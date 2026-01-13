@@ -1,0 +1,975 @@
+# Application configuration
+app:
+  name: "Audio-Visual Content Analysis Platform"
+  version: "0.1.0"
+
+# Network configuration
+network:
+  head_node_ip: "10.0.0.4"  # s4-head IP address
+
+# Active projects configuration
+active_projects:
+  CPRMV:
+    start_date: "2018-01-01"
+    end_date: "2026-01-01"  # null means up to current date
+    enabled: true
+    priority: 4
+    use_alternative_embeddings: true  # Enable 4B embeddings for this project
+  Big_Channels:
+    start_date: "2010-01-01"
+    end_date: "2030-01-01"  # null means up to current date
+    enabled: true
+    priority: 3
+    use_alternative_embeddings: false  # Enable 4B embeddings for this project
+  Canadian:
+    start_date: "2010-01-01"
+    end_date: "2030-01-01"  # null means up to current date
+    enabled: true
+    priority: 2
+    use_alternative_embeddings: false  # Enable 4B embeddings for this project
+  Health:
+    start_date: "2010-01-01"
+    end_date: "2030-08-01"  # null means up to current date
+    enabled: true
+    priority: 2
+    use_alternative_embeddings: false  # Enable 4B embeddings for this project
+  Finance:
+    start_date: "2010-01-01"
+    end_date: "2030-08-01"  # null means up to current date
+    enabled: true
+    priority: 2
+    use_alternative_embeddings: false  # Enable 4B embeddings for this project
+  decrypteurs:
+    start_date: "2025-03-23"
+    end_date: "2025-04-28"  
+    enabled: false
+    priority: 1
+  youtube_scams:
+    start_date: "2020-01-01"
+    end_date: "2025-09-01"
+    enabled: false
+    priority: 1
+  Romania:
+    start_date: "2025-09-01"
+    end_date: "2025-09-10"
+    enabled: false
+    priority: 3
+  Europe:
+    start_date: "2018-01-01"
+    end_date: "2030-01-01"
+    enabled: true
+    priority: 2
+    use_alternative_embeddings: false  # Enable 4B embeddings for this project
+  Anglosphere:
+    start_date: "2018-01-01"
+    end_date: "2030-01-01"
+    enabled: true
+    priority: 2
+    use_alternative_embeddings: false  # English-speaking countries (US, UK, CA, AU, NZ, IE, IN, NG, ZA, PH, KE)
+
+# Content indexing configuration - per-source scheduling
+indexing:
+  enabled: true  # Enable/disable content indexing
+
+  # Per-source scheduling (modular - easy to add TikTok, Instagram, etc.)
+  sources:
+    podcast:
+      enabled: true
+      interval_seconds: 14400  # Run every 4 hours - RSS feeds update frequently
+    youtube:
+      enabled: true
+      interval_seconds: 86400  # Run once per day - API rate limits
+    rumble:
+      enabled: true
+      interval_seconds: 86400  # Run once per day - API rate limits
+    # tiktok:  # Example for future sources
+    #   enabled: false
+    #   interval_seconds: 43200  # Run every 12 hours
+
+# Automated task creation configuration
+task_creation:
+  enabled: true  # Enable/disable automated task creation
+  interval_seconds: 1800  # Run every 30 minutes (1800 seconds)
+  batch_size: 1000  # Number of tasks to create per batch
+
+# Embedding hydration configuration
+embedding_hydration:
+  enabled: true  # Enable/disable automated embedding hydration
+  interval_seconds: 14400  # Run every 4 hours (14400 seconds)
+  batch_size: 512  # Batch size for embedding generation
+
+# Speaker clustering configuration
+speaker_clustering:
+  enabled: true  # Enable/disable automated speaker clustering pipeline
+  interval_seconds: 86400  # Run once per day (86400 seconds / 24 hours)
+  run_phases: "all"  # Phases to run: "all", "cluster", "identify", or "merge"
+
+# Podcast collection configuration (monthly chart collection from Podstatus)
+podcast_collection:
+  enabled: true  # Enable/disable automated podcast chart collection
+  check_interval_seconds: 3600  # Check every hour if new month collection needed
+  countries: null  # null = discover all available countries
+  platforms: ["spotify", "apple"]  # Platforms to collect from
+  categories: null  # null = discover categories per country
+  top_n: 200  # Number of top podcasts per chart
+  discover_mode: true  # Enable intelligent discovery of countries/categories
+
+# Dashboard configuration
+dashboards:
+  enabled: true  # Enable/disable monitoring dashboard
+  system_monitoring_port: 8501  # Port for unified system monitoring dashboard
+
+# Central services configuration (managed by orchestrator)
+services:
+  backend:
+    enabled: true  # Enable Backend API
+    port: 7999     # Port for Backend API
+  audio_server:
+    enabled: false  # Disable Audio server (functionality moved to backend)
+    port: 8010     # Port for Audio server
+  model_servers:
+    enabled: true  # Enable model servers as infrastructure services
+    instances:
+      worker0:
+        enabled: true
+        host: "10.0.0.34"  # worker0 IP
+        port: 8004
+        tiers: ["tier_1", "tier_2"]
+        allowed_models:
+          - "mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit"
+          - "mlx-community/Qwen3-30B-A3B-4bit"
+        default_model: "mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit"
+      head:
+        enabled: true
+        host: "10.0.0.4"   # head node IP
+        port: 8004
+        tiers: ["tier_2"]
+        allowed_models:
+          - "mlx-community/Qwen3-30B-A3B-4bit"
+        default_model: "mlx-community/Qwen3-30B-A3B-4bit"
+      worker5:
+        enabled: true
+        host: "10.0.0.209" # worker5 IP
+        port: 8004
+        tiers: ["tier_3"]
+        allowed_models:
+          - "mlx-community/Qwen3-4B-Instruct-2507-4bit"
+        default_model: "mlx-community/Qwen3-4B-Instruct-2507-4bit"
+
+# Processing settings
+processing:
+  hf_token: "${HF_TOKEN}"  # HuggingFace token for pyannote models (loaded from .env)
+  # uv path for running Python in the project's virtual environment
+  uv_path: "/Users/signal4/.local/bin/uv"
+  # Legacy python paths kept for compatibility with process verification
+  head_python_path: "/opt/homebrew/Caskroom/miniforge/base/envs/content-processing/bin/python"  # Python path for the head node
+  worker_python_path: "/opt/homebrew/Caskroom/miniforge/base/envs/content-processing/bin/python" # Python path for worker nodes
+  scripts_base_path: "src/processing_steps"  # Base path for processing scripts
+  
+  # Session manager for worker services (processor, llm_server)
+  session_manager: "screen"  # Options: "tmux", "screen", "nohup"
+  
+  # LLM server configuration (head node only) - MANAGED BY ORCHESTRATOR
+  llm_server:
+    enabled: true  # LLM server managed by orchestrator
+    port: 8002     # Port for LLM server
+
+    # Backend type: "mlx" (default) or "ollama"
+    # - mlx: Routes to model_server.py instances (MLX-based, Apple Silicon optimized)
+    # - ollama: Routes to Ollama instances (original behavior)
+    # No fallback between backends to prevent memory overuse
+    backend: "mlx"
+
+    # MLX backend endpoints (model_server.py instances)
+    # These are the machines running model_server.py on port 8004
+    mlx_endpoints:
+      "10.0.0.34":    # worker0 - tier_1 and tier_2 (80B, 30B models; tier_2 handles tier_3 overflow)
+        tiers: ["tier_1", "tier_2"]
+      "10.0.0.4":     # head node - tier_2 only (30B model; handles tier_3 overflow)
+        tiers: ["tier_2"]
+      "10.0.0.209":   # worker5 - tier_3 only (4B model)
+        tiers: ["tier_3"]
+
+    # Ollama backend endpoints (only used when backend: "ollama")
+    ollama_endpoints:
+      - "localhost"
+
+    # Task routing configuration - maps task types to preferred endpoints
+    # null means routing is determined by model tier only (recommended)
+    # Changes take effect automatically within 5 seconds (config is hot-reloaded)
+    # Manual reload: curl -X POST http://localhost:8002/reload-config
+    task_routing:
+      stitch: null     # Route by tier
+      text: null       # Route by tier
+      analysis: null   # Route by tier
+      embedding: null  # Route by tier
+
+  # MLX Model Server (worker0 only) - For theme classification and heavy LLM tasks
+  model_server:
+    enabled: true
+    host: "10.0.0.34"  # worker0 IP
+    port: 8004
+    max_concurrent: 5
+    max_queue_size: 100
+    model_keep_warm_seconds: 300
+    allowed_models:
+      - "mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit"
+      - "mlx-community/Qwen3-30B-A3B-4bit"
+      - "mlx-community/Qwen3-4B-Instruct-2507-4bit"
+    default_model: "mlx-community/Qwen3-30B-A3B-4bit"
+
+  # Speaker identification configuration
+  speaker_identification:
+    batch_size: 4  # Number of episodes per LLM batch (start with 4, can increase after memory testing)
+    model_tier: "tier_1"  # Model tier for speaker ID (tier_1 = 80B model)
+    temperature: 0.1
+    max_tokens: 2048
+
+  # LLM configuration for stitch and other processing steps
+  llms:
+    server_url: "http://10.0.0.4:8002"  # LLM balancer runs on head node
+    models:
+      primary:
+        name: "qwen3:4b-instruct"
+        description: "Primary model"
+        max_tokens_speaker_assignment: 10
+        max_tokens_grammar: null
+      fallback:
+        name: "qwen3:4b-instruct"
+        description: "Fallback model"
+        max_tokens_speaker_assignment: 10
+        max_tokens_grammar: null
+  
+  # SSH settings for worker management
+  ssh_username: "signal4"  # SSH username for worker nodes
+  ssh_key_path: "/Users/signal4/.ssh/id_ed25519"  # Path to SSH key
+
+  # Task management
+  youtube_auth_pause_duration_seconds: 50400  # 14 hours for YouTube auth failures  
+  max_consecutive_failures: 3  # Max consecutive failures before pausing task type
+
+  # Human-like behavior settings for YouTube download tasks
+  youtube_downloader:
+    # Default behavior pattern
+    daily_download_pattern:  # Simplified pattern with consistent watch times
+      08-09: 5   # Morning: 5 videos
+      12-13: 5   # Lunch: 5 videos  
+      18-19: 8   # Evening: 8 videos
+      21-22: 6   # Night: 6 videos
+      
+    session_watch_time_range: [180, 600]  # 3-10 minutes per video
+    inter_video_delay_range: [30, 90]     # 30-90 seconds between videos
+    session_break_duration_range: [900, 1800]  # 15-30 minutes between sessions
+    max_videos_per_session: 6             # Maximum videos per browsing session
+    
+    # Session management
+    session_type: "persistent"  # Reuse session for multiple downloads
+    cookies_update_frequency: 86400  # Update cookies daily
+    user_agent_rotation: true
+
+    # Cookie-based behavior (primary mode)
+    cookie_behavior:
+      enabled: true
+      require_cookies: true   # If true, fail tasks when cookies not available
+      cookie_rotation: true   # Rotate between available cookies
+      max_videos_per_cookie_per_day: 50  # Daily limit per cookie profile
+      cooldown_after_auth_failure: 86400  # 24 hours after auth failure
+      profiles:
+        - name: "clarinet"
+          cookie_file: "data/cookies/clarinet_cookies.txt"
+          profile_path: "/Users/signal4/Library/Application Support/Firefox/Profiles/jcepgo63.clarinet"
+          user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0"
+    
+    # Proxy-based behavior (alternative mode)  
+    proxy_behavior:
+      enabled: false  # Currently disabled
+      max_videos_per_proxy_per_hour: 10
+      proxy_rotation_interval: 3600  # Rotate proxy every hour
+      retry_with_different_proxy: true
+      proxies:
+        - "http://proxy1.example.com:8080"
+        - "http://proxy2.example.com:8080"
+
+  # Rumble human-like behavior settings
+  rumble_downloader:
+    daily_download_pattern:
+      08-09: 3   # Morning: 3 videos
+      12-13: 3   # Lunch: 3 videos  
+      18-19: 5   # Evening: 5 videos
+      21-22: 4   # Night: 4 videos
+      
+    session_watch_time_range: [120, 480]  # 2-8 minutes per video
+    inter_video_delay_range: [20, 60]     # 20-60 seconds between videos
+    session_break_duration_range: [600, 1200]  # 10-20 minutes between sessions
+    max_videos_per_session: 5             # Maximum videos per browsing session
+
+  cleanup:
+    hours_between_runs: 168  # 1 week between cleanup runs
+    compress_files_after: 72  # 3 days after processing completes
+    min_content_age_hours: 24  # Don't compress content younger than 24 hours
+    compression_batch_size: 100  # Process this many content items per run
+    delete_compressed_files: true  # Delete original files after compression
+  
+  # Audio processing settings
+  chunk_size: 300  # 5 minutes in seconds
+  chunk_overlap: 2  # 2 seconds overlap
+  
+  transcription:
+    model: "large-v3-turbo"
+    method: "whisper_baseline"  # Default transcription method for non-English (changed from vad_hybrid_2pass due to Parakeet slow French detection)
+    english_method: "parakeet_single_pass"  # Method for English content (using Parakeet v2)
+    safe_models_english:  # Safe models for English transcripts
+      - "mlx_whisper"
+      - "parakeet_single_pass"
+      - "parakeet_mlx_v2"
+      - "whisper_mlx_turbo"
+    safe_models_other:  # Safe models for non-English transcripts
+      - "vad_hybrid_2pass"
+      - "whisper_mlx_turbo"
+      - "mlx_whisper"
+    chunk_duration: 300  # 5 minutes in seconds
+    chunk_overlap: 2  # 2 seconds overlap
+    max_retries: 3
+    retry_delay: 5  # seconds
+    device: "gpu"  # or "cpu"
+    compute_type: "int8"  # or "float16", "float32"
+    language_detection_enabled: true
+    batch_size: 16  # Batch size for transcription
+    vad_threshold: 0.5  # Voice activity detection threshold
+    compression_ratio_threshold: 2.4  # Lower values filter out more non-speech
+    logprob_threshold: -1.0  # Lower values filter out low-confidence words
+    no_speech_threshold: 0.6  # Higher values are more aggressive about filtering silence
+    condition_on_previous_text: true  # Whether to condition on previous text
+    beam_size: 5  # Beam size for beam search
+    patience: 1.0  # Patience for beam search
+    temperature: 0.0  # Temperature for sampling
+    initial_prompt: null  # Optional initial prompt to guide transcription
+    output_formats: ["json", "txt", "vtt"]  # Output formats to generate
+    
+  diarization:
+    min_speakers: 2
+    max_speakers: 10
+    embedding_batch_size: 32
+    segmentation_batch_size: 32
+    use_auth_token: "${HF_TOKEN}"  # HuggingFace token (loaded from .env)
+    cache_dir: "models/diarization"  # Directory to cache models
+    
+  # convert:
+  #   output_sample_rate: 16000  # Target sample rate for audio
+  #   output_channels: 1  # Mono audio
+  #   output_format: "wav"  # Output format
+  #   compression_level: 0  # WAV compression level (0-10)
+  #   normalization: true  # Normalize audio levels
+  #   remove_silence: false  # Remove silence from audio
+  #   silence_threshold: -40  # dB threshold for silence detection
+
+  # Stitch configuration
+  stitch:
+    # Stitch version supports major versions (stitch_v13) and sub-versions (stitch_v13.1)
+    # - Major version changes (v13 → v14) trigger re-stitching of all content
+    # - Sub-version changes (v13 → v13.1) are compatible and don't trigger re-stitching
+    # - This allows for bug fixes and minor improvements without reprocessing all content
+    current_version: "stitch_v14.3"  # Increment when stitch logic changes - v14.3: Fixed French hyphenation in stage13 (smart_join_words)
+    min_words_per_turn: 3     # Minimum words to consider a valid speaker turn
+    use_semantic_mode: true   # Enable semantic processing (false for fast mode)
+    max_turn_duration: 300.0  # Maximum seconds for a single turn before splitting
+
+  # Segment configuration
+  segment:
+    embedding_suffix: "_xlmr"  # Embedding model suffix appended to stitch version
+    
+  # Ollama configuration for LLM operations
+  ollama:
+    # Server connection
+    server:
+      host: "localhost"
+      port: 11434
+      timeout: 120  # seconds
+    
+    # Available models and their configurations
+    models:
+      default:
+        name: "qwen3:4b-instruct"
+        description: "Default model for general tasks"
+        max_tokens_speaker_assignment: 10  # For simple speaker assignments
+        max_tokens_grammar: null  # null means use model default
+      # Add more models as needed
+      # fast:
+      #   name: "gemma3:2b"
+      #   description: "Faster, smaller model for simple tasks"
+      #   max_tokens_speaker_assignment: 10
+      #   max_tokens_grammar: null
+    
+    # Server settings
+    server:
+      max_concurrent_requests: 2  # Number of concurrent LLM requests
+      request_timeout: 30  # Timeout for standard requests in seconds
+      comprehensive_timeout: 60  # Timeout for comprehensive analysis in seconds
+      
+    # Temperature settings
+    temperature:
+      speaker_assignment:
+        initial: 0.3
+        increment: 0.2  # Increase per retry
+        max: 0.9
+      grammar:
+        initial: 0.1
+        increment: 0.1  # Increase per retry
+        max: 0.3
+  
+  distributed:
+    enabled: true
+    task_timeout: 600  # Default timeout for distributed tasks
+    heavy_cleanup_tasks:  # Tasks that need aggressive cleanup after each batch
+      - transcribe
+    worker_limits:  # New section for worker task limits
+      transcribe:
+        tasks_per_run: 12  # Process 5 transcriptions then exit
+        cooldown: 60  # 60 second break between runs
+      diarization:
+        tasks_per_run: 20  # Process 20 diarization tasks then exit
+        cooldown: 60  # 60 second break between runs
+        download_youtube:
+        tasks_per_run: 99999  # Process 50 downloads then exit
+        cooldown: 10  # Seconds to wait between runs
+      download_podcast:
+        tasks_per_run: 99999  # Process 20 downloads then exit
+        cooldown: 10  # Seconds to wait between runs
+      extract_audio:
+        tasks_per_run: 99999  # Process 20 audio extractions then exit
+        cooldown: 10  # Seconds to wait between runs
+      stitch:
+        tasks_per_run: 99999  # Process 20 stitching tasks then exit
+        cooldown: 10  # Seconds to wait between runs
+  
+  workers:
+    worker0:
+      eth: 10.0.0.34
+      wifi: 10.0.0.28
+      enabled: false
+      task_types: ["convert:2","download_podcast:1"]
+      max_concurrent_tasks: 1
+      type: "worker"
+      download_mode: cookie
+      services:
+        task_processor:
+          enabled: true
+          port: 8000
+
+    worker1:
+      eth: 10.0.0.9
+      wifi: 10.0.0.54
+      enabled: true
+      task_types: ["convert:1","stitch:1","transcribe:1"]
+      max_concurrent_tasks: 1
+      type: "worker"
+      services:
+        task_processor:
+          enabled: true
+          port: 8000
+      
+    worker2:
+      eth: 10.0.0.195
+      wifi: 10.0.0.196
+      enabled: false
+      task_types: ["convert:1","transcribe:1","cleanup:1","stitch:1"]
+      max_concurrent_tasks: 1
+      type: "worker"
+      services:
+        task_processor:
+          enabled: true
+          port: 8000
+      
+    worker3:
+      eth: 10.0.0.203
+      wifi: 10.0.0.76
+      enabled: false
+      task_types: ["convert:1","cleanup:1","stitch:1","transcribe:1"]
+      type: "worker"
+      services:
+        task_processor:
+          enabled: true
+          port: 8000
+        
+    worker4:
+      eth: 10.0.0.51
+      wifi: 10.0.0.163
+      enabled: false
+      task_types: ["convert:1","cleanup:1","stitch:1","transcribe:1"] #"cleanup",
+      max_concurrent_tasks: 1
+      type: "worker"
+      services:
+        task_processor:
+          enabled: true
+          port: 8000
+
+    worker5:
+      eth: 10.0.0.209
+      wifi: 10.0.0.99
+      enabled: false
+      task_types: ["convert:1","diarize:1","transcribe:1"]
+      max_concurrent_tasks: 1
+      type: "worker"
+      services:
+        task_processor:
+          enabled: true
+          port: 8000
+
+    worker6:
+      eth: 10.0.0.4
+      wifi: 10.0.0.215
+      enabled: false
+      task_types: ["download_rumble:1","download_podcast:1","download_youtube:1","transcribe:1"] # "cleanup:1",
+      max_concurrent_tasks: 1
+      type: "head"
+      services:
+        task_processor:
+          enabled: true
+          port: 8000
+
+# GPU settings
+gpu:
+  enabled: true
+  device: "mps"  # Using MPS for Mac
+
+# Storage settings
+storage:
+  type: "s3"  # Changed default to s3
+  local:
+    base_path: "/Users/signal4/signal4/core"
+    logs_path: "logs"  # Centralized logs directory
+  nas:
+    mount_point: "/Users/signal4/mnt/s4-storage"
+    server_path: "//signal4@10.0.0.251/s4-storage"
+    options: "rw,auto,nofail"
+  s3:
+    endpoint_url: "http://10.0.0.251:9000"
+    fallback_endpoint_url: "http://10.0.0.147:9000"  # Fallback S3 endpoint
+    access_key: "${S3_ACCESS_KEY}"  # Loaded from .env
+    secret_key: "${S3_SECRET_KEY}"  # Loaded from .env
+    region: "us-east-1"
+    bucket_name: "av-content"
+    use_ssl: false
+    paths:
+      content_prefix: "content"     # Content metadata and source files
+      structure:
+        chunk:
+          audio: "audio.wav"        # Standard chunk audio filename
+          meta: "meta.json"         # Chunk metadata file
+          transcript: "transcript.json"  # Standard chunk transcript filename
+    performance:
+      max_list_objects: 1000        # Maximum objects to list in one request
+      batch_size: 100               # Default batch size for operations
+
+# --- NEW Embedding Settings --- #
+embedding:
+  # Path to the LOCAL directory containing the final ONNX model (quantized or base)
+  local_model_path: "./models/embedding/multilingual-e5-large-instruct/onnx_quantized"
+  # Original model ID is needed for the tokenizer if tokenizer files aren't in local_model_path
+  tokenizer_id: "intfloat/multilingual-e5-large-instruct"
+  # Model ID for downloading PyTorch model (for MPS/GPU support)
+  model_id: "intfloat/multilingual-e5-large-instruct"
+  # Dimension should match the model
+  dimension: 1024
+  # Minimum number of words in a speaker turn to generate an embedding
+  min_turn_words_for_embedding: 12
+  # Device setting for embedding inference ('cuda', 'cpu', 'mps', 'auto')
+  device: "cuda"  # Changed from 'auto' to 'cuda' to force GPU usage
+
+  semantic_similarity_threshold: 0.9  # Lowered from 0.75 to encourage more splits
+  min_sentences_per_semantic_segment: 2  # Minimum sentences required for a valid segment after split (was 3)
+  min_words_per_semantic_segment: 10     # Minimum words required for a valid segment after split (was 12)
+  semantic_similarity_window: 2          # Number of adjacent sentence similarities to average (was 3)
+  max_segment_time_seconds: 90.0         # Maximum duration (in seconds) for a single speaker turn before forcing a split
+
+  stitch_processing: 
+    semantic_similarity:
+      onnx_model_path: "./models/embedding/paraphrase-xlm-r-multilingual-v1/onnx" # Path to its ONNX export
+      tokenizer_id: "sentence-transformers/paraphrase-xlm-r-multilingual-v1" # Paraphrase detection model for similarity
+      model_id: "sentence-transformers/paraphrase-xlm-r-multilingual-v1" # Model ID for MPS/GPU support
+      dimension: 768 # XLM-RoBERTa base has 768 dimensions
+      # Potentially other settings like device if different from main embedding
+
+  # Embedding segmentation configuration
+  embedding_segmentation:
+    min_tokens: 50              # Minimum tokens per segment
+    target_tokens: 250          # Target tokens per segment (sweet spot)
+    max_tokens: 400            # Maximum tokens per segment
+    coherence_threshold: 0.7    # Semantic similarity threshold for segment boundaries
+    combine_speakers: true      # Allow combining segments across speakers if semantically similar
+    max_combine_gap: 3.0       # Maximum time gap (seconds) between segments to combine
+    # Beam search parameters
+    use_beam_search: true      # Enable beam search optimization (set to true to use)
+    beam_width: 5               # Number of candidate segmentations to track
+    lookahead_sentences: 3      # Number of sentences to look ahead for better decisions
+    use_mps: true              # Enable MPS (Metal GPU) support for faster embeddings on Mac
+    
+    # Alternative embedding model configuration
+    use_alternative_embedding: false  # Global default - projects can override individually
+    alternative_model: "Qwen/Qwen3-Embedding-4B"  # Qwen3-4B: excellent quality/performance balance
+    alternative_model_dim: 2000  # Dimension of Qwen3-Embedding-4B embeddings
+    save_to_alt_column: true   # Save alternative embeddings to embedding_alt column
+    # For migration: which column to use for retrieval
+    retrieval_column: "embedding"  # Options: "embedding" (original) or "embedding_alt" (alternative)
+
+# Database settings
+database:
+  type: "postgresql"  # Only PostgreSQL is supported
+  host: "10.0.0.4"  # Database runs on head node
+  port: 5432
+  database: "av_content"  # Updated to new database
+  user: "signal4"
+  password: "${POSTGRES_PASSWORD}"  # Loaded from .env
+  connection:
+    timeout: 60  # Increased connection timeout in seconds
+    application_name: "av"  # Application name in pg_stat_activity
+    client_encoding: "utf8"
+    statement_timeout: 1800000  # Statement timeout in milliseconds (5 minutes)
+    idle_in_transaction_session_timeout: 300  # Timeout idle transactions after 5 minutes
+    keepalives: 1  # Enable TCP keepalives
+    keepalives_idle: 30  # Number of seconds before sending keepalive (reduced for tmux sessions)
+    keepalives_interval: 5  # Interval between keepalives (reduced for tmux sessions)
+    keepalives_count: 3  # Number of keepalives before dropping connection
+  pool:
+    enabled: true  # Enable connection pooling
+    size: 5  # Increased from 3 to 5 connections per pool
+    max_overflow: 10  # Increased from 5 to 10 overflow connections
+    timeout: 60  # Increased seconds to wait before getting a connection
+    recycle: 900  # Seconds after which a connection is recycled (reduced for tmux sessions)
+    pre_ping: true  # Check connection health before using
+  schemas:
+    content: "public"  # Main content schema
+    task_queue: "tasks"  # Task queue schema
+  cleanup:
+    stale_task_timeout: 3600  # 1 hour
+    completed_task_retention: 604800  # 7 days
+    worker_timeout: 300  # 5 minutes
+
+# Logging
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  base_path: "/Users/signal4/logs/content_processing"  # Changed from worker_logs to content_processing
+  components:
+    default:
+      max_size: 10485760  # 10MB
+      backup_count: 5
+      level: INFO
+    worker:
+      max_size: 20971520  # 20MB
+      backup_count: 10
+      level: INFO
+    downloader:
+      max_size: 15728640  # 15MB
+      backup_count: 7
+      level: INFO
+    audio:
+      max_size: 15728640
+      backup_count: 7
+      level: INFO
+    transcription:
+      max_size: 20971520  # 20MB
+      backup_count: 10
+      level: INFO
+    stitch:
+      max_size: 31457280  # 30MB
+      backup_count: 10
+      level: INFO
+
+# Error handling configuration
+error_handling:
+  # Define actions for each error code
+  policies:
+    # Transient errors - retry
+    network_error:
+      action: "recreate_task"
+      max_retries: 3
+    s3_connection_error:
+      action: "recreate_task"
+      max_retries: 3
+    timeout:
+      action: "recreate_task"
+      max_retries: 2
+    
+    # Missing dependencies - trigger prerequisites
+    missing_audio:
+      action: "trigger_prerequisites"
+      prerequisites: ["download", "convert"]
+    missing_transcript:
+      action: "trigger_prerequisites"
+      prerequisites: ["transcribe"]
+    missing_diarization:
+      action: "trigger_prerequisites"
+      prerequisites: ["diarize"]
+    missing_source:
+      action: "trigger_prerequisites"
+      prerequisites: ["download"]
+    
+    # Content restrictions - block content
+    age_restricted:
+      action: "block_content"
+      block_reason: "Age-restricted content"
+    members_only:
+      action: "block_content"
+      block_reason: "Members-only content"
+    private_content:
+      action: "block_content"
+      block_reason: "Private content"
+    bad_url:
+      action: "block_content"
+      block_reason: "Invalid URL"
+    video_unavailable:
+      action: "block_content"
+      block_reason: "Video unavailable"
+    access_denied:
+      action: "block_content"
+      block_reason: "Access denied (HTTP 403 Forbidden)"
+    
+    # Authentication errors - pause worker
+    youtube_auth:
+      action: "pause_worker"
+      pause_duration: 50400  # 14 hours
+    auth_failed:
+      action: "pause_worker"
+      pause_duration: 3600   # 1 hour
+      
+    # Processing results - special handling
+    empty_result:
+      action: "mark_ignored"
+      metadata_key: "diarization_ignored"
+      ignored_reason: "No speech detected"
+    already_exists:
+      action: "skip_state_audit"
+      
+    # Permanent errors
+    corrupt_media:
+      action: "trigger_prerequisites"
+      prerequisites: ["download"]
+    invalid_format:
+      action: "skip_state_audit"
+      permanent: true
+    unsupported_format:
+      action: "skip_state_audit"
+      permanent: true
+
+  # Task-specific overrides
+  task_overrides:
+    stitch:
+      missing_audio:
+        action: "skip_state_audit"
+        permanent: false
+      missing_diarization:
+        action: "trigger_prerequisites"
+        prerequisites: ["diarize"]
+      
+    diarize:
+      empty_result:
+        action: "mark_ignored"
+        metadata_key: "diarization_ignored"
+        ignored_reason: "Diarization pipeline returned empty result"
+        permanent: true
+        
+    download_youtube:
+      youtube_auth:
+        action: "pause_worker"
+        pause_duration: 50400  # 14 hours
+      corrupt_media:
+        action: "block_content"
+        block_reason: "Downloaded media file is corrupt or too short"
+
+    download_podcast:
+      corrupt_media:
+        action: "block_content"
+        block_reason: "Downloaded media file is corrupt or too short"
+
+    download_rumble:
+      corrupt_media:
+        action: "block_content"
+        block_reason: "Downloaded media file is corrupt or too short"
+
+# Unified scheduled tasks configuration
+# Replaces individual managers (indexing, task_creation, embedding_hydration, speaker_clustering, podcast_collection)
+# and pg_cron jobs (cache refresh, clustering)
+scheduled_tasks:
+  enabled: true  # Enabled for testing new orchestrator
+  state_file: "/Users/signal4/logs/content_processing/scheduled_tasks_state.json"
+
+  tasks:
+    # === Content Indexing & Downloads ===
+
+    podcast_index_download:
+      name: "Podcast Index & Download"
+      description: "Index podcast feeds and create download tasks"
+      enabled: true
+      schedule:
+        type: time_of_day
+        hours: [0, 8, 16]  # Run at 00:00, 08:00, 16:00
+      executor:
+        type: cli
+        command: "python"
+        args: ["scripts/create_tasks_db.py", "--steps", "index_podcast", "download_podcast"]
+      timeout_seconds: 3600
+
+    youtube_index_download:
+      name: "YouTube Index & Download"
+      description: "Index YouTube channels and create download tasks"
+      enabled: true
+      schedule:
+        type: time_of_day
+        hours: [0]
+        days_interval: 2  # Every 2 days
+      executor:
+        type: cli
+        command: "python"
+        args: ["scripts/create_tasks_db.py", "--steps", "index_youtube", "download_youtube"]
+      timeout_seconds: 7200
+
+    # === Continuous Processing (run then wait) ===
+
+    embedding_hydration:
+      name: "Embedding Hydration"
+      description: "Generate embeddings for segments"
+      enabled: true
+      schedule:
+        type: run_then_wait
+        wait_seconds: 3600  # Wait 1 hour after completion
+      executor:
+        type: cli
+        command: "python"
+        args: ["scripts/hydrate_embeddings.py", "--batch-size", "128"]
+      timeout_seconds: 14400
+
+    speaker_id_phase1:
+      name: "Speaker ID Phase 1"
+      description: "Speaker identification Phase 1: Metadata extraction"
+      enabled: true
+      schedule:
+        type: run_then_wait
+        wait_seconds: 3600
+      executor:
+        type: cli
+        command: "python"
+        args: ["-m", "src.speaker_identification.orchestrator", "--phases", "1", "--all-active", "--apply", "--batch-size", "10000"]
+      timeout_seconds: 7200
+
+    speaker_id_phase2:
+      name: "Speaker ID Phase 2"
+      description: "Speaker identification Phase 2: Text evidence"
+      enabled: true
+      schedule:
+        type: run_then_wait
+        wait_seconds: 3600
+      executor:
+        type: cli
+        command: "python"
+        args: ["-m", "src.speaker_identification.orchestrator", "--phases", "2", "--all-active", "--apply", "--batch-size", "10000"]
+      timeout_seconds: 7200
+
+    # === Monthly Tasks ===
+
+    podcast_collection:
+      name: "Podcast Chart Collection"
+      description: "Collect monthly podcast charts, enrich new podcasts, and send summary email"
+      enabled: true
+      schedule:
+        type: time_of_day
+        hours: [2]  # Run at 2 AM on first of month
+        days_interval: 30  # Approximately monthly (will run first matching day)
+      executor:
+        type: cli
+        command: "python"
+        args: ["scripts/collect_and_classify_podcasts.py", "--email", "aengus@signal4.ca"]
+      timeout_seconds: 21600
+
+    # === Backend Cache & Clustering (replaces pg_cron) ===
+
+    cache_refresh_30d:
+      name: "30-Day Cache Refresh"
+      description: "Refresh 30-day embedding cache"
+      enabled: true
+      schedule:
+        type: time_of_day
+        hours: [2, 8, 14, 20]
+        minutes: [30]
+      executor:
+        type: sql
+        function: "refresh_embedding_cache_30d"
+      timeout_seconds: 1800
+
+    cache_refresh_7d:
+      name: "7-Day Cache Refresh"
+      description: "Refresh 7-day embedding cache"
+      enabled: true
+      schedule:
+        type: interval
+        interval_seconds: 3600  # Hourly
+      executor:
+        type: sql
+        function: "refresh_embedding_cache_7d"
+      timeout_seconds: 600
+
+    clustering_30d_main:
+      name: "30-Day Clustering (Main)"
+      description: "Generate 30-day clusters (main model)"
+      enabled: true
+      schedule:
+        type: time_of_day
+        hours: [3]
+      executor:
+        type: cli
+        command: "python"
+        args: ["src/backend/scripts/generate_embedding_clusters.py", "--time-window", "30d", "--model", "main"]
+      timeout_seconds: 3600
+
+    clustering_30d_alt:
+      name: "30-Day Clustering (Alt)"
+      description: "Generate 30-day clusters (alt model)"
+      enabled: true
+      schedule:
+        type: time_of_day
+        hours: [3]
+        minutes: [10]
+      executor:
+        type: cli
+        command: "python"
+        args: ["src/backend/scripts/generate_embedding_clusters.py", "--time-window", "30d", "--model", "alt"]
+      timeout_seconds: 3600
+
+    clustering_7d_main:
+      name: "7-Day Clustering (Main)"
+      description: "Generate 7-day clusters (main model)"
+      enabled: true
+      schedule:
+        type: interval
+        interval_seconds: 7200  # Every 2 hours
+      executor:
+        type: cli
+        command: "python"
+        args: ["src/backend/scripts/generate_embedding_clusters.py", "--time-window", "7d", "--model", "main"]
+      timeout_seconds: 1800
+
+    clustering_7d_alt:
+      name: "7-Day Clustering (Alt)"
+      description: "Generate 7-day clusters (alt model)"
+      enabled: true
+      schedule:
+        type: interval
+        interval_seconds: 7200
+        offset_seconds: 600  # 10 min after main
+      executor:
+        type: cli
+        command: "python"
+        args: ["src/backend/scripts/generate_embedding_clusters.py", "--time-window", "7d", "--model", "alt"]
+      timeout_seconds: 1800
+
+    cleanup_old_clusters:
+      name: "Cleanup Old Clusters"
+      description: "Clean up old cluster data"
+      enabled: true
+      schedule:
+        type: time_of_day
+        hours: [4]
+      executor:
+        type: sql
+        function: "cleanup_old_clusters"
+      timeout_seconds: 300

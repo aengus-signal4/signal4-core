@@ -1,0 +1,26 @@
+# Environment files with secrets
+.env
+
+# Data files (too large / sensitive)
+data/
+*.csv
+*.parquet
+*.json
+!.env.example
+!**/README.md
+
+# Generated outputs
+outputs/
+*.html
+*.pdf
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# OS files
+.DS_Store
+Thumbs.db

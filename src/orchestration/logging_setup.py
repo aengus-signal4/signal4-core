@@ -1,0 +1,84 @@
+"""
+Logging Setup - Centralized logging configuration for the orchestrator
+"""
+import logging
+from pathlib import Path
+from typing import Tuple, Optional
+
+def setup_orchestrator_logging(log_dir: Optional[Path] = None) -> Tuple[logging.Logger, logging.Logger, logging.Logger]:
+    """
+    Set up dedicated loggers for orchestrator operations
+    
+    Returns:
+        Tuple of (completion_logger, error_logger, run_logger)
+    """
+    if log_dir is None:
+        log_dir = Path("/Users/signal4/logs/content_processing")
+    
+    log_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Error logger
+    error_logger = logging.getLogger('orchestrator_errors')
+    error_logger.setLevel(logging.ERROR)
+    error_logger.propagate = False
+    error_log_file = log_dir / "orchestrator_errors.log"
+    error_file_handler = logging.FileHandler(error_log_file)
+    error_file_handler.setLevel(logging.ERROR)
+    error_formatter = logging.Formatter('%(asctime)s %(message)s')
+    error_file_handler.setFormatter(error_formatter)
+    error_logger.addHandler(error_file_handler)
+    
+    # Completion logger
+    completion_logger = logging.getLogger('task_completion')
+    completion_logger.setLevel(logging.INFO)
+    completion_logger.propagate = False
+    completion_log_file = log_dir / "task_completions.log"
+    completion_file_handler = logging.FileHandler(completion_log_file)
+    completion_file_handler.setLevel(logging.INFO)
+    completion_formatter = logging.Formatter('%(asctime)s [%(message)s')
+    completion_file_handler.setFormatter(completion_formatter)
+    completion_logger.addHandler(completion_file_handler)
+    
+    # Hourly run logger
+    run_log_file = log_dir / "orchestrator_runs.log"
+    run_logger = logging.getLogger('orchestrator_runs')
+    run_logger.setLevel(logging.INFO)
+    run_logger.propagate = False
+    run_file_handler = logging.FileHandler(run_log_file)
+    run_file_handler.setLevel(logging.INFO)
+    run_formatter = logging.Formatter('%(asctime)s - %(message)s')
+    run_file_handler.setFormatter(run_formatter)
+    run_logger.addHandler(run_file_handler)
+    
+    return completion_logger, error_logger, run_logger
+
+
+class TaskLogger:
+    """Handles task-specific logging operations"""
+    
+    def __init__(self, completion_logger: logging.Logger, error_logger: logging.Logger, main_logger: logging.Logger):
+        self.completion_logger = completion_logger
+        self.error_logger = error_logger
+        self.main_logger = main_logger
+    
+    def log_completion(self, worker_id: str, task_type: str, content_id: str, 
+                      chunk_index: Optional[int] = None, time_taken: float = 0.0):
+        """Log task completion to dedicated file"""
+        try:
+            chunk_str = f" (chunk {chunk_index})" if chunk_index is not None else ""
+            message = f"[{worker_id}] [{task_type}] Task completed: {content_id}{chunk_str} ({time_taken:.1f}s)"
+            self.completion_logger.info(message)
+            self.main_logger.info(message)
+        except Exception as e:
+            self.main_logger.error(f"Error logging task completion: {str(e)}", exc_info=True)
+    
+    def log_error(self, worker_id: str, task_type: str, content_id: str, error_details: str,
+                  chunk_index: Optional[int] = None, time_taken: float = 0.0):
+        """Log task error to dedicated file"""
+        try:
+            chunk_str = f" (chunk {chunk_index})" if chunk_index is not None else ""
+            message = f"[{worker_id}] [{task_type}] Task error: {content_id}{chunk_str} Error: {error_details} ({time_taken:.1f}s)"
+            self.error_logger.error(message)
+            self.main_logger.error(message)
+        except Exception as e:
+            self.main_logger.error(f"Error logging task error to file: {str(e)}", exc_info=True)

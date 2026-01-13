@@ -1,0 +1,49 @@
+# Stitch Pipeline Stage Configuration
+# ===================================
+
+stitch_stages:
+  # Stage 3: LLM-Based Punctuation Enhancement
+  punctuation:
+    model_name: "llama3.2:3b"
+    fallback_model: "llama3.1:8b"
+    max_retries: 5
+    fallback_retries: 3
+    enabled: true
+    
+  # Stage 4: Word and Segment Tables
+  tables:
+    enabled: true
+    
+  # Stage 5: Wav2Vec2 Alignment
+  wav2vec2:
+    enabled: true
+    
+  # Stage 6: Speaker Context Analysis
+  context:
+    enabled: true
+    
+  # Stage 7: Speaker Assignment
+  speaker:
+    enabled: true
+    
+  # Stage 8: Sentence Embeddings (formerly word embeddings)
+  sentence_embeddings:
+    min_duration: 0.5  # Longer minimum duration for sentences
+    pad_to_duration: 2.0  # Longer padding for better embeddings
+    batch_size: 32  # Smaller batches for longer segments
+    num_workers: 2
+    min_similarity: 0.4
+    min_similarity_gap: 0.2
+    enabled: true
+    
+  # Stage 9: Whisper Fragment Cleanup
+  whisper_fragment_cleanup:
+    enabled: true
+    
+  # Stage 10: Speaker Consolidation
+  speaker_consolidation:
+    enabled: true
+    
+  # Stage 11: Output Generation
+  output:
+    enabled: true

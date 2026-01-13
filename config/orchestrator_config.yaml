@@ -1,0 +1,348 @@
+# ============================================================================
+# Task Orchestrator V2 Configuration
+# ============================================================================
+# This file contains all configuration for the Task Orchestrator V2 system.
+# The orchestrator manages distributed content processing across multiple workers.
+
+# Application metadata
+app:
+  name: "Task Orchestrator V2"
+  version: "2.0.0"
+
+# ============================================================================
+# Network Configuration
+# ============================================================================
+network:
+  head_node_ip: "10.0.0.4"  # IP address of the head node (orchestrator host)
+  orchestrator_port: 8001   # Port for orchestrator API
+
+# ============================================================================
+# Worker Configuration
+# ============================================================================
+# Define all worker nodes and their capabilities
+workers:
+  worker0:  # Head node - GPU-enabled
+    eth: "10.0.0.34"
+    wlan: "10.0.0.128"
+    processor_port: 8000
+    task_types: ["stitch:2","convert","download_podcast:1"]
+    enabled: true
+
+  worker1:
+    eth: "10.0.0.129"
+    wlan: "10.0.0.193"
+    processor_port: 8000
+    task_types: ["transcribe:3","convert:1","download_podcast:1"]
+    enabled: true
+
+  worker2:
+    eth: "10.0.0.195"
+    wlan: "10.0.0.196"
+    processor_port: 8000
+    task_types: ["transcribe:3","convert:1","cleanup:1"]
+    enabled: true
+
+  worker3:  # CPU-only worker
+    eth: "10.0.0.14"
+    wlan: "10.0.0.234"
+    processor_port: 8000
+    task_types: ["transcribe:3","cleanup:1","convert:1"]
+    enabled: true
+
+  worker4:  # CPU-only worker
+    eth: "10.0.0.43"
+    wlan: "10.0.0.235"
+    processor_port: 8000
+    task_types: ["transcribe:3","cleanup:1","convert:1"]
+    enabled: true
+
+  worker5:  # CPU-only worker
+    eth: "10.0.0.5"
+    wlan: "10.0.0.228"
+    processor_port: 8000
+    task_types: ["diarize:1","transcribe:2","download_podcast:1"]
+    enabled: true
+
+  worker6:  # CPU-only worker
+    eth: "10.0.0.4"
+    wlan: "10.0.0.215"
+    processor_port: 8000
+    task_types: ["segment:2","download_rumble","download_youtube"]
+    enabled: true
+
+# ============================================================================
+# Active Projects Configuration
+# ============================================================================
+# Define which projects are actively being processed
+active_projects:
+  CPRMV:
+    start_date: "2018-01-01"
+    end_date: "2025-09-30"
+    enabled: true
+    priority: 3
+    use_alternative_embeddings: true  # Enable 4B embeddings for this project
+
+  Big_Channels:
+    start_date: "2010-01-01"
+    end_date: "2030-01-01"
+    enabled: true
+    priority: 3
+
+  Canadian:
+    start_date: "2010-01-01"
+    end_date: "2030-01-01"
+    enabled: true
+    priority: 2
+
+  Health:
+    start_date: "2010-01-01"
+    end_date: "2030-08-01"
+    enabled: true
+    priority: 2
+
+  Finance:
+    start_date: "2010-01-01"
+    end_date: "2030-08-01"
+    enabled: true
+    priority: 2
+
+  Romania:
+    start_date: "2025-09-01"
+    end_date: "2025-09-10"
+    enabled: true
+    priority: 3
+
+  Europe:
+    start_date: "2025-09-01"
+    end_date: "2030-01-01"
+    enabled: true
+    priority: 2
+
+# ============================================================================
+# Automated Content Indexing
+# ============================================================================
+# Per-source scheduling for content discovery and download task creation
+indexing:
+  enabled: true
+
+  sources:
+    # Podcast RSS feeds - check frequently for new episodes
+    podcast:
+      enabled: true
+      interval_seconds: 14400  # 4 hours
+
+    # YouTube - once daily due to API rate limits
+    youtube:
+      enabled: true
+      interval_seconds: 86400  # 24 hours
+
+    # Rumble - once daily due to API rate limits
+    rumble:
+      enabled: true
+      interval_seconds: 86400  # 24 hours
+
+    # Example for future sources:
+    # tiktok:
+    #   enabled: false
+    #   interval_seconds: 43200  # 12 hours
+
+# ============================================================================
+# Automated Task Creation
+# ============================================================================
+# Periodically create processing tasks for content that needs processing
+task_creation:
+  enabled: true
+  interval_seconds: 1800  # 30 minutes
+  batch_size: 1000
+
+  # Task types to create automatically
+  # These match the processing pipeline: download → convert → transcribe → diarize → stitch → segment
+  create_for_steps:
+    - convert
+    - transcribe
+    - diarize
+    - stitch
+    - segment
+    - cleanup
+
+# ============================================================================
+# Automated Embedding Hydration
+# ============================================================================
+# Periodically generate embeddings for transcript segments
+embedding_hydration:
+  enabled: true
+  interval_seconds: 14400  # 4 hours
+  batch_size: 512
+
+  # GPU task blocking (prevents GPU contention during embedding generation)
+  block_gpu_tasks: true
+  gpu_task_types: [transcribe, diarize, stitch]
+  wait_for_running_tasks_timeout: 600  # 10 minutes
+
+  # Embedding models
+  primary_model: "Qwen/Qwen3-Embedding-0.6B"  # Fast, lightweight
+  alternative_model: "Qwen/Qwen3-Embedding-4B"  # High quality for specific projects
+
+# ============================================================================
+# Service Management
+# ============================================================================
+# Automatically start and manage supporting services
+services:
+  # LLM Server for stitch tasks
+  llm_server:
+    enabled: true
+    port: 8002
+    script_path: "src/api/llm_server.py"
+
+  # Ollama monitoring (for stitch tasks)
+  ollama:
+    enabled: true
+    port: 11434
+    check_interval_seconds: 60
+
+  # Monitoring dashboards
+  dashboards:
+    enabled: true
+    worker_monitoring_port: 8501
+    project_monitoring_port: 8502
+
+# ============================================================================
+# Task Management
+# ============================================================================
+task_management:
+  # Task assignment
+  assignment_interval_seconds: 5  # How often to assign tasks to workers
+  max_tasks_per_assignment: 10    # Max tasks to assign in one cycle
+
+  # Task timeouts (in seconds)
+  timeouts:
+    download_youtube: 3600      # 1 hour
+    download_podcast: 3600      # 1 hour
+    convert: 1800               # 30 minutes
+    transcribe: 1800            # 30 minutes
+    diarize: 1800               # 30 minutes
+    stitch: 3600                # 1 hour
+    segment: 1800               # 30 minutes
+    cleanup: 1800               # 30 minutes
+
+  # Failure handling
+  max_consecutive_failures: 3              # Before pausing a worker
+  task_retry_limit: 3                      # Max retries per task
+  youtube_auth_pause_duration_seconds: 100800  # 28 hours for auth failures
+
+  # Task cleanup
+  cleanup_completed_tasks_after_days: 7
+  cleanup_failed_tasks_after_days: 30
+
+# ============================================================================
+# Health Monitoring
+# ============================================================================
+monitoring:
+  # Worker health checks
+  worker_health_check_interval_seconds: 30
+  worker_timeout_seconds: 60
+  max_missed_heartbeats: 3
+
+  # Network monitoring
+  network_check_interval_seconds: 300  # 5 minutes
+  network_failover_enabled: true
+
+  # S3 storage monitoring
+  s3_health_check_interval_seconds: 300  # 5 minutes
+
+  # Statistics collection
+  stats_collection_interval_seconds: 60
+
+# ============================================================================
+# Worker Management
+# ============================================================================
+worker_management:
+  # SSH settings for remote worker control
+  ssh_username: "signal4"
+  ssh_key_path: "/Users/signal4/.ssh/id_ed25519"
+
+  # Automatic restart settings
+  auto_restart_enabled: true
+  restart_on_consecutive_failures: 5
+  restart_cooldown_seconds: 300  # 5 minutes between restart attempts
+
+  # Session management
+  session_manager: "screen"  # Options: "tmux", "screen", "nohup"
+
+# ============================================================================
+# Logging
+# ============================================================================
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  log_dir: "/Users/signal4/logs/content_processing"
+  max_log_size_mb: 100
+  backup_count: 5
+
+  # Component-specific logging
+  components:
+    orchestrator: "INFO"
+    task_manager: "INFO"
+    network_manager: "INFO"
+    worker_manager: "INFO"
+    indexing: "INFO"
+    embedding_hydration: "INFO"
+
+# ============================================================================
+# Database Configuration
+# ============================================================================
+database:
+  host: "localhost"
+  port: 5432
+  name: "av_content"
+  user: "signal4"
+  password: null  # Use peer authentication
+  pool_size: 20
+  max_overflow: 10
+  pool_timeout: 30
+  pool_recycle: 3600
+
+# ============================================================================
+# Storage Configuration
+# ============================================================================
+storage:
+  # Local storage paths
+  local:
+    base_path: "/Volumes/Extreme_1TB_4"
+    logs_path: "/Users/signal4/logs/content_processing"
+    models_path: "models"
+
+  # S3/MinIO storage
+  s3:
+    endpoint: "http://10.0.0.4:9000"
+    access_key: "minioadmin"
+    secret_key: "minioadmin"
+    bucket: "av-content"
+    use_ssl: false
+    region: "us-east-1"
+
+# ============================================================================
+# Python Environment
+# ============================================================================
+python:
+  head_node_path: "/opt/homebrew/Caskroom/miniforge/base/envs/content-processing/bin/python"
+  worker_node_path: "/opt/homebrew/Caskroom/miniforge/base/envs/content-processing/bin/python"
+
+# ============================================================================
+# Advanced Settings
+# ============================================================================
+advanced:
+  # Test mode (for development)
+  test_mode: false
+
+  # Global pause (emergency stop)
+  allow_global_pause: true
+
+  # Graceful shutdown
+  shutdown_grace_period_seconds: 30
+
+  # Task priority system
+  use_priority_queue: true
+  priority_boost_enabled: true
+
+  # Reactive task assignment (assign tasks immediately when workers become available)
+  reactive_assignment_enabled: true

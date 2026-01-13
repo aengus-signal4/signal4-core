@@ -1,0 +1,158 @@
+[project]
+name = "signal4-core"
+version = "0.1.0"
+description = "Signal4 audio-visual content processing pipeline"
+requires-python = "==3.12.11"
+
+# Core dependencies - required for all workers
+dependencies = [
+    "accelerate",
+    "aiohttp",
+    "alembic",
+    "assemblyai",
+    "asyncssh",
+    "boto3",
+    "browser-cookie3",
+    "fake-useragent",
+    "fastapi",
+    "feedparser",
+    "google-api-python-client",
+    "httpx",
+    "huggingface-hub",
+    "isodate",
+    "langchain",
+    "langchain-community",
+    "langchain-core",
+    "minio>=7.2.20",
+    "mlx",
+    "mlx-lm",
+    "mlx-whisper>=0.4.3",
+    "nltk>=3.9.2",
+    "numpy",
+    "openai",
+    "optimum[onnxruntime]",
+    "pandas",
+    "parakeet-mlx>=0.5.0",
+    "pgvector>=0.4.2",
+    "psutil",
+    "psycopg2-binary",
+    "pyannote-audio",
+    "pydantic",
+    "pydantic-settings",
+    "pydub",
+    "python-dateutil",
+    "python-dotenv",
+    "pytz",
+    "pyyaml",
+    "requests",
+    "safetensors",
+    "scikit-learn",
+    "scipy",
+    "sentence-transformers",
+    "sentencepiece",
+    "soundfile",
+    "speechbrain",
+    "sqlalchemy",
+    "tokenizers",
+    "torch",
+    "torchaudio",
+    "torchvision",
+    "tqdm",
+    "transformers>=4.53.0",
+    "uvicorn",
+    "webvtt-py",
+    "whisper-normalizer",
+    "yt-dlp",
+]
+
+[project.optional-dependencies]
+# Machine learning extensions
+ml = [
+    "bertopic",
+    "datasets",
+    "einops",
+    "evaluate",
+    "faiss-cpu",
+    "hdbscan",
+    "lightning",
+    "nemo-toolkit",
+    "optuna",
+    "peft",
+    "pyannote-core",
+    "pyannote-database",
+    "pyannote-metrics",
+    "pyannote-pipeline",
+    "pytorch-lightning",
+    "timm",
+    "torchmetrics",
+    "umap-learn",
+]
+
+# NLP tools
+nlp = [
+    "flashtext",
+    "inflect",
+    "langdetect",
+    "nltk",
+    "num2words",
+    "rapidfuzz",
+    "regex",
+    "spacy",
+    "tiktoken",
+]
+
+# Development and tooling
+tools = [
+    "altair",
+    "beautifulsoup4",
+    "click",
+    "colorlog",
+    "dash",
+    "fabric",
+    "flask",
+    "gunicorn",
+    "imageio",
+    "ipython",
+    "jinja2",
+    "loguru",
+    "lxml",
+    "matplotlib",
+    "opencv-python-headless",
+    "openpyxl",
+    "paramiko",
+    "pillow",
+    "plotly",
+    "pypdf",
+    "pytest",
+    "pytest-asyncio",
+    "python-docx",
+    "reportlab",
+    "rich",
+    "seaborn",
+    "selenium",
+    "streamlit",
+    "typer",
+    "weasyprint",
+    "werkzeug",
+    "xlsxwriter",
+]
+
+# All optional dependencies combined
+all = [
+    "signal4-core[ml,nlp,tools]",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.uv]
+# Prefer binary wheels for faster installs
+compile-bytecode = true
+
+[tool.uv.sources]
+# Add any custom package sources here if needed
+# e.g., private PyPI, git repos, etc.

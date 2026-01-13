@@ -1,0 +1,186 @@
+# Health & Wellness Dashboard Configuration
+# ==========================================
+# Comprehensive analysis of personal health, fitness, nutrition,
+# mental health, and wellness discourse across media content.
+
+dashboard:
+  id: health-wellness
+  name: "Health & Wellness Analysis"
+  project: BigChannels  # Or your health-focused project
+  languages: [en]
+  description: "Analyze health, fitness, nutrition, mental health, and wellness discourse"
+
+search:
+  # Embedding configuration
+  embedding_model: "Qwen/Qwen3-Embedding-0.6B"
+  embedding_dim: 1024
+  use_alt_embeddings: false
+
+  # Time windows for health trend analysis
+  time_windows: [7, 30, 90, 180, 365]
+  default_window: 90  # Health topics often need broader context
+
+  # Search parameters - broader for comprehensive analysis
+  max_results: 1000
+  similarity_threshold: 0.40  # Slightly lower for broader recall
+  max_per_channel: 5  # Allow more per channel for depth
+
+llm:
+  enabled: true
+  model: "grok-4-fast-non-reasoning-latest"
+  temperature: 0.3
+
+  # Query expansion for health topics
+  query_expansion: "health_domain"  # Custom strategy for health
+
+  # RAG settings
+  max_sample_segments: 25
+  sampling_strategy: "diverse"
+
+# Health-specific query domains for comprehensive coverage
+health_domains:
+  nutrition:
+    - "diet and weight management"
+    - "intermittent fasting"
+    - "ketogenic diet benefits and risks"
+    - "plant-based nutrition"
+    - "protein intake and muscle"
+    - "supplements and vitamins"
+    - "gut health and microbiome"
+    - "sugar and metabolic health"
+    - "processed foods impact"
+    - "hydration and electrolytes"
+
+  fitness:
+    - "strength training techniques"
+    - "cardiovascular exercise"
+    - "HIIT vs steady state cardio"
+    - "flexibility and mobility"
+    - "recovery and rest days"
+    - "exercise for longevity"
+    - "sports performance optimization"
+    - "home workout routines"
+    - "running and endurance"
+    - "workout programming"
+
+  mental_health:
+    - "stress management techniques"
+    - "anxiety and coping strategies"
+    - "depression awareness and support"
+    - "meditation and mindfulness"
+    - "sleep quality improvement"
+    - "work-life balance"
+    - "therapy and counseling"
+    - "mental health stigma"
+    - "burnout prevention"
+    - "emotional regulation"
+
+  sleep:
+    - "sleep hygiene practices"
+    - "insomnia remedies"
+    - "circadian rhythm optimization"
+    - "sleep tracking and data"
+    - "napping benefits"
+    - "sleep disorders"
+    - "blue light and screens"
+    - "sleep supplements melatonin"
+    - "deep sleep optimization"
+    - "sleep and performance"
+
+  longevity:
+    - "anti-aging strategies"
+    - "lifespan vs healthspan"
+    - "NAD and sirtuins"
+    - "caloric restriction"
+    - "autophagy and fasting"
+    - "biomarkers of aging"
+    - "longevity supplements"
+    - "zone 2 training"
+    - "cold exposure and heat therapy"
+    - "rapamycin and metformin"
+
+  hormones:
+    - "testosterone optimization"
+    - "estrogen and women's health"
+    - "thyroid health"
+    - "cortisol and stress"
+    - "growth hormone"
+    - "insulin sensitivity"
+    - "hormone replacement therapy"
+    - "PCOS management"
+    - "menopause health"
+    - "adrenal fatigue"
+
+  chronic_conditions:
+    - "diabetes management"
+    - "heart disease prevention"
+    - "autoimmune conditions"
+    - "chronic pain management"
+    - "inflammation reduction"
+    - "blood pressure control"
+    - "cholesterol management"
+    - "arthritis and joint health"
+    - "digestive disorders"
+    - "allergies and sensitivities"
+
+  biohacking:
+    - "wearable health tracking"
+    - "continuous glucose monitors"
+    - "cold plunge benefits"
+    - "red light therapy"
+    - "nootropics and cognitive enhancement"
+    - "blood testing and optimization"
+    - "grounding and earthing"
+    - "breathwork techniques"
+    - "sauna and heat exposure"
+    - "peptides and research chemicals"
+
+  wellness_practices:
+    - "yoga and stretching"
+    - "massage and bodywork"
+    - "acupuncture and TCM"
+    - "chiropractic care"
+    - "functional medicine"
+    - "naturopathy approaches"
+    - "holistic health"
+    - "preventive care"
+    - "health coaching"
+    - "integrative medicine"
+
+# Analysis configuration
+analysis:
+  # Number of queries to generate per domain
+  queries_per_domain: 5
+
+  # Minimum segments to include a domain in analysis
+  min_segments_per_domain: 10
+
+  # Theme extraction settings
+  theme_extraction:
+    method: "hdbscan"
+    min_cluster_size: 8
+    max_themes: 6
+    force_split: true
+
+  # Sub-theme settings
+  subtheme_extraction:
+    enabled: true
+    min_cluster_size: 4
+    max_subthemes: 4
+
+  # Summary generation
+  summary:
+    template: "health_theme_summary"
+    max_tokens: 500
+    include_metrics: true
+
+privacy:
+  allowed_projects: [BigChannels, Canadian, CPRMV]
+  allow_downloads: true
+  show_speaker_names: true
+  audit_searches: false
+
+ui:
+  theme_aware: true
+  results_per_page: 25
+  show_context_turns: 2

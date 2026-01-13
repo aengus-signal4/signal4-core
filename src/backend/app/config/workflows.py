@@ -1,0 +1,590 @@
+"""
+Predefined Workflows
+====================
+
+Convenience workflow definitions for common analysis patterns.
+
+These can be referenced by name in AnalysisRequest:
+    {"query": "...", "workflow": "simple_rag"}
+
+Workflows are just predefined sequences of pipeline steps.
+"""
+
+from typing import Dict, List, Any
+
+
+# ============================================================================
+# Workflow Definitions
+# ============================================================================
+
+WORKFLOWS: Dict[str, List[Dict[str, Any]]] = {
+    "simple_rag": [
+        {
+            "step": "expand_query",
+            "config": {
+                "strategy": "multi_query"
+            }
+        },
+        {
+            "step": "retrieve_segments",
+            "config": {
+                "k": 200
+            }
+        },
+        {
+            "step": "quick_cluster_check",
+            "config": {
+                "method": "hdbscan",
+                "min_cluster_size": 10,
+                "min_silhouette_score": 0.15,
+                "skip_if_few_segments": 30,
+                "max_themes": 4,
+                "force_split": True
+            }
+        },
+        {
+            "step": "quantitative_analysis",
+            "config": {
+                "include_baseline": True,
+                "time_window_days": 7
+            }
+        },
+        {
+            "step": "select_segments",
+            "config": {
+                "strategy": "balanced",
+                "n": 18,
+                "n_unclustered": 10
+            }
+        },
+        {
+            "step": "generate_summary",
+            "config": {
+                "template": "rag_answer",
+                "level": "theme",
+                "model": "grok-4-fast-non-reasoning-latest",
+                "temperature": 0.3,
+                "max_tokens": 1200
+            }
+        }
+    ],
+
+    "search_only": [
+        {
+            "step": "expand_query",
+            "config": {
+                "strategy": "multi_query"
+            }
+        },
+        {
+            "step": "retrieve_segments",
+            "config": {
+                "k": 200
+            }
+        }
+    ],
+
+    "hierarchical_summary": [
+        {
+            "step": "retrieve_segments",
+            "config": {}
+        },
+        {
+            "step": "extract_themes",
+            "config": {
+                "method": "hdbscan",
+                "min_cluster_size": 5,
+                "min_samples": 3
+            }
+        },
+        {
+            "step": "quantitative_analysis",
+            "config": {
+                "include_baseline": False
+            }
+        },
+        {
+            "step": "select_segments",
+            "config": {
+                "strategy": "diversity",
+                "n": 20
+            }
+        },
+        {
+            "step": "generate_summary",
+            "config": {
+                "template": "theme_summary",
+                "level": "theme",
+                "model": "grok-4-fast-non-reasoning-latest",
+                "temperature": 0.3,
+                "max_tokens": 400,
+                "max_concurrent": 20
+            }
+        },
+        {
+            "step": "generate_summary",
+            "config": {
+                "template": "meta_summary",
+                "level": "meta",
+                "model": "grok-4-fast-non-reasoning-latest",
+                "temperature": 0.3,
+                "max_tokens": 800,
+                "max_concurrent": 1
+            }
+        }
+    ],
+
+    "hierarchical_with_subthemes": [
+        {
+            "step": "retrieve_segments",
+            "config": {}
+        },
+        {
+            "step": "extract_themes",
+            "config": {
+                "method": "hdbscan",
+                "min_cluster_size": 5,
+                "min_samples": 3
+            }
+        },
+        {
+            "step": "extract_subthemes",
+            "config": {
+                "method": "hdbscan",
+                "n_subthemes": 3,
+                "min_cluster_size": 3,
+                "require_valid_clusters": True,
+                "min_silhouette_score": 0.15
+            }
+        },
+        {
+            "step": "quantitative_analysis",
+            "config": {
+                "include_baseline": False
+            }
+        },
+        {
+            "step": "select_segments",
+            "config": {
+                "strategy": "diversity",
+                "n": 10
+            }
+        },
+        {
+            "step": "generate_summary",
+            "config": {
+                "template": "theme_summary",
+                "level": "theme",
+                "model": "grok-4-fast-non-reasoning-latest",
+                "temperature": 0.3,
+                "max_tokens": 400,
+                "max_concurrent": 20
+            }
+        },
+        {
+            "step": "generate_summary",
+            "config": {
+                "template": "subtheme_summary",
+                "level": "subtheme",
+                "model": "grok-4-fast-non-reasoning-latest",
+                "temperature": 0.3,
+                "max_tokens": 300,
+                "max_concurrent": 20
+            }
+        },
+        {
+            "step": "generate_summary",
+            "config": {
+                "template": "meta_summary",
+                "level": "meta",
+                "model": "grok-4-fast-non-reasoning-latest",
+                "temperature": 0.3,
+                "max_tokens": 800,
+                "max_concurrent": 1
+            }
+        }
+    ],
+
+    "deep_analysis": [
+        {
+            "step": "expand_query",
+            "config": {
+                "strategy": "stance_variation",
+                "n_stances": 5
+            }
+        },
+        {
+            "step": "retrieve_segments",
+            "config": {
+                "k": 300
+            }
+        },
+        {
+            "step": "extract_themes",
+            "config": {
+                "method": "hdbscan",
+                "min_cluster_size": 5,
+                "min_samples": 3
+            }
+        },
+        {
+            "step": "quantitative_analysis",
+            "config": {
+                "include_baseline": True
+            }
+        },
+        {
+            "step": "select_segments",
+            "config": {
+                "strategy": "diversity",
+                "n": 20
+            }
+        },
+        {
+            "step": "generate_summary",
+            "config": {
+                "template": "theme_summary",
+                "level": "theme",
+                "model": "grok-4-fast-non-reasoning-latest",
+                "temperature": 0.3,
+                "max_tokens": 500,
+                "max_concurrent": 20
+            }
+        },
+        {
+            "step": "generate_summary",
+            "config": {
+                "template": "meta_summary",
+                "level": "meta",
+                "model": "grok-4-fast-non-reasoning-latest",
+                "temperature": 0.3,
+                "max_tokens": 1000,
+                "max_concurrent": 1
+            }
+        }
+    ],
+
+    "landing_page_overview": [
+        {
+            "step": "retrieve_all_segments",
+            "config": {
+                "time_window_days": 14,
+                "must_be_embedded": True,
+                "must_be_stitched": True
+            }
+        },
+        {
+            "step": "extract_themes",
+            "config": {
+                "method": "hdbscan",
+                "min_cluster_size": 50,
+                "max_themes": 8,
+                "min_theme_percentage": 5.0,
+                "use_faiss": True
+            }
+        },
+        {
+            "step": "corpus_analysis",
+            "config": {
+                "include_duration": True,
+                "include_episode_count": True
+            }
+        },
+        {
+            "step": "analyze_themes_with_subthemes",
+            "config": {
+                "quick_cluster_check": {
+                    "min_cluster_size": 10,
+                    "force_split": True,
+                    "max_themes": 4
+                },
+                "quantitative_per_theme": True,
+                "select_segments_per_subtheme": 8,
+                "select_unclustered": 6,
+                "generate_theme_names": True,
+                "model": "grok-4-fast-non-reasoning-latest",
+                "max_concurrent": 8
+            }
+        },
+        {
+            "step": "generate_summary",
+            "config": {
+                "template": "theme_summary_with_metrics",
+                "level": "theme",
+                "max_concurrent": 8,
+                "max_tokens": 400
+            }
+        },
+        {
+            "step": "generate_summary",
+            "config": {
+                "template": "corpus_report_summary",
+                "level": "corpus",
+                "max_tokens": 800,
+                "include_all_theme_summaries": True
+            }
+        }
+    ],
+
+    # ========================================================================
+    # Health & Wellness Dashboard Workflow
+    # ========================================================================
+    # Comprehensive health analysis: generates diverse queries across health domains,
+    # clusters responses sub-thematically, generates summaries, and rolls up.
+
+    "health_dashboard": [
+        # Step 1: Generate diverse health queries across all domains
+        {
+            "step": "generate_health_queries",
+            "config": {
+                "include_llm_expansion": True,
+                "include_cross_domain": True,
+                "include_perspectives": True,
+                "max_queries": 100,
+                "sampling_strategy": "stratified"
+            }
+        },
+        # Step 2: Retrieve segments for all queries (batched semantic search)
+        {
+            "step": "batch_retrieve_segments",
+            "config": {
+                "k_per_query": 50,
+                "time_window_days": 90,
+                "deduplicate": True,
+                "max_total_segments": 2000
+            }
+        },
+        # Step 3: Group segments by health domain
+        {
+            "step": "group_by_domain",
+            "config": {
+                "min_segments_per_domain": 10,
+                "domains_from": "query_metadata"
+            }
+        },
+        # Step 4: Extract themes within each domain
+        {
+            "step": "extract_themes",
+            "config": {
+                "method": "hdbscan",
+                "min_cluster_size": 8,
+                "max_themes": 6,
+                "per_domain": True,
+                "use_faiss": True
+            }
+        },
+        # Step 5: Extract sub-themes within each theme
+        {
+            "step": "extract_subthemes",
+            "config": {
+                "method": "hdbscan",
+                "n_subthemes": 4,
+                "min_cluster_size": 4,
+                "require_valid_clusters": True,
+                "min_silhouette_score": 0.12
+            }
+        },
+        # Step 6: Quantitative analysis per domain
+        {
+            "step": "quantitative_analysis",
+            "config": {
+                "include_baseline": False,
+                "per_domain": True,
+                "metrics": ["segment_count", "channel_distribution", "temporal_distribution"]
+            }
+        },
+        # Step 7: Select representative segments per sub-theme
+        {
+            "step": "select_segments",
+            "config": {
+                "strategy": "balanced",
+                "n_per_subtheme": 8,
+                "n_unclustered": 4,
+                "per_domain": True
+            }
+        },
+        # Step 8: Generate sub-theme summaries
+        {
+            "step": "generate_summary",
+            "config": {
+                "template": "health_subtheme_summary",
+                "level": "subtheme",
+                "model": "grok-4-fast-non-reasoning-latest",
+                "temperature": 0.3,
+                "max_tokens": 300,
+                "max_concurrent": 20
+            }
+        },
+        # Step 9: Generate theme summaries (rolling up sub-themes)
+        {
+            "step": "generate_summary",
+            "config": {
+                "template": "health_theme_summary",
+                "level": "theme",
+                "model": "grok-4-fast-non-reasoning-latest",
+                "temperature": 0.3,
+                "max_tokens": 500,
+                "max_concurrent": 10,
+                "include_subtheme_summaries": True
+            }
+        },
+        # Step 10: Generate domain summaries (rolling up themes)
+        {
+            "step": "generate_summary",
+            "config": {
+                "template": "health_domain_summary",
+                "level": "domain",
+                "model": "grok-4-fast-non-reasoning-latest",
+                "temperature": 0.3,
+                "max_tokens": 600,
+                "max_concurrent": 5,
+                "include_theme_summaries": True
+            }
+        },
+        # Step 11: Generate overall health dashboard synthesis
+        {
+            "step": "generate_summary",
+            "config": {
+                "template": "health_dashboard_synthesis",
+                "level": "corpus",
+                "model": "grok-4-fast-non-reasoning-latest",
+                "temperature": 0.3,
+                "max_tokens": 1000,
+                "include_all_domain_summaries": True
+            }
+        }
+    ],
+
+    # Lighter version for quick health topic exploration
+    "health_topic_explorer": [
+        {
+            "step": "expand_query",
+            "config": {
+                "strategy": "health_domain",
+                "include_perspectives": True
+            }
+        },
+        {
+            "step": "retrieve_segments",
+            "config": {
+                "k": 300,
+                "time_window_days": 90
+            }
+        },
+        {
+            "step": "quick_cluster_check",
+            "config": {
+                "method": "hdbscan",
+                "min_cluster_size": 8,
+                "min_silhouette_score": 0.12,
+                "skip_if_few_segments": 25,
+                "max_themes": 5,
+                "force_split": True
+            }
+        },
+        {
+            "step": "quantitative_analysis",
+            "config": {
+                "include_baseline": True,
+                "time_window_days": 90
+            }
+        },
+        {
+            "step": "select_segments",
+            "config": {
+                "strategy": "balanced",
+                "n": 20,
+                "n_unclustered": 8
+            }
+        },
+        {
+            "step": "generate_summary",
+            "config": {
+                "template": "health_rag_answer",
+                "level": "theme",
+                "model": "grok-4-fast-non-reasoning-latest",
+                "temperature": 0.3,
+                "max_tokens": 600
+            }
+        }
+    ]
+}
+
+
+# ============================================================================
+# Workflow Functions
+# ============================================================================
+
+def get_workflow(name: str) -> List[Dict[str, Any]]:
+    """
+    Get workflow definition by name.
+
+    Args:
+        name: Workflow name
+
+    Returns:
+        List of step configs
+
+    Raises:
+        ValueError: If workflow not found
+    """
+    if name not in WORKFLOWS:
+        raise ValueError(
+            f"Unknown workflow: {name}. Available workflows: {list(WORKFLOWS.keys())}"
+        )
+    return WORKFLOWS[name]
+
+
+def list_workflows() -> Dict[str, str]:
+    """
+    List all available workflows with descriptions.
+
+    Returns:
+        Dict mapping workflow name to description
+    """
+    return {
+        "simple_rag": "Simple RAG with adaptive clustering: expand query → retrieve → detect sub-themes (if meaningful) → analyze → sample per cluster → unified summary",
+        "search_only": "Search only: expand query → retrieve (no summarization)",
+        "hierarchical_summary": "Hierarchical: retrieve → cluster themes → summarize themes → meta-summary",
+        "hierarchical_with_subthemes": "Hierarchical with sub-themes: retrieve → themes → sub-themes → summaries at all levels",
+        "deep_analysis": "Deep analysis: stance variation → retrieve → themes → quantitative (with baseline) → summaries",
+        "landing_page_overview": "Landing page: retrieve all → discover major themes (FAISS + HDBSCAN) → corpus stats → parallel theme analysis with sub-themes → report-style summaries",
+        "health_dashboard": "Health dashboard: generate diverse health queries → batch retrieve → group by domain → extract themes/sub-themes per domain → hierarchical summaries → synthesis",
+        "health_topic_explorer": "Health topic explorer: quick health-focused RAG with perspective variations and sub-theme detection"
+    }
+
+
+def apply_config_overrides(
+    workflow: List[Dict[str, Any]],
+    overrides: Dict[str, Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """
+    Apply config overrides to workflow steps.
+
+    Args:
+        workflow: Workflow definition (list of steps)
+        overrides: Dict mapping step name to config overrides
+
+    Returns:
+        Modified workflow with overrides applied
+
+    Example:
+        workflow = get_workflow("simple_rag")
+        overrides = {
+            "expand_query": {"strategy": "theme_queries"},
+            "retrieve_segments": {"k": 300}
+        }
+        workflow = apply_config_overrides(workflow, overrides)
+    """
+    result = []
+    for step in workflow:
+        step_copy = {**step}
+        step_name = step_copy["step"]
+
+        # Apply overrides if provided for this step
+        if step_name in overrides:
+            step_copy["config"] = {**step_copy["config"], **overrides[step_name]}
+
+        result.append(step_copy)
+
+    return result

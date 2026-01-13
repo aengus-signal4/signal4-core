@@ -1,0 +1,54 @@
+# Classification Pipeline Configuration
+
+# LLM Settings
+llm:
+  model: "llama3.2"  # Options: llama3.2, llama3.1, gpt-4, gpt-3.5-turbo
+  api_type: "ollama"  # Options: ollama, openai
+  temperature: 0.1
+  top_p: 0.9
+  max_retries: 3
+  retry_delay: 2  # seconds
+
+# Processing Settings
+processing:
+  batch_size: 100
+  min_segment_words: 20
+  parallel_workers: 1
+  use_gpu: false
+  save_intermediate: true
+
+# Keyword Matching
+keyword_matching:
+  fuzzy_matching: true
+  fuzzy_threshold: 85  # Minimum similarity score for fuzzy matches
+  case_sensitive: false
+
+# Output Settings
+output:
+  directory: "outputs/classification"
+  formats:
+    - csv
+    - jsonl
+    - json
+    - summary
+  save_full_segments: true
+
+# Theme Classification Thresholds
+classification:
+  confidence_thresholds:
+    high: 0.8
+    medium: 0.6
+    low: 0.4
+  max_subthemes_per_segment: 3
+  require_keyword_match: true  # Only process segments with keyword matches
+
+# Local Storage Settings
+local_storage:
+  cache_segments: true
+  compression: false  # Option to compress large output files
+  
+# Logging
+logging:
+  level: "INFO"
+  file: "logs/classification.log"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

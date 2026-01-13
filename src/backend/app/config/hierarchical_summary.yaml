@@ -1,0 +1,89 @@
+# Hierarchical Summary System Configuration
+# ==========================================
+# Standalone configuration for hierarchical summarization (not tied to any dashboard)
+
+# Embedding and Search Configuration
+embeddings:
+  model: "Qwen/Qwen3-Embedding-0.6B"  # 1024-dim model (available for all content)
+  dimension: 1024
+  use_alt_field: false  # Use standard 'embedding' column, not 'embedding_alt'
+
+search:
+  similarity_threshold: 0.40  # Minimum cosine similarity for clustering
+  max_results_per_query: 500
+  index_cache_hours: 24  # How long to cache FAISS indexes
+
+# Theme Discovery via Clustering
+clustering:
+  # Theme granularity control
+  # Adaptive sizing: min_cluster_size scales with dataset size to maintain consistent granularity
+  #
+  # adaptive_sizing: true → min_cluster_size = max(min_size, total_segments / target_themes)
+  # adaptive_sizing: false → use fixed min_cluster_size value
+  #
+  # Target themes controls the desired number of themes:
+  #   - target_themes: 20 → Broad overview (good for summaries)
+  #   - target_themes: 40 → Balanced (DEFAULT)
+  #   - target_themes: 80 → Fine-grained (good for exploration)
+
+  adaptive_sizing: true  # Enable adaptive cluster sizing
+  target_themes: 40  # Target number of themes to discover
+  min_cluster_size_floor: 10  # Minimum cluster size (even for small datasets)
+  min_cluster_size_ceiling: 100  # Maximum cluster size (even for huge datasets)
+
+  # If adaptive_sizing=false, use this fixed value:
+  min_cluster_size: 30  # Fixed value when adaptive_sizing is disabled
+
+  # Other HDBSCAN parameters
+  min_samples: 5  # Core point threshold for density-based clustering
+  cluster_selection_method: "eom"  # Excess of mass - more stable clusters
+
+  # UMAP dimensionality reduction
+  umap_n_components: 50  # Reduce to 50 dimensions before clustering
+  umap_n_neighbors: 15  # Local neighborhood size
+  umap_min_dist: 0.1  # Minimum distance between points in low-dim space
+  umap_metric: "cosine"  # Distance metric for embeddings
+
+# Segment Sampling
+sampling:
+  samples_per_theme: 20  # Number of segments to sample per theme for LLM summarization
+  min_samples: 5
+  max_samples: 50
+  strategy: "balanced"  # balanced | top_similarity | diverse_channels | temporal_spread
+
+# LLM Configuration for Summarization
+llm:
+  provider: "grok"
+  model: "grok-beta"
+  api_key_env: "XAI_API_KEY"
+  base_url: "https://api.x.ai/v1"
+
+  # Generation parameters
+  temperature: 0.7
+  max_tokens: 8000
+
+  # Rate limiting
+  max_requests_per_minute: 60
+  max_retries: 3
+  retry_delay_seconds: 2
+
+  # Prompt configuration
+  theme_summary_paragraphs: 7  # Target paragraphs for theme summaries
+  meta_summary_paragraphs: 10  # Target paragraphs for meta-summaries
+
+# Citation Configuration
+citations:
+  format: "[G{group_id}-T{theme_id}-S{segment_id}]"
+  validate_on_generation: true  # Check that LLM only uses provided citations
+
+# Database Configuration
+database:
+  save_to_db: true  # Save all summaries to hierarchical_summaries table
+  enable_caching: true  # Skip regeneration if config_hash matches
+  cache_ttl_days: 7  # How long cached summaries are valid
+
+# Time Windows
+time_windows:
+  default_days: 7
+  available: [7, 30, 90, 365]
+  max_days: 365

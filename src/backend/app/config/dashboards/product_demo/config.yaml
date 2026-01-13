@@ -1,0 +1,60 @@
+# Global Podcast Intelligence Dashboard Configuration
+# ====================================================
+# Sales demo covering multiple podcast categories worldwide
+
+dashboard:
+  id: product-demo
+  name: "Global Podcast Intelligence"
+  project: Canadian  # Primary project (fallback)
+  languages: [en, fr]
+
+search:
+  # Embedding configuration - use 2000-dim (4B model with truncate_dim=2000, pre-loaded at startup)
+  embedding_model: "Qwen/Qwen3-Embedding-4B"
+  embedding_dim: 2000
+  use_alt_embeddings: true
+
+  # Time windows available for search (in days)
+  time_windows: [7, 30, 90, 365]
+  default_window: 7
+
+  # Search parameters
+  max_results: 500
+  similarity_threshold: 0.43
+  max_per_channel: 3
+
+llm:
+  enabled: true
+  model: "qwen3:4b-instruct"
+  temperature: 0.3
+  query_expansion: "theme_queries"
+  max_sample_segments: 20
+  sampling_strategy: "diverse"
+
+audio:
+  enabled: true
+  default_padding: 2.0
+  max_padding: 10.0
+  allow_download: true
+
+filters:
+  speakers: true
+  channels: true
+  date_range: true
+  language: true
+
+privacy:
+  # Multi-project access for global intelligence
+  allowed_projects:
+    - Canadian
+    - Big_Channels
+
+  allow_downloads: true
+  show_speaker_names: true
+  audit_searches: false
+  audit_downloads: false
+
+ui:
+  theme_aware: true
+  results_per_page: 20
+  show_context_turns: 2

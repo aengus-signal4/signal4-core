@@ -1,0 +1,61 @@
+# Hierarchical Summary System Configuration
+# ==========================================
+# Dashboard-agnostic configuration for hierarchical summarization
+
+search:
+  # Embedding configuration - uses standard 1024-dim embeddings (available for all content)
+  embedding_model: "Qwen/Qwen3-Embedding-0.6B"
+  embedding_dim: 1024
+  use_alt_embeddings: false  # Use standard embedding field
+  
+  # FAISS index settings
+  index_type: "IVF"  # Inverted file index for large datasets
+  nlist: 100  # Number of clusters for IVF
+  nprobe: 10  # Number of clusters to search
+  
+  # Time windows for clustering
+  default_time_window_days: 7
+  max_time_window_days: 365
+
+clustering:
+  # HDBSCAN parameters
+  min_cluster_size: 15  # Minimum segments per theme
+  min_samples: 5  # Core point threshold
+  cluster_selection_method: "eom"  # Excess of mass
+  
+  # UMAP parameters
+  n_components: 50  # Target dimensions after reduction
+  n_neighbors: 15  # Local neighborhood size
+  min_dist: 0.1  # Minimum distance in low-dim space
+  metric: "cosine"  # Distance metric
+
+llm:
+  provider: "grok"
+  model: "grok-beta"
+  api_key_env: "XAI_API_KEY"
+  base_url: "https://api.x.ai/v1"
+  
+  # Generation parameters
+  temperature: 0.7
+  max_tokens: 8000
+  
+  # Rate limiting
+  max_requests_per_minute: 60
+  max_retries: 3
+  retry_delay_seconds: 2
+
+sampling:
+  # Segment sampling strategy
+  default_strategy: "balanced"  # balanced, top_similarity, diverse_channels, temporal_spread
+  samples_per_theme: 20  # Default segments to sample per theme
+  min_samples_per_theme: 5
+  max_samples_per_theme: 50
+
+citations:
+  # Citation format
+  default_format: "[G{group_id}-T{theme_id}-S{segment_id}]"
+  
+database:
+  # HierarchicalSummary table settings
+  enable_caching: true  # Cache based on config_hash
+  cache_ttl_hours: 168  # 7 days

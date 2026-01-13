@@ -1,0 +1,72 @@
+# Practitioner Dashboard Configuration
+# =====================================
+
+dashboard:
+  id: practitioner
+  name: "Practitioner Portal"
+  project: Canadian  # Primary project (fallback)
+  languages: [en]  # English only for now
+
+search:
+  # Embedding configuration - must match database embeddings
+  embedding_model: "Qwen/Qwen3-Embedding-0.6B"  # Use 1024-dim embeddings (available for all content)
+  embedding_dim: 1024
+  use_alt_embeddings: false  # Use standard embedding field (1024-dim)
+
+  # Time windows available for search (in days)
+  time_windows: [7, 30, 90, 365]
+  default_window: 7
+
+  # Search parameters
+  max_results: 500  # k-nn results to return
+  similarity_threshold: 0.43  # Minimum similarity for hierarchical summaries (optimized)
+  max_per_channel: 3  # Maximum results per channel (diversity control)
+
+  # Index refresh settings
+  rebuild_indexes_daily: true
+  stale_while_revalidate: true  # Serve stale index while rebuilding
+
+llm:
+  enabled: true
+  model: "qwen3:4b-instruct"
+  temperature: 0.3
+
+  # Query expansion strategy
+  query_expansion: "theme_queries"  # "theme_queries" (discourse-focused, 10 variations), "multi_query" (multi-stance), or "query2doc" (fast, 1 LLM call)
+
+  # RAG settings
+  max_sample_segments: 20  # Diverse sample for summary
+  sampling_strategy: "diverse"  # diverse, top_k, or random
+
+audio:
+  enabled: true
+  default_padding: 2.0  # seconds before/after segment
+  max_padding: 10.0
+  allow_download: true
+
+filters:
+  # Available filter controls in UI
+  speakers: true
+  channels: true
+  date_range: true
+  language: false  # Single language dashboard
+
+privacy:
+  # Row-level security - multiple project access
+  allowed_projects: [Canadian, Big_Channels, Health, Finance]
+
+  # Feature permissions
+  allow_downloads: true
+  show_speaker_names: true
+
+  # Audit logging
+  audit_searches: false
+  audit_downloads: false
+
+ui:
+  # Light/dark theme support
+  theme_aware: true
+
+  # Results display
+  results_per_page: 20
+  show_context_turns: 2  # Turn context before/after match
