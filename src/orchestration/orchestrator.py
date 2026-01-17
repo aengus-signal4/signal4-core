@@ -264,7 +264,11 @@ class TaskOrchestratorV2:
                 self.worker_manager.workers[wid] = worker_obj
                 logger.info(f"Created worker manager entry for {wid}: {worker_obj.api_url}")
             logger.info(f"Updated WorkerManager with {len(self.worker_manager.workers)} workers")
-            
+
+            # Sync Swift binaries to workers before starting services
+            logger.info("Syncing Swift binaries to workers")
+            await self._sync_swift_binaries_to_workers()
+
             # Start worker services
             logger.info("Starting worker services")
             await self._start_all_worker_services()
@@ -319,7 +323,92 @@ class TaskOrchestratorV2:
                 if worker:
                     worker.status = 'failed'
                 logger.error(f"Error starting services for worker {worker_id}: {str(e)}")
-    
+
+    async def _sync_swift_binaries_to_workers(self) -> None:
+        """Sync compiled Swift binaries (FluidDiarization) to all remote workers.
+
+        Workers may not have Xcode CLI tools installed, so we sync the pre-built
+        binary from the head node rather than requiring them to compile.
+        """
+        swift_build_dir = get_project_root() / "src" / "processing_steps" / "swift" / ".build"
+
+        if not swift_build_dir.exists():
+            logger.warning(f"Swift build directory not found at {swift_build_dir}, skipping sync")
+            return
+
+        # Get remote workers (not head node)
+        remote_workers = [
+            (wid, w) for wid, w in self.worker_pool.workers.items()
+            if not w.is_head_worker and w.eth_ip != '10.0.0.4'
+        ]
+
+        if not remote_workers:
+            logger.info("No remote workers to sync Swift binaries to")
+            return
+
+        logger.info(f"Syncing Swift binaries to {len(remote_workers)} workers")
+
+        # Sync to each worker concurrently
+        sync_tasks = []
+        for worker_id, worker_info in remote_workers:
+            task = asyncio.create_task(self._sync_swift_binary_to_worker(worker_id, worker_info, swift_build_dir))
+            sync_tasks.append((worker_id, task))
+
+        for worker_id, task in sync_tasks:
+            try:
+                success = await task
+                if success:
+                    logger.info(f"Swift binary synced to {worker_id}")
+                else:
+                    logger.warning(f"Failed to sync Swift binary to {worker_id}")
+            except Exception as e:
+                logger.error(f"Error syncing Swift binary to {worker_id}: {e}")
+
+    async def _sync_swift_binary_to_worker(self, worker_id: str, worker_info: WorkerInfo, swift_build_dir: Path) -> bool:
+        """Sync Swift binary to a single worker using rsync"""
+        try:
+            target_ip = worker_info.eth_ip or worker_info.wifi_ip
+            if not target_ip:
+                logger.warning(f"No IP for worker {worker_id}, skipping Swift sync")
+                return False
+
+            ssh_key = self.config.get('processing', {}).get('ssh_key_path', '/Users/signal4/.ssh/id_ed25519')
+            ssh_user = self.config.get('processing', {}).get('ssh_username', 'signal4')
+
+            # Create target directory first
+            mkdir_cmd = f"ssh -o StrictHostKeyChecking=no -i {ssh_key} {ssh_user}@{target_ip} 'mkdir -p {swift_build_dir}'"
+            mkdir_proc = await asyncio.create_subprocess_shell(
+                mkdir_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            await mkdir_proc.communicate()
+
+            # Rsync the .build directory
+            rsync_cmd = [
+                'rsync', '-avz',
+                '-e', f'ssh -o StrictHostKeyChecking=no -i {ssh_key}',
+                f'{swift_build_dir}/',
+                f'{ssh_user}@{target_ip}:{swift_build_dir}/'
+            ]
+
+            proc = await asyncio.create_subprocess_exec(
+                *rsync_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await proc.communicate()
+
+            if proc.returncode != 0:
+                logger.error(f"Rsync to {worker_id} failed: {stderr.decode()}")
+                return False
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error syncing Swift binary to {worker_id}: {e}")
+            return False
+
     async def _start_worker_services(self, worker_id: str) -> bool:
         """Start required services for a specific worker"""
         try:
