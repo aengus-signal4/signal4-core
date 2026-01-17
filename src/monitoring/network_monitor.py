@@ -18,10 +18,17 @@ class NetworkMonitor:
         self.service_manager = service_manager
         self.should_stop = False
         self._monitor_task = None
-        
+
+        # Initialize workers dict - will be populated by start_monitoring
+        self.workers = {}
+        self.get_session = None
+
         # Monitoring settings
         self.health_check_interval = 30  # seconds
         self.retry_check_interval = 60  # seconds - check for retry opportunities more frequently
+
+        # Pause restart attempts during deployment
+        self.restart_paused = False
         
     async def start_monitoring(self, workers: Dict[str, Any], get_session_func):
         """Start network monitoring"""
@@ -112,6 +119,11 @@ class NetworkMonitor:
     
     async def _attempt_worker_restart(self, worker_id: str, worker) -> bool:
         """Attempt to restart a worker with proper retry tracking"""
+        # Skip if restart is paused (during deployment)
+        if self.restart_paused:
+            logger.debug(f"Restart paused - skipping restart for worker {worker_id}")
+            return False
+
         try:
             logger.info(f"Attempting to restart worker {worker_id} "
                        f"(attempt {worker.restart_attempts + 1}/{worker.max_restart_attempts})")

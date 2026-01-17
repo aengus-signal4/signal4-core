@@ -18,7 +18,19 @@ The `ScheduledTaskManager` provides a unified system for all periodic tasks:
 | `scheduled_task_manager.py` | Core scheduler - loads tasks from config, manages execution |
 | `schedule_types.py` | Schedule type definitions (interval, time_of_day, run_then_wait) |
 | `background_loops.py` | Background tasks (stats, config reload, cleanup, health) |
+| `task_creation_manager.py` | Task creation logic for content pipeline |
 | `executors/` | Task executors (CLI commands, SQL functions) |
+
+## Task Modules
+
+All scheduled tasks are implemented as Python modules with `__main__` entry points:
+
+| Module | Purpose | Scheduled Task |
+|--------|---------|----------------|
+| `src.automation.task_creation_manager` | Index sources, create processing tasks | `podcast_index_download`, `youtube_index_download` |
+| `src.utils.embedding_hydrator` | Generate embeddings for segments | `embedding_hydration` |
+| `src.speaker_identification.orchestrator` | Speaker identification phases | `speaker_id_phase1`, `speaker_id_phase2` |
+| `src.ingestion.podcast_pipeline` | Monthly podcast chart collection | `podcast_collection` |
 
 ## Configuration
 
@@ -40,7 +52,7 @@ scheduled_tasks:
       executor:
         type: cli
         command: "python"
-        args: ["scripts/create_tasks_db.py", "--steps", "index_podcast"]
+        args: ["-m", "src.automation.task_creation_manager", "--steps", "index_podcast", "download_podcast"]
       timeout_seconds: 3600
 ```
 
@@ -52,7 +64,7 @@ scheduled_tasks:
 
 ## Executor Types
 
-- **cli**: Run shell commands (python scripts, etc.)
+- **cli**: Run Python modules via `-m` or shell commands
 - **sql**: Execute PostgreSQL functions
 
 ## API
@@ -69,3 +81,20 @@ POST /api/scheduled_tasks/{task_id}/enable    # Enable/disable
 ## State Persistence
 
 Task state (last run time, result) is persisted to JSON file and survives restarts.
+
+## Running Modules Manually
+
+```bash
+# Task creation
+python -m src.automation.task_creation_manager --steps index_podcast download_podcast
+python -m src.automation.task_creation_manager --project CPRMV --steps download convert
+
+# Embedding hydration
+python -m src.utils.embedding_hydrator --batch-size 128
+
+# Speaker identification
+python -m src.speaker_identification.orchestrator --phases 1 --all-active --apply
+
+# Podcast pipeline
+python -m src.ingestion.podcast_pipeline --phase all
+```

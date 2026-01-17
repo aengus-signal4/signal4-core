@@ -53,7 +53,6 @@ class SQLExecutor(BaseExecutor):
                 error="No function name specified"
             )
 
-        logger.info(f"Executing SQL function: {function_name}")
 
         try:
             # Import here to avoid circular imports
@@ -99,7 +98,6 @@ class SQLExecutor(BaseExecutor):
                 )
 
             end_time = datetime.now(timezone.utc)
-            logger.info(f"SQL function {function_name} completed in {(end_time - start_time).total_seconds():.1f}s")
 
             return ExecutionResult(
                 success=True,

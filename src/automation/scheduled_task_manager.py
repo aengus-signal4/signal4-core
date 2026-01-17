@@ -287,9 +287,7 @@ class ScheduledTaskManager:
             return
 
         task.state.is_running = True
-        logger.info("=" * 60)
-        logger.info(f"Starting task: {task_id} ({task.description})")
-        logger.info("=" * 60)
+        logger.info(f"INITIALIZING TASK {task_id}")
 
         try:
             # Get executor
@@ -311,24 +309,21 @@ class ScheduledTaskManager:
             task.state.last_run_date = result.end_time.strftime('%Y-%m-%d')
 
             if result.success:
-                logger.info(f"Task {task_id} completed successfully in {result.duration_seconds:.1f}s")
+                logger.info(f"COMPLETED TASK {task_id}: success in {result.duration_seconds:.1f}s")
             else:
-                logger.error(f"Task {task_id} failed: {result.error}")
+                logger.error(f"COMPLETED TASK {task_id}: failed - {result.error}")
 
             # Save state
             self._save_state()
 
         except Exception as e:
-            logger.error(f"Error executing task {task_id}: {e}", exc_info=True)
+            logger.error(f"COMPLETED TASK {task_id}: error - {e}", exc_info=True)
             task.state.last_run_time = datetime.now(timezone.utc)
             task.state.last_run_result = 'error'
             self._save_state()
 
         finally:
             task.state.is_running = False
-            logger.info("=" * 60)
-            logger.info(f"Finished task: {task_id}")
-            logger.info("=" * 60)
 
     async def trigger_task(self, task_id: str) -> Dict[str, Any]:
         """Manually trigger a task"""

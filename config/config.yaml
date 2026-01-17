@@ -446,7 +446,7 @@ processing:
     worker0:
       eth: 10.0.0.34
       wifi: 10.0.0.28
-      enabled: false
+      enabled: true
       task_types: ["convert:2","download_podcast:1"]
       max_concurrent_tasks: 1
       type: "worker"
@@ -460,7 +460,7 @@ processing:
       eth: 10.0.0.9
       wifi: 10.0.0.54
       enabled: true
-      task_types: ["convert:1","stitch:1","transcribe:1"]
+      task_types: ["convert:1","transcribe:1","stitch:1"]
       max_concurrent_tasks: 1
       type: "worker"
       services:
@@ -483,7 +483,7 @@ processing:
     worker3:
       eth: 10.0.0.203
       wifi: 10.0.0.76
-      enabled: false
+      enabled: true
       task_types: ["convert:1","cleanup:1","stitch:1","transcribe:1"]
       type: "worker"
       services:
@@ -494,7 +494,7 @@ processing:
     worker4:
       eth: 10.0.0.51
       wifi: 10.0.0.163
-      enabled: false
+      enabled: true
       task_types: ["convert:1","cleanup:1","stitch:1","transcribe:1"] #"cleanup",
       max_concurrent_tasks: 1
       type: "worker"
@@ -506,7 +506,7 @@ processing:
     worker5:
       eth: 10.0.0.209
       wifi: 10.0.0.99
-      enabled: false
+      enabled: true
       task_types: ["convert:1","diarize:1","transcribe:1"]
       max_concurrent_tasks: 1
       type: "worker"
@@ -518,7 +518,7 @@ processing:
     worker6:
       eth: 10.0.0.4
       wifi: 10.0.0.215
-      enabled: false
+      enabled: true
       task_types: ["download_rumble:1","download_podcast:1","download_youtube:1","transcribe:1"] # "cleanup:1",
       max_concurrent_tasks: 1
       type: "head"
@@ -807,7 +807,7 @@ scheduled_tasks:
       executor:
         type: cli
         command: "python"
-        args: ["scripts/create_tasks_db.py", "--steps", "index_podcast", "download_podcast"]
+        args: ["-m", "src.automation.task_creation_manager", "--steps", "index_podcast", "download_podcast"]
       timeout_seconds: 3600
 
     youtube_index_download:
@@ -821,7 +821,7 @@ scheduled_tasks:
       executor:
         type: cli
         command: "python"
-        args: ["scripts/create_tasks_db.py", "--steps", "index_youtube", "download_youtube"]
+        args: ["-m", "src.automation.task_creation_manager", "--steps", "index_youtube", "download_youtube"]
       timeout_seconds: 7200
 
     # === Continuous Processing (run then wait) ===
@@ -836,7 +836,7 @@ scheduled_tasks:
       executor:
         type: cli
         command: "python"
-        args: ["scripts/hydrate_embeddings.py", "--batch-size", "128"]
+        args: ["-m", "src.utils.embedding_hydrator", "--batch-size", "128"]
       timeout_seconds: 14400
 
     speaker_id_phase1:
@@ -878,7 +878,7 @@ scheduled_tasks:
       executor:
         type: cli
         command: "python"
-        args: ["scripts/collect_and_classify_podcasts.py", "--email", "aengus@signal4.ca"]
+        args: ["-m", "src.ingestion.podcast_pipeline", "--phase", "all", "--email", "aengus@signal4.ca"]
       timeout_seconds: 21600
 
     # === Backend Cache & Clustering (replaces pg_cron) ===

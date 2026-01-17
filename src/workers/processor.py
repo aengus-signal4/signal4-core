@@ -3,6 +3,17 @@ import os
 os.environ['MallocStackLogging'] = '0'
 os.environ['MallocStackLoggingNoCompact'] = '0'
 
+# Load .env file for credentials (S3_ACCESS_KEY, POSTGRES_PASSWORD, etc.)
+from dotenv import load_dotenv
+from pathlib import Path
+_env_path = Path(__file__).resolve().parents[2] / '.env'
+load_dotenv(_env_path)
+
+# Ensure homebrew binaries (ffmpeg, etc.) are in PATH for subprocesses
+_homebrew_bin = '/opt/homebrew/bin'
+if _homebrew_bin not in os.environ.get('PATH', ''):
+    os.environ['PATH'] = f"{_homebrew_bin}:{os.environ.get('PATH', '')}"
+
 # Standard library imports
 import asyncio
 import contextlib
@@ -801,7 +812,8 @@ async def run_processing_script(task_type: str, task_data: Dict[str, Any]) -> Di
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(project_root)  # Required for 'src' imports to resolve
         )
 
         # Store process reference for potential cancellation
@@ -825,6 +837,16 @@ async def run_processing_script(task_type: str, task_data: Dict[str, Any]) -> Di
 
         stdout = stdout_bytes.decode('utf-8', errors='replace').strip() if stdout_bytes else ""
         stderr = stderr_bytes.decode('utf-8', errors='replace').strip() if stderr_bytes else ""
+
+        # Filter out uv noise from stderr (informational messages that aren't errors)
+        if stderr:
+            stderr_lines = [line for line in stderr.splitlines()
+                          if not line.startswith('Bytecode compiled')
+                          and not line.startswith('Resolved ')
+                          and not line.startswith('Prepared ')
+                          and not line.startswith('Installed ')
+                          and not line.startswith('Uninstalled ')]
+            stderr = '\n'.join(stderr_lines).strip()
         
         # Special handling for convert.py exit code 2 (invalid media file)
         if task_type == "convert" and return_code == 2:

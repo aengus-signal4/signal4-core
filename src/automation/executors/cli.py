@@ -53,9 +53,6 @@ class CLIExecutor(BaseExecutor):
         env = os.environ.copy()
         env.update(env_additions)
 
-        logger.info(f"Executing CLI command: {' '.join(full_cmd)}")
-        logger.info(f"Working directory: {cwd}")
-
         stdout_lines = []
         stderr_lines = []
 
@@ -68,27 +65,25 @@ class CLIExecutor(BaseExecutor):
                 env=env
             )
 
-            # Stream output in real-time while capturing
-            async def stream_output(stream, lines_list, prefix):
+            # Capture output silently
+            async def stream_output(stream, lines_list):
                 while True:
                     line = await stream.readline()
                     if not line:
                         break
                     decoded = line.decode('utf-8', errors='replace').rstrip()
                     lines_list.append(decoded)
-                    logger.info(f"{prefix}: {decoded}")
 
             # Run both streams concurrently with timeout
             try:
                 await asyncio.wait_for(
                     asyncio.gather(
-                        stream_output(process.stdout, stdout_lines, "STDOUT"),
-                        stream_output(process.stderr, stderr_lines, "STDERR")
+                        stream_output(process.stdout, stdout_lines),
+                        stream_output(process.stderr, stderr_lines)
                     ),
                     timeout=timeout_seconds
                 )
             except asyncio.TimeoutError:
-                logger.error(f"Command timed out after {timeout_seconds}s")
                 process.kill()
                 await process.wait()
                 end_time = datetime.now(timezone.utc)
@@ -108,9 +103,7 @@ class CLIExecutor(BaseExecutor):
             end_time = datetime.now(timezone.utc)
 
             success = returncode == 0
-            if success:
-                logger.info(f"Command completed successfully in {(end_time - start_time).total_seconds():.1f}s")
-            else:
+            if not success:
                 logger.error(f"Command failed with return code {returncode}")
 
             return ExecutionResult(

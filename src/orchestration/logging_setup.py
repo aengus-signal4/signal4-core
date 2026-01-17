@@ -8,16 +8,19 @@ from typing import Tuple, Optional
 def setup_orchestrator_logging(log_dir: Optional[Path] = None) -> Tuple[logging.Logger, logging.Logger, logging.Logger]:
     """
     Set up dedicated loggers for orchestrator operations
-    
+
     Returns:
         Tuple of (completion_logger, error_logger, run_logger)
     """
     if log_dir is None:
         log_dir = Path("/Users/signal4/logs/content_processing")
-    
+
     log_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Error logger
+
+    # Console formatter for task events
+    console_formatter = logging.Formatter('%(asctime)s [%(name)s] %(message)s')
+
+    # Error logger - file + console
     error_logger = logging.getLogger('orchestrator_errors')
     error_logger.setLevel(logging.ERROR)
     error_logger.propagate = False
@@ -27,8 +30,13 @@ def setup_orchestrator_logging(log_dir: Optional[Path] = None) -> Tuple[logging.
     error_formatter = logging.Formatter('%(asctime)s %(message)s')
     error_file_handler.setFormatter(error_formatter)
     error_logger.addHandler(error_file_handler)
-    
-    # Completion logger
+    # Add console handler for errors
+    error_console_handler = logging.StreamHandler()
+    error_console_handler.setLevel(logging.ERROR)
+    error_console_handler.setFormatter(console_formatter)
+    error_logger.addHandler(error_console_handler)
+
+    # Completion logger - file + console
     completion_logger = logging.getLogger('task_completion')
     completion_logger.setLevel(logging.INFO)
     completion_logger.propagate = False
@@ -38,8 +46,13 @@ def setup_orchestrator_logging(log_dir: Optional[Path] = None) -> Tuple[logging.
     completion_formatter = logging.Formatter('%(asctime)s [%(message)s')
     completion_file_handler.setFormatter(completion_formatter)
     completion_logger.addHandler(completion_file_handler)
-    
-    # Hourly run logger
+    # Add console handler for completions
+    completion_console_handler = logging.StreamHandler()
+    completion_console_handler.setLevel(logging.INFO)
+    completion_console_handler.setFormatter(console_formatter)
+    completion_logger.addHandler(completion_console_handler)
+
+    # Hourly run logger (file only - not needed on console)
     run_log_file = log_dir / "orchestrator_runs.log"
     run_logger = logging.getLogger('orchestrator_runs')
     run_logger.setLevel(logging.INFO)
@@ -49,8 +62,38 @@ def setup_orchestrator_logging(log_dir: Optional[Path] = None) -> Tuple[logging.
     run_formatter = logging.Formatter('%(asctime)s - %(message)s')
     run_file_handler.setFormatter(run_formatter)
     run_logger.addHandler(run_file_handler)
-    
+
     return completion_logger, error_logger, run_logger
+
+
+def configure_noise_suppression():
+    """
+    Suppress noisy loggers while keeping important messages visible.
+    Call this after setting up orchestrator logging.
+    """
+    # Suppress background loop noise (task assignment chatter)
+    logging.getLogger('src.automation.background_loops').setLevel(logging.WARNING)
+
+    # Suppress reactive assignment info logs
+    logging.getLogger('src.orchestration.reactive_assignment').setLevel(logging.WARNING)
+
+    # Suppress timeout manager info logs (keep warnings for actual timeouts)
+    logging.getLogger('src.orchestration.timeout_manager').setLevel(logging.WARNING)
+
+    # Suppress failure tracker info logs (keep warnings)
+    logging.getLogger('src.orchestration.failure_tracker').setLevel(logging.WARNING)
+
+    # Suppress uvicorn access logs (HTTP request noise)
+    logging.getLogger('uvicorn.access').setLevel(logging.ERROR)
+
+    # Suppress task queue cache debug/info
+    logging.getLogger('src.orchestration.task_queue_cache').setLevel(logging.WARNING)
+
+    # Suppress task manager routine operations
+    logging.getLogger('src.orchestration.task_manager').setLevel(logging.WARNING)
+
+    # Suppress asyncssh connection chatter
+    logging.getLogger('asyncssh').setLevel(logging.WARNING)
 
 
 class TaskLogger:

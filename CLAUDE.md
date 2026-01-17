@@ -2,6 +2,8 @@
 
 Content ingestion, processing pipeline, and query API. **Owns the database schema.**
 
+**Repository:** https://github.com/aengus-signal4/signal4-core
+
 ## Quick Reference
 
 - **Orchestrator**: Task Orchestrator V2 (port 8001)

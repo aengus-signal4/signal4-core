@@ -216,54 +216,63 @@ class NetworkManager:
         """Send HTTP request to worker with automatic retry on different interfaces"""
         if worker_id not in self.worker_network_status:
             return False, "Worker not registered"
-        
+
         status = self.worker_network_status[worker_id]
-        
-        # Try current interface first
-        if status.current_interface:
-            success, response = await self._send_interface_request(
-                status.current_interface, method, endpoint, data, timeout
-            )
-            if success:
-                status.current_interface.last_success = datetime.now(timezone.utc)
-                status.current_interface.consecutive_failures = 0
-                status.last_successful_connection = datetime.now(timezone.utc)
-                return True, response
-            else:
-                status.current_interface.last_failure = datetime.now(timezone.utc)
-                status.current_interface.consecutive_failures += 1
-        
-        # Try alternative interfaces if current failed
-        for interface in status.available_interfaces:
-            if interface == status.current_interface:
-                continue
-            
-            # Skip interfaces in cooldown
-            if (interface.last_failure and 
-                (datetime.now(timezone.utc) - interface.last_failure).seconds < self.interface_cooldown):
-                continue
-            
-            success, response = await self._send_interface_request(
-                interface, method, endpoint, data, timeout
-            )
-            if success:
-                # Switch to this interface
-                self.logger.info(f"Switched worker {worker_id} to {interface.name} for successful request")
-                status.current_interface = interface
-                interface.last_success = datetime.now(timezone.utc)
-                interface.consecutive_failures = 0
-                status.last_successful_connection = datetime.now(timezone.utc)
-                
-                # Update URLs
-                status.health_check_url = f"http://{interface.ip}:8000/tasks"
-                status.api_url = f"http://{interface.ip}:8000"
-                
-                return True, response
-            else:
-                interface.last_failure = datetime.now(timezone.utc)
-                interface.consecutive_failures += 1
-        
-        return False, "All interfaces failed"
+        last_error = None
+        retry_delays = [1, 4, 10]  # Delays between attempts: 1s, 4s, 10s
+
+        for attempt in range(4):
+            # Try current interface first
+            if status.current_interface:
+                success, response = await self._send_interface_request(
+                    status.current_interface, method, endpoint, data, timeout
+                )
+                if success:
+                    status.current_interface.last_success = datetime.now(timezone.utc)
+                    status.current_interface.consecutive_failures = 0
+                    status.last_successful_connection = datetime.now(timezone.utc)
+                    return True, response
+                else:
+                    last_error = response
+                    status.current_interface.last_failure = datetime.now(timezone.utc)
+                    status.current_interface.consecutive_failures += 1
+
+            # Try alternative interfaces if current failed
+            for interface in status.available_interfaces:
+                if interface == status.current_interface:
+                    continue
+
+                # Skip interfaces in cooldown (but only on first attempt)
+                if attempt == 0 and interface.last_failure and \
+                   (datetime.now(timezone.utc) - interface.last_failure).seconds < self.interface_cooldown:
+                    continue
+
+                success, response = await self._send_interface_request(
+                    interface, method, endpoint, data, timeout
+                )
+                if success:
+                    # Switch to this interface
+                    self.logger.info(f"Switched worker {worker_id} to {interface.name} for successful request")
+                    status.current_interface = interface
+                    interface.last_success = datetime.now(timezone.utc)
+                    interface.consecutive_failures = 0
+                    status.last_successful_connection = datetime.now(timezone.utc)
+
+                    # Update URLs
+                    status.health_check_url = f"http://{interface.ip}:8000/tasks"
+                    status.api_url = f"http://{interface.ip}:8000"
+
+                    return True, response
+                else:
+                    last_error = response
+                    interface.last_failure = datetime.now(timezone.utc)
+                    interface.consecutive_failures += 1
+
+            # Wait before retrying (except on last attempt)
+            if attempt < 3:
+                await asyncio.sleep(retry_delays[attempt])
+
+        return False, f"All interfaces failed after 4 attempts: {last_error}"
     
     async def _send_interface_request(self, interface: NetworkInterface, method: str,
                                     endpoint: str, data: Optional[Dict] = None,

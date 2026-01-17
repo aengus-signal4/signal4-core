@@ -42,7 +42,7 @@ from src.workers.code_deployment import CodeDeploymentManager
 
 # OllamaMonitor removed - we use MLX only now
 from src.workers.service_startup import ServiceStartupManager
-from src.orchestration.logging_setup import setup_orchestrator_logging, TaskLogger
+from src.orchestration.logging_setup import setup_orchestrator_logging, TaskLogger, configure_noise_suppression
 from src.workers.info import WorkerInfo
 from src.orchestration.config_manager import ConfigManager
 from src.orchestration.test_mode_manager import TestModeManager
@@ -76,6 +76,9 @@ root_logger.addHandler(console_handler)
 
 # Set up dedicated loggers
 completion_logger, error_logger, run_logger = setup_orchestrator_logging()
+
+# Suppress noisy loggers
+configure_noise_suppression()
 
 # Create task logger instance
 task_logger = TaskLogger(completion_logger, error_logger, logger)
@@ -352,7 +355,23 @@ class TaskOrchestratorV2:
     async def run(self) -> None:
         """Main orchestrator loop"""
         logger.info("Starting Task Orchestrator V2 main operations")
-        
+
+        # Deploy code to all enabled workers on startup
+        # Pause network monitor restarts during deployment
+        self.network_monitor.restart_paused = True
+        logger.info("Deploying code to enabled workers...")
+        try:
+            deployment_status = await self.code_deployment.deploy_to_all_workers(self.worker_pool)
+            if deployment_status.failed_workers:
+                logger.warning(f"Code deployment failed for workers: {deployment_status.failed_workers}")
+            else:
+                logger.info(f"Code deployed successfully to {len(deployment_status.successful_workers)} workers")
+        except Exception as e:
+            logger.error(f"Code deployment failed: {e}")
+        finally:
+            # Resume network monitor restarts after deployment
+            self.network_monitor.restart_paused = False
+
         # Start monitoring components
         logger.info("Starting monitoring components")
         logger.info("Starting timeout manager")
@@ -360,7 +379,8 @@ class TaskOrchestratorV2:
         logger.info("Starting network monitor")
         await self.network_monitor.start_monitoring(self.worker_pool.get_all_workers(), get_session)
 
-        # Start unified scheduled task manager
+        # Start unified scheduled task manager for background services
+        # (indexing, downloading, speaker ID, hydration, podcast collection)
         logger.info("Starting scheduled task manager")
         await self.scheduled_task_manager.start()
 
@@ -1009,7 +1029,8 @@ async def main():
                 orchestrator.app,
                 host=orchestrator.api_host,
                 port=orchestrator.api_port,
-                log_level="info"
+                log_level="warning",
+                access_log=False  # Suppress HTTP request logs
             )
             server = uvicorn.Server(config)
             server_task = asyncio.create_task(server.serve())
@@ -1023,25 +1044,30 @@ async def main():
                 return_when=asyncio.FIRST_COMPLETED
             )
         else:
-            # Normal mode - initialize all workers
-            logger.info("Initializing orchestrator")
-            success = await orchestrator.initialize()
-            if not success:
-                logger.error("Failed to initialize orchestrator")
-                return
-            
-            # Start API server in background
+            # Normal mode
+            # Start API server FIRST so it's ready to receive callbacks
             logger.info(f"Starting API server on port {orchestrator.api_port}")
             config = uvicorn.Config(
                 orchestrator.app,
                 host=orchestrator.api_host,
                 port=orchestrator.api_port,
-                log_level="info"  # Use info level to show existing component logs
+                log_level="warning",
+                access_log=False  # Suppress HTTP request logs
             )
             server = uvicorn.Server(config)
             server_task = asyncio.create_task(server.serve())
             logger.info("API server started in background")
-            
+
+            # Brief pause to ensure server is listening
+            await asyncio.sleep(0.5)
+
+            # Now initialize workers (they may call back immediately)
+            logger.info("Initializing orchestrator")
+            success = await orchestrator.initialize()
+            if not success:
+                logger.error("Failed to initialize orchestrator")
+                return
+
             # Run main orchestrator loop
             logger.info("Starting main orchestrator loop")
             orchestrator_task = asyncio.create_task(orchestrator.run())

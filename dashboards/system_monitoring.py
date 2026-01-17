@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """
-System Monitoring Dashboard - Unified View
-==========================================
+System Monitoring Dashboard - Tabbed Interface
+==============================================
 
-A single-pane-of-glass view combining:
-- System health and orchestrator status (from orchestrator_monitoring.py)
-- Worker throughput by content duration (from worker_monitoring_v2.py)
-- Project pipeline progress (from project_monitoring.py)
-- Automation services status
-
-This dashboard provides a comprehensive view of the entire Signal4 processing system.
+Four-tab layout:
+- Quick Status: Color-coded grid of all critical services
+- Services: System health, model servers, workers, LLM balancer
+- Tasks: Scheduled tasks, task queue, throughput charts
+- Projects: Pipeline progress, embeddings, speaker identification
 """
 import sys
 from pathlib import Path
@@ -22,7 +20,6 @@ from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 import yaml
 from sqlalchemy import text, func, and_, or_
-import time
 
 # Add the project root to Python path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -35,9 +32,69 @@ logger = setup_worker_logger('system_monitoring')
 
 # Configuration
 ORCHESTRATOR_API_URL = "http://localhost:8001"
-DEFAULT_REFRESH_INTERVAL = 60  # seconds
+LLM_BALANCER_URL = "http://localhost:8002"
 
-# Pipeline stage colors (from project_monitoring)
+# Model servers configuration (from config.yaml)
+MODEL_SERVERS = {
+    'worker0': {'host': '10.0.0.34', 'port': 8004, 'tiers': ['tier_1', 'tier_2']},
+    'head': {'host': '10.0.0.4', 'port': 8004, 'tiers': ['tier_2']},
+    'worker5': {'host': '10.0.0.209', 'port': 8004, 'tiers': ['tier_3']},
+}
+
+# Worker processors configuration
+WORKER_PROCESSORS = {
+    'worker0': {'host': '10.0.0.34', 'port': 8000},
+    'worker1': {'host': '10.0.0.101', 'port': 8000},
+    'worker2': {'host': '10.0.0.181', 'port': 8000},
+    'worker3': {'host': '10.0.0.159', 'port': 8000},
+    'worker4': {'host': '10.0.0.213', 'port': 8000},
+    'worker5': {'host': '10.0.0.209', 'port': 8000},
+    'worker6': {'host': '10.0.0.189', 'port': 8000},
+}
+
+# Quick status grid configuration - organized by category
+QUICK_STATUS_GROUPS = {
+    'Orchestrator': [
+        {'name': 'Orchestrator', 'url': 'http://localhost:8001', 'endpoint': '/api/health',
+         'log_cmd': 'tail -f /Users/signal4/logs/content_processing/head/orchestrator.log'},
+    ],
+    'LLMs': [
+        {'name': 'Balancer', 'url': 'http://localhost:8002', 'endpoint': '/health',
+         'log_cmd': 'tail -f /Users/signal4/logs/content_processing/head/llm_balancer.log'},
+        {'name': 'Head', 'url': 'http://10.0.0.4:8004', 'endpoint': '/health',
+         'log_cmd': 'tail -f /Users/signal4/logs/content_processing/head/head_model_server.log'},
+        {'name': 'Worker0', 'url': 'http://10.0.0.34:8004', 'endpoint': '/health',
+         'log_cmd': 'ssh signal4@10.0.0.34 "tail -f /Users/signal4/logs/content_processing/worker0/worker0_model_server.log"'},
+        {'name': 'Worker5', 'url': 'http://10.0.0.209:8004', 'endpoint': '/health',
+         'log_cmd': 'ssh signal4@10.0.0.209 "tail -f /Users/signal4/logs/content_processing/worker5/worker5_model_server.log"'},
+    ],
+    'Workers': [
+        {'name': 'W0', 'url': 'http://10.0.0.34:8000', 'endpoint': '/tasks',
+         'log_cmd': 'ssh signal4@10.0.0.34 "tail -f /Users/signal4/logs/content_processing/worker0/worker0_task_processor.log"'},
+        {'name': 'W1', 'url': 'http://10.0.0.101:8000', 'endpoint': '/tasks',
+         'log_cmd': 'ssh signal4@10.0.0.101 "tail -f /Users/signal4/logs/content_processing/worker1/worker1_task_processor.log"'},
+        {'name': 'W2', 'url': 'http://10.0.0.181:8000', 'endpoint': '/tasks',
+         'log_cmd': 'ssh signal4@10.0.0.181 "tail -f /Users/signal4/logs/content_processing/worker2/worker2_task_processor.log"'},
+        {'name': 'W3', 'url': 'http://10.0.0.159:8000', 'endpoint': '/tasks',
+         'log_cmd': 'ssh signal4@10.0.0.159 "tail -f /Users/signal4/logs/content_processing/worker3/worker3_task_processor.log"'},
+        {'name': 'W4', 'url': 'http://10.0.0.213:8000', 'endpoint': '/tasks',
+         'log_cmd': 'ssh signal4@10.0.0.213 "tail -f /Users/signal4/logs/content_processing/worker4/worker4_task_processor.log"'},
+        {'name': 'W5', 'url': 'http://10.0.0.209:8000', 'endpoint': '/tasks',
+         'log_cmd': 'ssh signal4@10.0.0.209 "tail -f /Users/signal4/logs/content_processing/worker5/worker5_task_processor.log"'},
+        {'name': 'W6', 'url': 'http://10.0.0.189:8000', 'endpoint': '/tasks',
+         'log_cmd': 'ssh signal4@10.0.0.189 "tail -f /Users/signal4/logs/content_processing/worker6/worker6_task_processor.log"'},
+    ],
+    'Scheduled': [
+        {'name': 'Podcast Index', 'task_id': 'podcast_index_download'},
+        {'name': 'YouTube Index', 'task_id': 'youtube_index_download'},
+        {'name': 'Embeddings', 'task_id': 'embedding_hydration'},
+        {'name': 'Speaker ID 1', 'task_id': 'speaker_id_phase1'},
+        {'name': 'Speaker ID 2', 'task_id': 'speaker_id_phase2'},
+        {'name': 'Podcast Charts', 'task_id': 'podcast_collection'},
+    ],
+}
+
+# Pipeline stage colors
 PIPELINE_COLORS = {
     'Pending Download': '#e74c3c',
     'Downloaded': '#95a5a6',
@@ -50,7 +107,7 @@ PIPELINE_COLORS = {
     'Skipped (Short)': '#7f8c8d',
 }
 
-# Task type colors (from worker_monitoring_v2)
+# Task type colors
 TASK_COLORS = {
     'download': '#1f77b4',
     'convert': '#ff7f0e',
@@ -74,21 +131,54 @@ def load_config() -> dict:
 
 
 # =============================================================================
-# API Functions (from orchestrator_monitoring.py)
+# API Functions
 # =============================================================================
 
-def fetch_api(endpoint: str) -> dict:
-    """Fetch data from orchestrator API with error handling"""
+def fetch_api(endpoint: str, base_url: str = None, timeout: int = 15) -> dict:
+    """Fetch data from API with error handling"""
+    url = base_url or ORCHESTRATOR_API_URL
     try:
-        response = requests.get(f"{ORCHESTRATOR_API_URL}{endpoint}", timeout=5)
+        response = requests.get(f"{url}{endpoint}", timeout=timeout)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.ConnectionError:
-        return {"error": "Connection refused - Orchestrator not running"}
+        return {"error": "Connection refused - Service not running"}
     except requests.exceptions.Timeout:
         return {"error": "Request timeout"}
     except Exception as e:
         return {"error": str(e)}
+
+
+def post_api(endpoint: str, data: dict = None, base_url: str = None) -> dict:
+    """POST to API with error handling"""
+    url = base_url or ORCHESTRATOR_API_URL
+    try:
+        response = requests.post(f"{url}{endpoint}", json=data or {}, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.ConnectionError:
+        return {"error": "Connection refused - Service not running"}
+    except requests.exceptions.Timeout:
+        return {"error": "Request timeout"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@st.cache_data(ttl=30)
+def check_service_health(url: str, endpoint: str = "/health") -> dict:
+    """Check if a service is healthy"""
+    try:
+        response = requests.get(f"{url}{endpoint}", timeout=3)
+        if response.status_code == 200:
+            return {"status": "running", "response": response.json() if response.text else {}}
+        else:
+            return {"status": "unhealthy", "code": response.status_code}
+    except requests.exceptions.ConnectionError:
+        return {"status": "stopped", "error": "Connection refused"}
+    except requests.exceptions.Timeout:
+        return {"status": "timeout", "error": "Request timeout"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 
 # =============================================================================
@@ -419,7 +509,6 @@ def get_global_content_status() -> dict:
 
                 total_content += project_total
 
-                # Calculate counts for each status
                 segment_embeddings = session.query(func.count()).filter(
                     *project_filters,
                     Content.is_embedded == True
@@ -562,7 +651,6 @@ def create_project_progress_bars(global_status: dict):
                     ))
                     x_offset += percentage
 
-            # Calculate overall progress
             total_progress = 0
             total_items = 0
             for status, progress_pct, color in pipeline_stages:
@@ -738,44 +826,333 @@ def display_worker_throughput_table(task_data):
 
 
 # =============================================================================
-# Render Functions
+# Helper Functions
 # =============================================================================
 
-def render_header():
-    """Render dashboard header with title and refresh controls"""
-    col1, col2, col3 = st.columns([2, 1, 1])
-
-    with col1:
-        st.title("System Monitoring Dashboard")
-
-    with col2:
-        st.caption(f"Last updated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
-
-    with col3:
-        if st.button("Refresh Now", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
+def format_duration(seconds: float) -> str:
+    """Format duration in seconds to human-readable string"""
+    if seconds is None:
+        return "N/A"
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    elif seconds < 3600:
+        minutes = seconds / 60
+        return f"{minutes:.1f}m"
+    else:
+        hours = seconds / 3600
+        return f"{hours:.1f}h"
 
 
-def render_system_health():
-    """Render system health overview section"""
+def format_time_until(target_time_str: str) -> str:
+    """Format time until a future datetime"""
+    if not target_time_str:
+        return "N/A"
+    try:
+        target = datetime.fromisoformat(target_time_str.replace('Z', '+00:00'))
+        now = datetime.now(timezone.utc)
+        delta = target - now
+
+        if delta.total_seconds() < 0:
+            return "overdue"
+
+        total_seconds = delta.total_seconds()
+        if total_seconds < 60:
+            return f"in {int(total_seconds)}s"
+        elif total_seconds < 3600:
+            return f"in {int(total_seconds / 60)}m"
+        elif total_seconds < 86400:
+            hours = total_seconds / 3600
+            return f"in {hours:.1f}h"
+        else:
+            days = total_seconds / 86400
+            return f"in {days:.1f}d"
+    except Exception:
+        return "N/A"
+
+
+def format_time_ago(timestamp_str: str) -> str:
+    """Format time since a past datetime"""
+    if not timestamp_str:
+        return "Never"
+    try:
+        ts = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        now = datetime.now(timezone.utc)
+        delta = now - ts
+
+        total_seconds = delta.total_seconds()
+        if total_seconds < 60:
+            return f"{int(total_seconds)}s ago"
+        elif total_seconds < 3600:
+            return f"{int(total_seconds / 60)}m ago"
+        elif total_seconds < 86400:
+            hours = total_seconds / 3600
+            return f"{hours:.1f}h ago"
+        else:
+            days = total_seconds / 86400
+            return f"{days:.1f}d ago"
+    except Exception:
+        return timestamp_str[:16] if timestamp_str else "N/A"
+
+
+def format_schedule_description(schedule_config: dict) -> str:
+    """Format schedule configuration to human-readable description"""
+    schedule_type = schedule_config.get('type', 'interval')
+
+    if schedule_type == 'time_of_day':
+        hours = schedule_config.get('hours', [0])
+        minutes = schedule_config.get('minutes', [0])
+        days_interval = schedule_config.get('days_interval', 1)
+
+        times = []
+        for h in hours:
+            for m in minutes:
+                times.append(f"{h:02d}:{m:02d}")
+
+        times_str = ', '.join(times)
+
+        if days_interval == 1:
+            return f"Daily at {times_str}"
+        else:
+            return f"Every {days_interval}d at {times_str}"
+
+    elif schedule_type == 'interval':
+        interval = schedule_config.get('interval_seconds', 3600)
+        if interval < 3600:
+            return f"Every {interval // 60}m"
+        else:
+            return f"Every {interval // 3600}h"
+
+    elif schedule_type == 'run_then_wait':
+        wait = schedule_config.get('wait_seconds', 3600)
+        if wait < 3600:
+            return f"Continuous (wait {wait // 60}m)"
+        else:
+            return f"Continuous (wait {wait // 3600}h)"
+
+    return schedule_type
+
+
+# =============================================================================
+# Quick Status Tab Render Functions
+# =============================================================================
+
+def check_service_health_fast(url: str, endpoint: str = "/health") -> dict:
+    """Check service health with short timeout - no caching"""
+    try:
+        response = requests.get(f"{url}{endpoint}", timeout=5.0)
+        if response.status_code == 200:
+            return {"status": "running"}
+        else:
+            return {"status": "unhealthy"}
+    except requests.exceptions.ConnectionError:
+        return {"status": "stopped"}
+    except requests.exceptions.Timeout:
+        return {"status": "timeout"}
+    except Exception:
+        return {"status": "unknown"}
+
+
+def get_status_grid_css() -> str:
+    """Return CSS for status grid"""
+    return """
+    <style>
+        .status-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            gap: 8px;
+        }
+        .status-row-label {
+            font-weight: 600;
+            font-size: 12px;
+            color: #666;
+            min-width: 80px;
+            text-align: right;
+        }
+        .status-row-items {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .status-box {
+            padding: 8px 14px;
+            border-radius: 6px;
+            text-align: center;
+            font-weight: 600;
+            font-size: 12px;
+            color: white;
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.1s;
+            user-select: none;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .status-box:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        }
+        .status-box:active {
+            transform: translateY(0);
+        }
+        .status-running { background-color: #2ecc71; }
+        .status-idle { background-color: #3498db; }
+        .status-stopped { background-color: #e74c3c; }
+        .status-timeout { background-color: #f39c12; }
+        .status-unhealthy { background-color: #e67e22; }
+        .status-unknown { background-color: #95a5a6; }
+        .status-checking { background-color: #bdc3c7; }
+        .status-disabled { background-color: #7f8c8d; }
+        .copy-toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #333;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 6px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 1000;
+            pointer-events: none;
+        }
+        .copy-toast.show {
+            opacity: 1;
+        }
+    </style>
+    <script>
+        function copyToClipboard(text, serviceName) {
+            var textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.select();
+            textarea.setSelectionRange(0, 99999);
+            try {
+                document.execCommand('copy');
+                var toast = document.getElementById('copy-toast');
+                toast.textContent = 'Copied: ' + serviceName;
+                toast.classList.add('show');
+                setTimeout(function() { toast.classList.remove('show'); }, 1500);
+            } catch (err) {
+                console.error('Copy failed', err);
+            }
+            document.body.removeChild(textarea);
+        }
+    </script>
+    """
+
+
+def build_status_row_html(label: str, services: list) -> str:
+    """Build HTML for a single row of status boxes"""
+    html = f'<div class="status-row"><div class="status-row-label">{label}</div><div class="status-row-items">'
+    for svc in services:
+        status_class = f"status-{svc.get('status', 'checking')}"
+        log_cmd = svc.get('log_cmd', '')
+        if log_cmd:
+            escaped_cmd = log_cmd.replace('\\', '\\\\').replace("'", "\\'").replace('"', '\\"')
+            onclick = f'''onclick="copyToClipboard('{escaped_cmd}', '{svc['name']}')"'''
+        else:
+            onclick = ''
+        html += f'<div class="status-box {status_class}" {onclick}>{svc["name"]}</div>'
+    html += '</div></div>'
+    return html
+
+
+def render_quick_status_tab():
+    """Render the Quick Status tab - color-coded grid organized by category"""
+
+    # Initialize status tracking for each group
+    group_statuses = {}
+    for group_name, services in QUICK_STATUS_GROUPS.items():
+        group_statuses[group_name] = [
+            {**svc, 'status': 'checking'}
+            for svc in services
+        ]
+
+    # Create placeholder for the grid
+    grid_placeholder = st.empty()
+
+    # Render CSS and initial checking state
+    def render_grid():
+        html = get_status_grid_css()
+        for group_name in ['Orchestrator', 'LLMs', 'Workers', 'Scheduled']:
+            if group_name in group_statuses:
+                html += build_status_row_html(group_name, group_statuses[group_name])
+        html += '<div id="copy-toast" class="copy-toast"></div>'
+        return html
+
+    grid_placeholder.markdown(render_grid(), unsafe_allow_html=True)
+
+    # Check services progressively (skip scheduled tasks - they use API)
+    for group_name in ['Orchestrator', 'LLMs', 'Workers']:
+        for i, svc in enumerate(group_statuses[group_name]):
+            if 'url' in svc:
+                result = check_service_health_fast(svc['url'], svc['endpoint'])
+                group_statuses[group_name][i]['status'] = result.get('status', 'unknown')
+                grid_placeholder.markdown(render_grid(), unsafe_allow_html=True)
+
+    # Check scheduled tasks via API
+    scheduled_tasks_data = fetch_api("/api/scheduled_tasks")
+    if "error" not in scheduled_tasks_data:
+        tasks = scheduled_tasks_data.get('tasks', {})
+        for i, svc in enumerate(group_statuses['Scheduled']):
+            task_id = svc.get('task_id')
+            if task_id and task_id in tasks:
+                task_info = tasks[task_id]
+                if task_info.get('is_running'):
+                    group_statuses['Scheduled'][i]['status'] = 'running'
+                elif not task_info.get('enabled'):
+                    group_statuses['Scheduled'][i]['status'] = 'disabled'
+                elif task_info.get('last_run', {}).get('result') == 'success':
+                    group_statuses['Scheduled'][i]['status'] = 'idle'
+                elif task_info.get('last_run', {}).get('result') in ['failed', 'error']:
+                    group_statuses['Scheduled'][i]['status'] = 'stopped'
+                else:
+                    group_statuses['Scheduled'][i]['status'] = 'unknown'
+            else:
+                group_statuses['Scheduled'][i]['status'] = 'unknown'
+    else:
+        for i in range(len(group_statuses['Scheduled'])):
+            group_statuses['Scheduled'][i]['status'] = 'unknown'
+
+    grid_placeholder.markdown(render_grid(), unsafe_allow_html=True)
+
+    # Summary counts (only for HTTP services)
+    all_http_services = []
+    for group_name in ['Orchestrator', 'LLMs', 'Workers']:
+        all_http_services.extend(group_statuses[group_name])
+
+    running = sum(1 for s in all_http_services if s['status'] == 'running')
+    stopped = sum(1 for s in all_http_services if s['status'] == 'stopped')
+
+    st.caption(f"Services: {running} running, {stopped} stopped | Click to copy log command")
+
+
+# =============================================================================
+# Services Tab Render Functions
+# =============================================================================
+
+def render_services_tab():
+    """Render the Services tab - system health and service status"""
+
+    # System Health Section
     st.subheader("System Health")
 
     health_data = fetch_api("/api/health")
     monitoring_stats = fetch_api("/api/monitoring/stats")
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
         if "error" in health_data:
             st.error("OFFLINE")
-            st.caption(health_data.get("error", "Unknown error"))
+            st.caption("Orchestrator")
         elif health_data.get('status') == 'healthy':
             st.success("HEALTHY")
-            st.caption("Orchestrator Status")
+            st.caption("Orchestrator")
         else:
             st.warning("DEGRADED")
-            st.caption("Orchestrator Status")
+            st.caption("Orchestrator")
 
     with col2:
         global_pause = monitoring_stats.get('global_pause', {})
@@ -790,212 +1167,462 @@ def render_system_health():
             st.caption("Task Assignment")
 
     with col3:
-        services = monitoring_stats.get('services', {})
-        if "error" in monitoring_stats:
-            st.warning("UNKNOWN")
-            st.caption("Services")
-        elif services:
-            service_statuses = []
-            for name, status in services.items():
-                if isinstance(status, dict):
-                    service_statuses.append(status.get('status', 'unknown'))
-
-            if all(s == 'running' for s in service_statuses):
-                st.success("ALL RUNNING")
-            else:
-                st.warning("ISSUES")
-            st.caption(f"{len(service_statuses)} Services")
+        # LLM Balancer status
+        balancer_health = check_service_health(LLM_BALANCER_URL)
+        if balancer_health.get('status') == 'running':
+            st.success("RUNNING")
+        elif balancer_health.get('status') == 'stopped':
+            st.error("STOPPED")
         else:
-            st.info("NO DATA")
-            st.caption("Services")
+            st.warning(balancer_health.get('status', 'UNKNOWN').upper())
+        st.caption("LLM Balancer")
 
-    with col4:
-        timestamp = health_data.get('timestamp', '')
-        if timestamp and "error" not in health_data:
-            st.metric("Uptime Check", timestamp[:19].replace('T', ' '))
+    st.divider()
+
+    # Core Infrastructure Services
+    st.subheader("Infrastructure Services")
+
+    services_data = []
+
+    # Orchestrator
+    services_data.append({
+        'Service': 'Orchestrator',
+        'Host': 'localhost',
+        'Port': '8001',
+        'Status': ':large_green_circle: Running' if 'error' not in health_data else ':red_circle: Stopped',
+    })
+
+    # LLM Balancer
+    balancer_status = ':large_green_circle: Running' if balancer_health.get('status') == 'running' else ':red_circle: Stopped'
+    services_data.append({
+        'Service': 'LLM Balancer',
+        'Host': 'localhost',
+        'Port': '8002',
+        'Status': balancer_status,
+    })
+
+    # Backend API
+    backend_health = check_service_health("http://localhost:7999")
+    backend_status = ':large_green_circle: Running' if backend_health.get('status') == 'running' else ':red_circle: Stopped'
+    services_data.append({
+        'Service': 'Backend API',
+        'Host': 'localhost',
+        'Port': '7999',
+        'Status': backend_status,
+    })
+
+    services_df = pd.DataFrame(services_data)
+    st.dataframe(services_df, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # Model Servers
+    st.subheader("Model Servers")
+
+    model_server_data = []
+    for name, config in MODEL_SERVERS.items():
+        url = f"http://{config['host']}:{config['port']}"
+        health = check_service_health(url)
+        status = ':large_green_circle: Running' if health.get('status') == 'running' else ':red_circle: Stopped'
+        model_server_data.append({
+            'Server': name,
+            'Host': config['host'],
+            'Port': str(config['port']),
+            'Tiers': ', '.join(config['tiers']),
+            'Status': status,
+        })
+
+    model_df = pd.DataFrame(model_server_data)
+    st.dataframe(model_df, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # Scheduled Services (Background Jobs)
+    st.subheader("Scheduled Services")
+
+    scheduled_tasks_data = fetch_api("/api/scheduled_tasks")
+
+    if "error" in scheduled_tasks_data:
+        st.warning(f"Unable to fetch scheduled tasks: {scheduled_tasks_data.get('error')}")
+    else:
+        tasks = scheduled_tasks_data.get('tasks', {})
+
+        if tasks:
+            service_rows = []
+            for task_id, task_info in sorted(tasks.items(), key=lambda x: x[1].get('name', x[0]) if x[1] else x[0]):
+                if not task_info:
+                    continue
+
+                last_run = task_info.get('last_run', {})
+                schedule = task_info.get('schedule', {})
+                schedule_config = schedule.get('config', {})
+
+                # Determine status
+                if task_info.get('is_running'):
+                    status = ':large_green_circle: Running'
+                elif not task_info.get('enabled'):
+                    status = ':white_circle: Disabled'
+                elif last_run.get('result') == 'success':
+                    status = ':white_check_mark: Idle'
+                elif last_run.get('result') in ['failed', 'error']:
+                    status = ':x: Failed'
+                else:
+                    status = ':hourglass: Pending'
+
+                # Format last run time
+                last_run_time = last_run.get('time')
+                last_run_display = format_time_ago(last_run_time) if last_run_time else "Never"
+
+                # Format next run
+                next_run = task_info.get('next_run_time')
+                if next_run and task_info.get('enabled'):
+                    next_run_display = format_time_until(next_run)
+                else:
+                    next_run_display = "N/A"
+
+                service_rows.append({
+                    'Service': task_info.get('name', task_id),
+                    'Schedule': format_schedule_description(schedule_config),
+                    'Status': status,
+                    'Last Run': last_run_display,
+                    'Next Run': next_run_display,
+                })
+
+            if service_rows:
+                services_df = pd.DataFrame(service_rows)
+                st.dataframe(services_df, use_container_width=True, hide_index=True)
         else:
-            st.caption("No uptime data")
+            st.info("No scheduled services configured")
 
+    st.divider()
 
-def render_worker_status():
-    """Render worker status grid with processor details"""
+    # Worker Status
     st.subheader("Worker Status")
 
     workers_data = fetch_api("/api/workers")
 
     if "error" in workers_data:
         st.warning(f"Unable to fetch worker data: {workers_data.get('error')}")
-        return
+    else:
+        workers = workers_data.get('workers', {})
 
-    workers = workers_data.get('workers', {})
-
-    if not workers:
-        st.info("No worker data available")
-        return
-
-    # Summary metrics
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Active Workers", workers_data.get('active_workers', 0))
-    with col2:
-        st.metric("Total Workers", workers_data.get('total_workers', 0))
-    with col3:
-        failed_count = sum(1 for w in workers.values() if w.get('status') == 'failed')
-        unhealthy_count = sum(1 for w in workers.values() if w.get('status') == 'unhealthy')
-        if failed_count > 0:
-            st.metric("Failed", failed_count, delta_color="inverse")
-        elif unhealthy_count > 0:
-            st.metric("Unhealthy", unhealthy_count, delta_color="inverse")
-        else:
-            st.metric("Issues", 0)
-    with col4:
-        # Count workers with running processors
-        processor_running = sum(
-            1 for w in workers.values()
-            if w.get('services', {}).get('task_processor', {}).get('status') == 'running'
-        )
-        st.metric("Processors Running", processor_running)
-
-    # Worker table with processor status
-    worker_rows = []
-    for worker_id, worker_info in sorted(workers.items()):
-        status = worker_info.get('status', 'unknown')
-
-        # Get processor status from services
-        services = worker_info.get('services', {})
-        processor_info = services.get('task_processor', {})
-        processor_status = processor_info.get('status', 'unknown')
-
-        # Determine status display
-        if status == 'active' and processor_status == 'running':
-            status_display = ":large_green_circle: Active"
-        elif status == 'active':
-            status_display = ":yellow_circle: Active (no proc)"
-        elif status == 'starting':
-            status_display = ":hourglass: Starting"
-        elif status == 'failed':
-            status_display = ":red_circle: Failed"
-        elif status == 'unhealthy':
-            status_display = ":orange_circle: Unhealthy"
-        else:
-            status_display = ":white_circle: Unknown"
-
-        # Processor status
-        if processor_status == 'running':
-            proc_display = f":white_check_mark: Port {processor_info.get('port', 8000)}"
-        elif processor_status == 'stopped':
-            proc_display = ":octagonal_sign: Stopped"
-        elif processor_status == 'starting':
-            proc_display = ":hourglass: Starting"
-        else:
-            proc_display = ":question: Unknown"
-
-        task_counts = worker_info.get('task_counts_by_type', {})
-        task_summary = ', '.join([f"{k}:{v}" for k, v in task_counts.items()]) if task_counts else '-'
-
-        # Format last heartbeat
-        last_heartbeat = worker_info.get('last_heartbeat')
-        if last_heartbeat:
-            try:
-                hb_dt = datetime.fromisoformat(last_heartbeat.replace('Z', '+00:00'))
-                age = (datetime.now(timezone.utc) - hb_dt).total_seconds()
-                if age < 60:
-                    hb_display = f"{int(age)}s ago"
-                elif age < 3600:
-                    hb_display = f"{int(age/60)}m ago"
-                else:
-                    hb_display = f"{age/3600:.1f}h ago"
-            except Exception:
-                hb_display = last_heartbeat[:19] if len(last_heartbeat) >= 19 else last_heartbeat
-        else:
-            hb_display = "Never"
-
-        worker_rows.append({
-            'Worker': worker_id,
-            'Status': status_display,
-            'Processor': proc_display,
-            'Tasks': f"{worker_info.get('active_tasks', 0)}/{worker_info.get('max_concurrent_tasks', 0)}",
-            'Running': task_summary[:30] + ('...' if len(task_summary) > 30 else ''),
-            'Heartbeat': hb_display
-        })
-
-    if worker_rows:
-        df = pd.DataFrame(worker_rows)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-
-    # Expandable details for each worker
-    with st.expander("Worker Details", expanded=False):
-        for worker_id, worker_info in sorted(workers.items()):
-            col1, col2 = st.columns([1, 3])
-
+        if workers:
+            # Summary metrics
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.markdown(f"**{worker_id}**")
-                status = worker_info.get('status', 'unknown')
-                if status == 'active':
-                    st.success("ACTIVE")
-                elif status == 'starting':
-                    st.info("STARTING")
-                elif status == 'failed':
-                    st.error("FAILED")
-                elif status == 'unhealthy':
-                    st.warning("UNHEALTHY")
-                else:
-                    st.info("UNKNOWN")
-
+                st.metric("Active Workers", workers_data.get('active_workers', 0))
             with col2:
-                # Task types
-                task_types = worker_info.get('task_types', [])
-                if task_types:
-                    st.caption(f"Task types: {', '.join(task_types)}")
+                st.metric("Total Workers", workers_data.get('total_workers', 0))
+            with col3:
+                failed_count = sum(1 for w in workers.values() if w.get('status') == 'failed')
+                unhealthy_count = sum(1 for w in workers.values() if w.get('status') == 'unhealthy')
+                if failed_count > 0:
+                    st.metric("Failed", failed_count, delta_color="inverse")
+                elif unhealthy_count > 0:
+                    st.metric("Unhealthy", unhealthy_count, delta_color="inverse")
+                else:
+                    st.metric("Issues", 0)
+            with col4:
+                processor_running = sum(
+                    1 for w in workers.values()
+                    if w.get('services', {}).get('task_processor', {}).get('status') == 'running'
+                )
+                st.metric("Processors Running", processor_running)
 
-                detail_cols = st.columns(4)
+            # Worker table
+            worker_rows = []
+            for worker_id, worker_info in sorted(workers.items()):
+                status = worker_info.get('status', 'unknown')
+                services = worker_info.get('services', {})
+                processor_info = services.get('task_processor', {})
+                processor_status = processor_info.get('status', 'unknown')
 
-                with detail_cols[0]:
-                    st.markdown("**Active Tasks**")
-                    st.text(f"{worker_info.get('active_tasks', 0)}/{worker_info.get('max_concurrent_tasks', 0)}")
+                if status == 'active' and processor_status == 'running':
+                    status_display = ":large_green_circle: Active"
+                elif status == 'active':
+                    status_display = ":yellow_circle: Active (no proc)"
+                elif status == 'starting':
+                    status_display = ":hourglass: Starting"
+                elif status == 'failed':
+                    status_display = ":red_circle: Failed"
+                elif status == 'unhealthy':
+                    status_display = ":orange_circle: Unhealthy"
+                else:
+                    status_display = ":white_circle: Unknown"
 
-                with detail_cols[1]:
-                    st.markdown("**Processor**")
-                    services = worker_info.get('services', {})
-                    proc = services.get('task_processor', {})
-                    proc_status = proc.get('status', 'unknown')
-                    st.text(f"{proc_status} (:{proc.get('port', 8000)})")
+                if processor_status == 'running':
+                    proc_display = f":white_check_mark: Port {processor_info.get('port', 8000)}"
+                elif processor_status == 'stopped':
+                    proc_display = ":octagonal_sign: Stopped"
+                elif processor_status == 'starting':
+                    proc_display = ":hourglass: Starting"
+                else:
+                    proc_display = ":question: Unknown"
 
-                with detail_cols[2]:
-                    st.markdown("**Model Server**")
-                    model_srv = services.get('model_server', {})
-                    if model_srv:
-                        models = model_srv.get('models', [])
-                        st.text(f"{model_srv.get('status', 'N/A')} ({len(models)} models)")
-                    else:
-                        st.text("Not configured")
+                task_counts = worker_info.get('task_counts_by_type', {})
+                task_summary = ', '.join([f"{k}:{v}" for k, v in task_counts.items()]) if task_counts else '-'
 
-                with detail_cols[3]:
-                    st.markdown("**Network**")
-                    network = worker_info.get('network_monitoring', {})
-                    if network:
-                        st.text(f"Latency: {network.get('avg_latency_ms', 'N/A')}ms")
-                    else:
-                        st.text("N/A")
+                last_heartbeat = worker_info.get('last_heartbeat')
+                hb_display = format_time_ago(last_heartbeat) if last_heartbeat else "Never"
 
-                # Show failure info if any
-                failure_info = worker_info.get('failure_info', {})
-                if failure_info:
-                    failures = [f"{k}: {v.get('count', 0)}" for k, v in failure_info.items() if v.get('count', 0) > 0]
-                    if failures:
-                        st.caption(f":warning: Failures: {', '.join(failures)}")
+                worker_rows.append({
+                    'Worker': worker_id,
+                    'Status': status_display,
+                    'Processor': proc_display,
+                    'Tasks': f"{worker_info.get('active_tasks', 0)}/{worker_info.get('max_concurrent_tasks', 0)}",
+                    'Running': task_summary[:30] + ('...' if len(task_summary) > 30 else ''),
+                    'Heartbeat': hb_display
+                })
+
+            if worker_rows:
+                df = pd.DataFrame(worker_rows)
+                st.dataframe(df, use_container_width=True, hide_index=True)
+
+            # Expandable details
+            with st.expander("Worker Details", expanded=False):
+                for worker_id, worker_info in sorted(workers.items()):
+                    col1, col2 = st.columns([1, 3])
+
+                    with col1:
+                        st.markdown(f"**{worker_id}**")
+                        status = worker_info.get('status', 'unknown')
+                        if status == 'active':
+                            st.success("ACTIVE")
+                        elif status == 'starting':
+                            st.info("STARTING")
+                        elif status == 'failed':
+                            st.error("FAILED")
+                        elif status == 'unhealthy':
+                            st.warning("UNHEALTHY")
+                        else:
+                            st.info("UNKNOWN")
+
+                    with col2:
+                        task_types = worker_info.get('task_types', [])
+                        if task_types:
+                            st.caption(f"Task types: {', '.join(task_types)}")
+
+                        detail_cols = st.columns(4)
+
+                        with detail_cols[0]:
+                            st.markdown("**Active Tasks**")
+                            st.text(f"{worker_info.get('active_tasks', 0)}/{worker_info.get('max_concurrent_tasks', 0)}")
+
+                        with detail_cols[1]:
+                            st.markdown("**Processor**")
+                            services = worker_info.get('services', {})
+                            proc = services.get('task_processor', {})
+                            proc_status = proc.get('status', 'unknown')
+                            st.text(f"{proc_status} (:{proc.get('port', 8000)})")
+
+                        with detail_cols[2]:
+                            st.markdown("**Model Server**")
+                            model_srv = services.get('model_server', {})
+                            if model_srv:
+                                models = model_srv.get('models', [])
+                                st.text(f"{model_srv.get('status', 'N/A')} ({len(models)} models)")
+                            else:
+                                st.text("Not configured")
+
+                        with detail_cols[3]:
+                            st.markdown("**Network**")
+                            network = worker_info.get('network_monitoring', {})
+                            if network:
+                                st.text(f"Latency: {network.get('avg_latency_ms', 'N/A')}ms")
+                            else:
+                                st.text("N/A")
+
+                        failure_info = worker_info.get('failure_info', {})
+                        if failure_info:
+                            failures = [f"{k}: {v.get('count', 0)}" for k, v in failure_info.items() if v.get('count', 0) > 0]
+                            if failures:
+                                st.caption(f":warning: Failures: {', '.join(failures)}")
+
+                    st.markdown("---")
+        else:
+            st.info("No worker data available")
+
+
+# =============================================================================
+# Tasks Tab Render Functions
+# =============================================================================
+
+def render_tasks_tab():
+    """Render the Tasks tab - scheduled tasks and task queue"""
+
+    # Scheduled Tasks Section
+    st.subheader("Scheduled Tasks")
+
+    scheduled_tasks_data = fetch_api("/api/scheduled_tasks")
+
+    if "error" in scheduled_tasks_data:
+        st.warning(f"Unable to fetch scheduled tasks: {scheduled_tasks_data.get('error')}")
+    else:
+        tasks = scheduled_tasks_data.get('tasks', {})
+
+        if tasks:
+            # Summary metrics
+            total_tasks = len(tasks)
+            enabled_tasks = sum(1 for t in tasks.values() if t and t.get('enabled', False))
+            running_tasks = sum(1 for t in tasks.values() if t and t.get('is_running', False))
+
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Tasks", total_tasks)
+            with col2:
+                st.metric("Enabled", enabled_tasks)
+            with col3:
+                st.metric("Running", running_tasks)
+            with col4:
+                failed_recently = sum(
+                    1 for t in tasks.values()
+                    if t and t.get('last_run', {}).get('result') in ['failed', 'error']
+                )
+                if failed_recently > 0:
+                    st.metric("Recent Failures", failed_recently, delta_color="inverse")
+                else:
+                    st.metric("Recent Failures", 0)
 
             st.markdown("---")
 
+            # Task table with trigger buttons
+            for task_id, task_info in sorted(tasks.items(), key=lambda x: x[1].get('name', x[0]) if x[1] else x[0]):
+                if not task_info:
+                    continue
 
-def render_task_queue_overview():
-    """Render task queue overview section"""
+                last_run = task_info.get('last_run', {})
+                schedule = task_info.get('schedule', {})
+                schedule_config = schedule.get('config', {})
+
+                # Determine status icon
+                if task_info.get('is_running'):
+                    status_icon = ":large_green_circle:"
+                    status_text = "Running"
+                elif not task_info.get('enabled'):
+                    status_icon = ":white_circle:"
+                    status_text = "Disabled"
+                elif last_run.get('result') == 'success':
+                    status_icon = ":white_check_mark:"
+                    status_text = "Success"
+                elif last_run.get('result') in ['failed', 'error']:
+                    status_icon = ":x:"
+                    status_text = "Failed"
+                else:
+                    status_icon = ":hourglass:"
+                    status_text = "Pending"
+
+                col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 2, 1])
+
+                with col1:
+                    st.markdown(f"{status_icon} **{task_info.get('name', task_id)}**")
+
+                with col2:
+                    st.caption(f"Schedule: {format_schedule_description(schedule_config)}")
+
+                with col3:
+                    last_run_time = last_run.get('time')
+                    st.caption(f"Last: {format_time_ago(last_run_time)}")
+
+                with col4:
+                    next_run = task_info.get('next_run_time')
+                    if next_run and task_info.get('enabled'):
+                        st.caption(f"Next: {format_time_until(next_run)}")
+                    else:
+                        st.caption("Next: N/A")
+
+                with col5:
+                    # Trigger button
+                    if task_info.get('enabled') and not task_info.get('is_running'):
+                        if st.button("Run", key=f"trigger_{task_id}", use_container_width=True):
+                            result = post_api(f"/api/scheduled_tasks/{task_id}/trigger")
+                            if "error" in result:
+                                st.error(f"Failed: {result.get('error')}")
+                            else:
+                                st.success("Triggered!")
+                                st.rerun()
+                    elif task_info.get('is_running'):
+                        st.caption("Running...")
+                    else:
+                        st.caption("Disabled")
+
+            # Expandable details
+            with st.expander("Task Details", expanded=False):
+                for task_id, task_info in sorted(tasks.items(), key=lambda x: x[1].get('name', x[0]) if x[1] else x[0]):
+                    if not task_info:
+                        continue
+
+                    last_run = task_info.get('last_run', {})
+                    schedule = task_info.get('schedule', {})
+                    executor = task_info.get('executor', {})
+
+                    col1, col2 = st.columns([1, 3])
+
+                    with col1:
+                        st.markdown(f"**{task_info.get('name', task_id)}**")
+                        if task_info.get('is_running'):
+                            st.success("RUNNING")
+                        elif not task_info.get('enabled'):
+                            st.warning("DISABLED")
+                        elif last_run.get('result') == 'success':
+                            st.info("IDLE")
+                        elif last_run.get('result') in ['failed', 'error']:
+                            st.error("FAILED")
+                        else:
+                            st.info("PENDING")
+
+                    with col2:
+                        st.caption(task_info.get('description', ''))
+
+                        detail_cols = st.columns(4)
+                        with detail_cols[0]:
+                            st.markdown("**Schedule**")
+                            st.text(format_schedule_description(schedule.get('config', {})))
+
+                        with detail_cols[1]:
+                            st.markdown("**Last Run**")
+                            last_time = last_run.get('time')
+                            if last_time:
+                                try:
+                                    last_dt = datetime.fromisoformat(last_time.replace('Z', '+00:00'))
+                                    st.text(last_dt.strftime('%Y-%m-%d %H:%M'))
+                                except Exception:
+                                    st.text(last_time[:16] if last_time else "Never")
+                            else:
+                                st.text("Never")
+
+                        with detail_cols[2]:
+                            st.markdown("**Duration**")
+                            st.text(format_duration(last_run.get('duration_seconds')))
+
+                        with detail_cols[3]:
+                            st.markdown("**Next Run**")
+                            next_run = task_info.get('next_run_time')
+                            if next_run and task_info.get('enabled'):
+                                st.text(format_time_until(next_run))
+                            else:
+                                st.text("N/A")
+
+                        executor_type = executor.get('type', 'cli')
+                        if executor_type == 'cli':
+                            cmd = executor.get('command', '')
+                            args = executor.get('args', [])
+                            st.caption(f"Executor: `{cmd} {' '.join(args)}`")
+                        elif executor_type == 'sql':
+                            func = executor.get('function', '')
+                            st.caption(f"Executor: SQL function `{func}()`")
+
+                    st.markdown("---")
+        else:
+            st.info("No scheduled tasks configured")
+
+    st.divider()
+
+    # Task Queue Section
     st.subheader("Task Queue Overview")
 
     task_stats = get_task_stats()
     recent_throughput = get_recent_throughput(minutes=60)
 
-    # Summary metrics
     total_pending = sum(stats.get('pending', {}).get('count', 0) for stats in task_stats.values())
     total_processing = sum(stats.get('processing', {}).get('count', 0) for stats in task_stats.values())
     total_completed = sum(stats.get('completed', {}).get('count', 0) for stats in task_stats.values())
@@ -1011,7 +1638,7 @@ def render_task_queue_overview():
     with col4:
         st.metric("Failed", f"{total_failed:,}")
 
-    # Detailed breakdown by task type
+    # Detailed breakdown
     task_queue_data = []
     default_stat = {'count': 0, 'hours': 0.0}
 
@@ -1039,9 +1666,35 @@ def render_task_queue_overview():
         task_df = pd.DataFrame(task_queue_data)
         st.dataframe(task_df, hide_index=True, use_container_width=True)
 
+    st.divider()
 
-def render_project_progress():
-    """Render project pipeline progress section"""
+    # Throughput Chart
+    st.subheader("Content Throughput (Last 24 Hours)")
+
+    now = datetime.now(timezone.utc)
+    start_dt = now - timedelta(hours=24)
+    end_dt = now
+
+    task_data = get_completed_tasks_with_duration(start_date=start_dt, end_date=end_dt)
+
+    if task_data:
+        fig = plot_throughput_over_time(task_data, 'hour')
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Not enough data to display throughput chart")
+    else:
+        st.info("No throughput data available for the last 24 hours")
+
+
+# =============================================================================
+# Projects Tab Render Functions
+# =============================================================================
+
+def render_projects_tab():
+    """Render the Projects tab - pipeline progress and project status"""
+
+    # Project Progress Section
     st.subheader("Project Pipeline Progress")
 
     global_status = get_global_content_status()
@@ -1092,288 +1745,16 @@ def render_project_progress():
         unsafe_allow_html=True
     )
 
+    st.divider()
 
-def render_throughput_charts(task_data, time_interval):
-    """Render throughput charts section"""
-    st.subheader("Content Throughput")
+    # Pipeline Progress Details
+    st.subheader("Pipeline Progress Details")
 
-    if not task_data:
-        st.info("No throughput data available for the selected period")
-        return
+    progress = get_pipeline_progress_from_db()
 
-    fig = plot_throughput_over_time(task_data, time_interval)
-    if fig:
-        st.plotly_chart(fig, use_container_width=True)
+    if not progress or 'error' in progress:
+        st.warning(f"No progress data available: {progress.get('error', 'Unknown error')}")
     else:
-        st.info("Not enough data to display throughput chart")
-
-
-def format_duration(seconds: float) -> str:
-    """Format duration in seconds to human-readable string"""
-    if seconds is None:
-        return "N/A"
-    if seconds < 60:
-        return f"{seconds:.0f}s"
-    elif seconds < 3600:
-        minutes = seconds / 60
-        return f"{minutes:.1f}m"
-    else:
-        hours = seconds / 3600
-        return f"{hours:.1f}h"
-
-
-def format_time_until(target_time_str: str) -> str:
-    """Format time until a future datetime"""
-    if not target_time_str:
-        return "N/A"
-    try:
-        target = datetime.fromisoformat(target_time_str.replace('Z', '+00:00'))
-        now = datetime.now(timezone.utc)
-        delta = target - now
-
-        if delta.total_seconds() < 0:
-            return "overdue"
-
-        total_seconds = delta.total_seconds()
-        if total_seconds < 60:
-            return f"in {int(total_seconds)}s"
-        elif total_seconds < 3600:
-            return f"in {int(total_seconds / 60)}m"
-        elif total_seconds < 86400:
-            hours = total_seconds / 3600
-            return f"in {hours:.1f}h"
-        else:
-            days = total_seconds / 86400
-            return f"in {days:.1f}d"
-    except Exception:
-        return "N/A"
-
-
-def format_schedule_description(schedule_config: dict) -> str:
-    """Format schedule configuration to human-readable description"""
-    schedule_type = schedule_config.get('type', 'interval')
-
-    if schedule_type == 'time_of_day':
-        hours = schedule_config.get('hours', [0])
-        minutes = schedule_config.get('minutes', [0])
-        days_interval = schedule_config.get('days_interval', 1)
-
-        times = []
-        for h in hours:
-            for m in minutes:
-                times.append(f"{h:02d}:{m:02d}")
-
-        times_str = ', '.join(times)
-
-        if days_interval == 1:
-            return f"Daily at {times_str}"
-        else:
-            return f"Every {days_interval}d at {times_str}"
-
-    elif schedule_type == 'interval':
-        interval = schedule_config.get('interval_seconds', 3600)
-        if interval < 3600:
-            return f"Every {interval // 60}m"
-        else:
-            return f"Every {interval // 3600}h"
-
-    elif schedule_type == 'run_then_wait':
-        wait = schedule_config.get('wait_seconds', 3600)
-        if wait < 3600:
-            return f"Continuous (wait {wait // 60}m)"
-        else:
-            return f"Continuous (wait {wait // 3600}h)"
-
-    return schedule_type
-
-
-def render_scheduled_tasks():
-    """Render comprehensive scheduled tasks monitoring section"""
-    st.subheader("Scheduled Tasks")
-
-    scheduled_tasks_data = fetch_api("/api/scheduled_tasks")
-
-    if "error" in scheduled_tasks_data:
-        st.warning(f"Unable to fetch scheduled tasks: {scheduled_tasks_data.get('error')}")
-        return
-
-    tasks = scheduled_tasks_data.get('tasks', {})
-    if not tasks:
-        st.info("No scheduled tasks configured")
-        return
-
-    # Summary metrics
-    total_tasks = len(tasks)
-    enabled_tasks = sum(1 for t in tasks.values() if t and t.get('enabled', False))
-    running_tasks = sum(1 for t in tasks.values() if t and t.get('is_running', False))
-
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Total Tasks", total_tasks)
-    with col2:
-        st.metric("Enabled", enabled_tasks)
-    with col3:
-        if running_tasks > 0:
-            st.metric("Running", running_tasks)
-        else:
-            st.metric("Running", 0)
-    with col4:
-        # Count tasks with recent failures
-        failed_recently = sum(
-            1 for t in tasks.values()
-            if t and t.get('last_run', {}).get('result') in ['failed', 'error']
-        )
-        if failed_recently > 0:
-            st.metric("Recent Failures", failed_recently, delta_color="inverse")
-        else:
-            st.metric("Recent Failures", 0)
-
-    # Detailed task table
-    st.markdown("---")
-
-    task_rows = []
-    for task_id, task_info in sorted(tasks.items(), key=lambda x: x[1].get('name', x[0]) if x[1] else x[0]):
-        if not task_info:
-            continue
-
-        last_run = task_info.get('last_run', {})
-        schedule = task_info.get('schedule', {})
-        schedule_config = schedule.get('config', {})
-
-        # Determine status
-        if task_info.get('is_running'):
-            status = "Running"
-            status_icon = ":large_green_circle:"
-        elif not task_info.get('enabled'):
-            status = "Disabled"
-            status_icon = ":white_circle:"
-        elif last_run.get('result') == 'success':
-            status = "Success"
-            status_icon = ":white_check_mark:"
-        elif last_run.get('result') in ['failed', 'error']:
-            status = "Failed"
-            status_icon = ":x:"
-        else:
-            status = "Pending"
-            status_icon = ":hourglass:"
-
-        # Format last run time
-        last_run_time = last_run.get('time')
-        if last_run_time:
-            try:
-                last_dt = datetime.fromisoformat(last_run_time.replace('Z', '+00:00'))
-                last_run_display = last_dt.strftime('%Y-%m-%d %H:%M')
-            except Exception:
-                last_run_display = last_run_time[:16] if len(last_run_time) >= 16 else last_run_time
-        else:
-            last_run_display = "Never"
-
-        # Format next run
-        next_run = task_info.get('next_run_time')
-        if next_run and task_info.get('enabled'):
-            next_run_display = format_time_until(next_run)
-        else:
-            next_run_display = "N/A" if not task_info.get('enabled') else "Pending"
-
-        task_rows.append({
-            'Status': f"{status_icon} {status}",
-            'Task': task_info.get('name', task_id),
-            'Schedule': format_schedule_description(schedule_config),
-            'Last Run': last_run_display,
-            'Duration': format_duration(last_run.get('duration_seconds')),
-            'Next Run': next_run_display,
-        })
-
-    if task_rows:
-        df = pd.DataFrame(task_rows)
-        st.dataframe(df, hide_index=True, use_container_width=True)
-
-    # Expandable details for each task
-    with st.expander("Task Details", expanded=False):
-        for task_id, task_info in sorted(tasks.items(), key=lambda x: x[1].get('name', x[0]) if x[1] else x[0]):
-            if not task_info:
-                continue
-
-            last_run = task_info.get('last_run', {})
-            schedule = task_info.get('schedule', {})
-            executor = task_info.get('executor', {})
-
-            col1, col2 = st.columns([1, 3])
-
-            with col1:
-                st.markdown(f"**{task_info.get('name', task_id)}**")
-                if task_info.get('is_running'):
-                    st.success("RUNNING")
-                elif not task_info.get('enabled'):
-                    st.warning("DISABLED")
-                elif last_run.get('result') == 'success':
-                    st.info("IDLE")
-                elif last_run.get('result') in ['failed', 'error']:
-                    st.error("FAILED")
-                else:
-                    st.info("PENDING")
-
-            with col2:
-                st.caption(task_info.get('description', ''))
-
-                detail_cols = st.columns(4)
-                with detail_cols[0]:
-                    st.markdown("**Schedule**")
-                    st.text(format_schedule_description(schedule.get('config', {})))
-
-                with detail_cols[1]:
-                    st.markdown("**Last Run**")
-                    last_time = last_run.get('time')
-                    if last_time:
-                        try:
-                            last_dt = datetime.fromisoformat(last_time.replace('Z', '+00:00'))
-                            st.text(last_dt.strftime('%Y-%m-%d %H:%M'))
-                        except Exception:
-                            st.text(last_time[:16] if last_time else "Never")
-                    else:
-                        st.text("Never")
-
-                with detail_cols[2]:
-                    st.markdown("**Duration**")
-                    st.text(format_duration(last_run.get('duration_seconds')))
-
-                with detail_cols[3]:
-                    st.markdown("**Next Run**")
-                    next_run = task_info.get('next_run_time')
-                    if next_run and task_info.get('enabled'):
-                        st.text(format_time_until(next_run))
-                    else:
-                        st.text("N/A")
-
-                # Show executor info
-                executor_type = executor.get('type', 'cli')
-                if executor_type == 'cli':
-                    cmd = executor.get('command', '')
-                    args = executor.get('args', [])
-                    st.caption(f"Executor: `{cmd} {' '.join(args)}`")
-                elif executor_type == 'sql':
-                    func = executor.get('function', '')
-                    st.caption(f"Executor: SQL function `{func}()`")
-
-            st.markdown("---")
-
-
-def render_automation_services():
-    """Render automation services status section (legacy summary view)"""
-    # This section is now replaced by render_scheduled_tasks()
-    # Keeping for backward compatibility but can be removed
-    pass
-
-
-def render_pipeline_progress():
-    """Render embedding and speaker identification progress"""
-    with st.expander("Pipeline Progress Details", expanded=False):
-        progress = get_pipeline_progress_from_db()
-
-        if not progress or 'error' in progress:
-            st.warning(f"No progress data available: {progress.get('error', 'Unknown error')}")
-            return
-
         col1, col2, col3 = st.columns(3)
 
         with col1:
@@ -1433,111 +1814,47 @@ def render_pipeline_progress():
             st.metric("Stitched", f"{content.get('stitched', 0):,}")
             st.metric("Needs Embedding", f"{content.get('needs_embedding', 0):,}")
 
+    st.divider()
 
-def render_worker_throughput_details(task_data):
-    """Render detailed worker throughput in an expander"""
-    with st.expander("Worker Throughput Details", expanded=False):
-        if not task_data:
-            st.info("No worker throughput data available")
-            return
+    # Worker Throughput Details
+    st.subheader("Worker Throughput (Last 24 Hours)")
 
+    now = datetime.now(timezone.utc)
+    start_dt = now - timedelta(hours=24)
+    end_dt = now
+
+    task_data = get_completed_tasks_with_duration(start_date=start_dt, end_date=end_dt)
+
+    if task_data:
         throughput_df = display_worker_throughput_table(task_data)
         if throughput_df is not None:
             st.dataframe(throughput_df, hide_index=True, use_container_width=True)
         else:
             st.info("No throughput data with duration information available")
+    else:
+        st.info("No worker throughput data available")
 
 
-def render_sidebar():
-    """Render sidebar with filters and controls"""
-    with st.sidebar:
-        st.header("Filters & Controls")
+# =============================================================================
+# Sidebar & Header
+# =============================================================================
 
-        # Auto-refresh toggle
-        auto_refresh = st.toggle("Auto-refresh", value=True)
-        refresh_interval = st.slider("Refresh interval (seconds)", 30, 300, DEFAULT_REFRESH_INTERVAL, 30)
+def render_header():
+    """Render dashboard header with title and refresh controls"""
+    col1, col2, col3 = st.columns([2, 1, 1])
 
-        st.divider()
+    with col1:
+        st.title("System Monitoring Dashboard")
 
-        # Quick date presets
-        st.subheader("Date Range")
+    with col2:
+        st.caption(f"Last updated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
 
-        if "filter_start_date" not in st.session_state:
-            st.session_state["filter_start_date"] = (datetime.now(timezone.utc) - timedelta(hours=24)).date()
-        if "filter_end_date" not in st.session_state:
-            st.session_state["filter_end_date"] = datetime.now(timezone.utc).date()
-
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Today", use_container_width=True):
-                st.session_state["filter_start_date"] = datetime.now(timezone.utc).date()
-                st.session_state["filter_end_date"] = datetime.now(timezone.utc).date()
-                st.rerun()
-        with col2:
-            if st.button("24h", use_container_width=True):
-                st.session_state["filter_start_date"] = (datetime.now(timezone.utc) - timedelta(days=1)).date()
-                st.session_state["filter_end_date"] = datetime.now(timezone.utc).date()
-                st.rerun()
-
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("7 days", use_container_width=True):
-                st.session_state["filter_start_date"] = (datetime.now(timezone.utc) - timedelta(days=7)).date()
-                st.session_state["filter_end_date"] = datetime.now(timezone.utc).date()
-                st.rerun()
-        with col2:
-            if st.button("30 days", use_container_width=True):
-                st.session_state["filter_start_date"] = (datetime.now(timezone.utc) - timedelta(days=30)).date()
-                st.session_state["filter_end_date"] = datetime.now(timezone.utc).date()
-                st.rerun()
-
-        start_date = st.date_input("Start", value=st.session_state["filter_start_date"])
-        end_date = st.date_input("End", value=st.session_state["filter_end_date"])
-
-        st.session_state["filter_start_date"] = start_date
-        st.session_state["filter_end_date"] = end_date
-
-        st.divider()
-
-        # Project filter
-        st.subheader("Project Filter")
-        config = load_config()
-        active_projects = [p for p, s in config.get('active_projects', {}).items() if s.get('enabled', False)]
-
-        selected_projects = st.multiselect(
-            "Projects",
-            active_projects,
-            default=active_projects,
-            help="Filter project progress view"
-        )
-
-        st.divider()
-
-        # Time interval for charts
-        st.subheader("Chart Settings")
-        time_interval = st.radio(
-            "Throughput interval",
-            ["Hour", "Day"],
-            horizontal=True,
-            index=0
-        )
-
-        st.divider()
-
-        # Clear cache button
-        if st.button("Clear Cache", use_container_width=True):
+    with col3:
+        if st.button("Refresh Now", use_container_width=True):
             st.cache_data.clear()
-            st.success("Cache cleared!")
             st.rerun()
 
-        return {
-            'auto_refresh': auto_refresh,
-            'refresh_interval': refresh_interval,
-            'start_date': start_date,
-            'end_date': end_date,
-            'selected_projects': selected_projects,
-            'time_interval': time_interval.lower()
-        }
+
 
 
 # =============================================================================
@@ -1549,10 +1866,10 @@ def main():
         page_title="System Monitoring Dashboard",
         page_icon=":",
         layout="wide",
-        initial_sidebar_state="expanded"
+        initial_sidebar_state="collapsed"
     )
 
-    # Custom CSS for cleaner appearance
+    # Custom CSS
     st.markdown("""
     <style>
         .stMetric {
@@ -1564,64 +1881,36 @@ def main():
             font-size: 1rem;
             font-weight: 600;
         }
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 24px;
+        }
+        .stTabs [data-baseweb="tab"] {
+            height: 50px;
+            padding-left: 20px;
+            padding-right: 20px;
+        }
     </style>
     """, unsafe_allow_html=True)
-
-    # Render sidebar and get settings
-    settings = render_sidebar()
 
     # Header
     render_header()
 
     st.divider()
 
-    # System Health Summary
-    render_system_health()
+    # Create tabs
+    tab1, tab2, tab3, tab4 = st.tabs(["Quick Status", "Services", "Tasks", "Projects"])
 
-    st.divider()
+    with tab1:
+        render_quick_status_tab()
 
-    # Worker Status Grid
-    render_worker_status()
+    with tab2:
+        render_services_tab()
 
-    st.divider()
+    with tab3:
+        render_tasks_tab()
 
-    # Task Queue Overview
-    render_task_queue_overview()
-
-    st.divider()
-
-    # Project Progress
-    render_project_progress()
-
-    st.divider()
-
-    # Throughput Charts
-    now = datetime.now(timezone.utc)
-    start_dt = datetime.combine(settings['start_date'], datetime.min.time()).replace(tzinfo=timezone.utc)
-    end_dt = datetime.combine(settings['end_date'], datetime.max.time()).replace(tzinfo=timezone.utc)
-
-    task_data = get_completed_tasks_with_duration(
-        start_date=start_dt,
-        end_date=end_dt
-    )
-
-    render_throughput_charts(task_data, settings['time_interval'])
-
-    st.divider()
-
-    # Scheduled Tasks Status (replaces legacy automation services)
-    render_scheduled_tasks()
-
-    # Expandable detailed sections
-    st.divider()
-
-    render_pipeline_progress()
-    render_worker_throughput_details(task_data)
-
-    # Auto-refresh
-    if settings['auto_refresh']:
-        time.sleep(settings['refresh_interval'])
-        st.rerun()
+    with tab4:
+        render_projects_tab()
 
 
 if __name__ == "__main__":

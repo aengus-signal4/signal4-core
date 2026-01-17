@@ -64,7 +64,7 @@ class CodeDeploymentManager:
         try:
             enabled_workers = {
                 wid: worker for wid, worker in worker_pool.workers.items()
-                if worker.eth_ip != '10.0.0.4'  # Skip head node (already has latest code)
+                if worker.status != 'disabled' and worker.eth_ip != '10.0.0.4'  # Skip disabled workers and head node
             }
 
             if not enabled_workers:
@@ -195,18 +195,25 @@ class CodeDeploymentManager:
                 steps_completed.append('uv_sync')
                 output_lines.append(f"UV sync: Dependencies synced successfully")
 
-                # Step 6: Restart services if requested
+                # Step 6: Always restart processor to pick up new code
+                # Stop existing processor
+                await conn.run('pkill -f "processor.py" || true')
+                steps_completed.append('stop_processor')
+
+                # Give process time to stop
+                await asyncio.sleep(2)
+
+                # Start processor in background
+                # Use nohup to detach from SSH session
+                start_cmd = f'cd {self.project_path} && nohup /Users/signal4/.local/bin/uv run python src/workers/processor.py > /tmp/processor.log 2>&1 &'
+                await conn.run(start_cmd)
+                steps_completed.append('start_processor')
+                output_lines.append("Processor restarted")
+
+                # Optionally restart model server if requested
                 if force_restart:
-                    # Stop existing services
-                    await conn.run('pkill -f "uvicorn.*processor" || true')
                     await conn.run('pkill -f "mlx_server" || true')
-                    steps_completed.append('stop_services')
-
-                    # Give services time to stop
-                    await asyncio.sleep(2)
-
-                    # Services will be restarted by orchestrator worker management
-                    steps_completed.append('restart_services')
+                    steps_completed.append('stop_model_server')
 
             duration = (datetime.now(timezone.utc) - start_time).total_seconds()
 

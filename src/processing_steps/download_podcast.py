@@ -471,6 +471,11 @@ class PodcastDownloader:
                     logger.error(f"HTTP 502 Bad Gateway detected - content likely unavailable")
                     return create_error_result(ErrorCode.NOT_FOUND, f"HTTP 502 Bad Gateway: content unavailable", permanent=True)
 
+                # Check for 410 Gone - content permanently deleted
+                if "410" in stderr_text and "Gone" in stderr_text:
+                    logger.error(f"HTTP 410 Gone detected - content permanently deleted")
+                    return create_error_result(ErrorCode.CONTENT_GONE, f"HTTP 410 Gone: content permanently deleted", permanent=True)
+
                 return create_error_result(ErrorCode.PROCESS_FAILED, f"yt-dlp command failed: {stderr_text}")
 
             # Check for downloaded file

@@ -96,8 +96,9 @@ class Session:
                 raise
         
         # Test connection with retry
-        max_retries = 2
-        retry_delay = 5.0
+        # Worker0 and others may have network interface timing issues at startup
+        max_retries = 5
+        retry_delay = 10.0
         for attempt in range(max_retries + 1):
             try:
                 if attempt > 0:
@@ -124,7 +125,7 @@ class Session:
         """Get local IP address using multiple methods."""
         return get_worker_ip()
     
-    def _test_connectivity(self, host: str, port: int, max_retries: int = 2, retry_delay: float = 5.0) -> bool:
+    def _test_connectivity(self, host: str, port: int, max_retries: int = 5, retry_delay: float = 10.0) -> bool:
         """Test network connectivity to database host with retry mechanism."""
         for attempt in range(max_retries + 1):  # +1 for initial attempt
             try:

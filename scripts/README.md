@@ -1,11 +1,36 @@
 # Scripts Directory
 
-This directory is intentionally empty.
+Utility shell scripts for deployment and worker management.
 
-Previous operational scripts have been moved to their proper locations in `src/`:
+## Shell Scripts
 
-- `hydrate_embeddings.py` → `src/utils/embedding_hydrator.py` (called by EmbeddingHydrationManager)
-- `audit_content.py` → `src/processing/audit.py`
-- `create_tasks_db.py` → Logic consolidated into `src/api/components/task_creation_manager.py`
+| Script | Purpose |
+|--------|---------|
+| `sync_workers.sh` | Sync code to worker machines |
+| `install_uv_workers.sh` | Install uv on worker machines |
 
-All scripts are now integrated into the orchestrator and run automatically.
+## Orchestrator-Driven Tasks
+
+All scheduled processing tasks are now implemented as Python modules in `src/` and invoked via `-m`:
+
+| Module | Purpose | Config Key |
+|--------|---------|------------|
+| `src.automation.task_creation_manager` | Index sources and create processing tasks | `podcast_index_download`, `youtube_index_download` |
+| `src.utils.embedding_hydrator` | Generate embeddings for segments | `embedding_hydration` |
+| `src.ingestion.podcast_pipeline` | Monthly podcast chart collection | `podcast_collection` |
+
+See `config/config.yaml` under `scheduled_tasks:` for configuration.
+
+## Running Modules Manually
+
+```bash
+# Task creation
+python -m src.automation.task_creation_manager --steps index_podcast download_podcast
+python -m src.automation.task_creation_manager --project CPRMV --steps download convert
+
+# Embedding hydration
+python -m src.utils.embedding_hydrator --batch-size 128
+
+# Podcast pipeline
+python -m src.ingestion.podcast_pipeline --phase all
+```

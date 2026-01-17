@@ -1301,3 +1301,39 @@ class EmbeddingHydrator:
             'alternative_generated': total_alternative_generated,
             'total_segments': total_primary_generated + total_alternative_generated
         }
+
+
+# CLI entry point for scheduled task execution
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Embedding Hydrator CLI")
+    parser.add_argument("--batch-size", type=int, default=128, help="Batch size for embedding generation")
+    parser.add_argument("--project", type=str, default=None, help="Filter to specific project")
+    parser.add_argument("--primary-only", action="store_true", help="Only generate primary (0.6B) embeddings")
+    parser.add_argument("--alternative-only", action="store_true", help="Only generate alternative (4B) embeddings")
+    parser.add_argument("--alt-first", action="store_true", help="Prioritize alternative embeddings for configured projects")
+    parser.add_argument("--force-reembed", action="store_true", help="Re-generate embeddings even if version exists")
+    parser.add_argument("--stitch-version", type=str, default=None, help="Filter to specific stitch version prefix (e.g., 'stitch_v14')")
+
+    args = parser.parse_args()
+
+    # Parse stitch version filter
+    stitch_versions = None
+    if args.stitch_version:
+        stitch_versions = {'prefix': [args.stitch_version]}
+
+    # Run hydration
+    hydrator = EmbeddingHydrator()
+    result = asyncio.run(hydrator.hydrate_batch(
+        batch_size=args.batch_size,
+        project=args.project,
+        primary_only=args.primary_only,
+        alternative_only=args.alternative_only,
+        alt_first=args.alt_first,
+        force_reembed=args.force_reembed,
+        stitch_versions=stitch_versions
+    ))
+
+    logger.info(f"Hydration result: {result}")
+
+    # Exit with appropriate code
+    sys.exit(0 if result.get('status') == 'success' else 1)

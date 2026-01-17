@@ -54,7 +54,6 @@ from src.processing_steps.stitch_steps.util_stitch import (
     update_processing_status,
     format_stage_stats,
     summarize_speaker_assignments)
-from src.processing_steps.stitch_steps.util_wav2vec2 import run_wav2vec2_on_unassigned_words
 from src.storage.s3_utils import S3Storage
 
 logger = setup_worker_logger('stitch')

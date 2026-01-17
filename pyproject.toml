@@ -13,6 +13,7 @@ dependencies = [
     "asyncssh",
     "boto3",
     "browser-cookie3",
+    "deepmultilingualpunctuation>=1.0.1",
     "fake-useragent",
     "fastapi",
     "feedparser",
@@ -56,6 +57,7 @@ dependencies = [
     "tokenizers",
     "torch",
     "torchaudio",
+    "torchcodec>=0.9.1",
     "torchvision",
     "tqdm",
     "transformers>=4.53.0",
@@ -63,6 +65,9 @@ dependencies = [
     "webvtt-py",
     "whisper-normalizer",
     "yt-dlp",
+    # NLP deps required for stitch
+    "langdetect",
+    "spacy",
 ]
 
 [project.optional-dependencies]

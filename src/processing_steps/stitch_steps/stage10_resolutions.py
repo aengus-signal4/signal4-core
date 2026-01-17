@@ -61,9 +61,18 @@ from src.storage.s3_utils import S3Storage
 # Model server imports removed - using direct model loading only
 
 try:
+    # PyTorch 2.6+ changed default weights_only=True which breaks loading older models
+    # Patch torch.load BEFORE importing pyannote to ensure the patched version is used
+    import torch
+    _original_torch_load = torch.load
+    def _patched_torch_load(*args, **kwargs):
+        if 'weights_only' not in kwargs:
+            kwargs['weights_only'] = False
+        return _original_torch_load(*args, **kwargs)
+    torch.load = _patched_torch_load
+
     from pyannote.audio import Inference
     import librosa
-    import torch
     PYANNOTE_AVAILABLE = True
 except ImportError:
     PYANNOTE_AVAILABLE = False

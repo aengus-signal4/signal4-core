@@ -21,6 +21,17 @@ import yaml
 import torch
 import numpy as np
 
+# PyTorch 2.6+ changed default weights_only=True which breaks loading older models
+# that contain pickle-serialized objects like pytorch_lightning callbacks.
+# Monkey-patch torch.load BEFORE any pyannote imports to ensure the patched version
+# is used throughout. This is safe for pyannote models which are from a trusted source.
+_original_torch_load = torch.load
+def _patched_torch_load(*args, **kwargs):
+    if 'weights_only' not in kwargs:
+        kwargs['weights_only'] = False
+    return _original_torch_load(*args, **kwargs)
+torch.load = _patched_torch_load
+
 from .stage3_tables import WordTable
 
 from src.utils.logger import setup_worker_logger

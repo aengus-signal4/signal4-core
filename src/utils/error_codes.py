@@ -46,6 +46,7 @@ class ErrorCode(Enum):
     BAD_URL = "bad_url"
     VIDEO_UNAVAILABLE = "video_unavailable"
     LIVE_STREAM = "live_stream"
+    CONTENT_GONE = "content_gone"  # HTTP 410 - permanently deleted
     
     # Processing results (special handling)
     EMPTY_RESULT = "empty_result"
@@ -184,7 +185,8 @@ ERROR_CATEGORIES = {
         ErrorCode.PRIVATE_CONTENT,
         ErrorCode.BAD_URL,
         ErrorCode.VIDEO_UNAVAILABLE,
-        ErrorCode.LIVE_STREAM
+        ErrorCode.LIVE_STREAM,
+        ErrorCode.CONTENT_GONE
     ],
     'special': [
         ErrorCode.EMPTY_RESULT,

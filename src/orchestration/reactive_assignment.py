@@ -10,23 +10,24 @@ logger = logging.getLogger(__name__)
 
 class ReactiveAssignmentManager:
     """Manages immediate task assignment when workers complete tasks"""
-    
+
     def __init__(self, task_manager, orchestrator):
         self.task_manager = task_manager
         self.orchestrator = orchestrator
         self.pending_assignments: Set[str] = set()  # Track workers with pending assignments
-        
+        self._pending_lock = asyncio.Lock()  # Lock for atomic check-and-add
+
     async def assign_next_task(self, worker_id: str, completed_task_type: str) -> bool:
         """
         Trigger immediate queue backfill check when a task completes.
         If worker supports batch API, send batch refill. Otherwise fall back to single-task assignment.
         """
-        # Prevent duplicate assignments
-        if worker_id in self.pending_assignments:
-            logger.debug(f"Backfill already pending for worker {worker_id}")
-            return False
-
-        self.pending_assignments.add(worker_id)
+        # Prevent duplicate assignments with atomic check-and-add
+        async with self._pending_lock:
+            if worker_id in self.pending_assignments:
+                logger.debug(f"Backfill already pending for worker {worker_id}")
+                return False
+            self.pending_assignments.add(worker_id)
 
         try:
             # Check global pause first

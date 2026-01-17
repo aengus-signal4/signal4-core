@@ -35,6 +35,18 @@ import os
 # Set tokenizers parallelism before any imports to avoid fork warning
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+# PyTorch 2.6+ changed default weights_only=True which breaks loading older models
+# that contain pickle-serialized objects like pytorch_lightning callbacks.
+# Monkey-patch torch.load BEFORE any pyannote imports to ensure the patched version
+# is used throughout. This is safe for pyannote models which are from a trusted source.
+import torch
+_original_torch_load = torch.load
+def _patched_torch_load(*args, **kwargs):
+    if 'weights_only' not in kwargs:
+        kwargs['weights_only'] = False
+    return _original_torch_load(*args, **kwargs)
+torch.load = _patched_torch_load
+
 import sys
 import asyncio
 import json
@@ -44,6 +56,24 @@ import pandas as pd
 import time
 import yaml
 from pathlib import Path
+
+# Check required NLP dependencies early - fail fast with clear error
+_missing_packages = []
+try:
+    import spacy
+except ImportError:
+    _missing_packages.append("spacy")
+try:
+    from langdetect import detect
+except ImportError:
+    _missing_packages.append("langdetect")
+try:
+    from deepmultilingualpunctuation import PunctuationModel
+except ImportError:
+    _missing_packages.append("deepmultilingualpunctuation")
+
+if _missing_packages:
+    raise ImportError(f"Missing required NLP packages for stitch: {', '.join(_missing_packages)}. Run: uv add {' '.join(_missing_packages)}")
 
 from src.utils.paths import get_project_root
 from src.utils.config import load_config
@@ -56,6 +86,10 @@ from datetime import timezone
 
 # Add the project root to Python path
 sys.path.append(str(get_project_root()))
+
+# Load environment variables (S3 credentials, etc.)
+from dotenv import load_dotenv
+load_dotenv(get_project_root() / '.env')
 
 from src.utils.logger import setup_worker_logger
 from src.storage.s3_utils import S3StorageConfig, S3Storage, create_s3_storage_from_config
@@ -475,15 +509,13 @@ class StitchPipeline:
         self.segment_table = None
         self.speaker_assignment_engine = None
         
-        # Load config
-        config_path = get_config_path()
-        logger.debug(f"Loading configuration from: {config_path}")
+        # Load config using centralized loader (handles .env and ${VAR} substitution)
+        logger.debug("Loading configuration with environment variable substitution...")
         try:
-            with open(config_path) as f:
-                self.config = yaml.safe_load(f)
+            self.config = load_config()
             logger.debug("Configuration loaded successfully.")
-        except FileNotFoundError:
-            logger.error(f"Config file not found at {config_path}")
+        except FileNotFoundError as e:
+            logger.error(f"Config file not found: {e}")
             raise
         except Exception as e:
             logger.error(f"Failed to load or parse config: {e}")
