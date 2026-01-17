@@ -350,6 +350,26 @@ class PodcastDownloader:
             logger.error(f"Unexpected error in requests download: {e}", exc_info=True)
             return create_error_result(ErrorCode.UNKNOWN_ERROR, f"Requests download error: {e}")
 
+    def _extract_ytdlp_error(self, stderr_text: str) -> str:
+        """Extract just the ERROR lines from yt-dlp output, filtering out debug noise."""
+        error_lines = []
+        for line in stderr_text.split('\n'):
+            line = line.strip()
+            if line.startswith('ERROR:'):
+                # Remove the ERROR: prefix for cleaner messages
+                error_lines.append(line[6:].strip())
+
+        if error_lines:
+            return '; '.join(error_lines)
+
+        # Fallback: if no ERROR lines found, look for common error patterns
+        for line in stderr_text.split('\n'):
+            if 'HTTP Error' in line or 'Unable to' in line:
+                return line.strip()
+
+        # Last resort: return truncated stderr
+        return stderr_text[:200] + '...' if len(stderr_text) > 200 else stderr_text
+
     async def _try_ytdlp_download(self, url: str, output_path: Path, retry_attempt: int = 0) -> Dict:
         """Attempt to download using yt-dlp as a fallback method with exponential backoff for 429 errors"""
         # Clean the URL
@@ -476,7 +496,8 @@ class PodcastDownloader:
                     logger.error(f"HTTP 410 Gone detected - content permanently deleted")
                     return create_error_result(ErrorCode.CONTENT_GONE, f"HTTP 410 Gone: content permanently deleted", permanent=True)
 
-                return create_error_result(ErrorCode.PROCESS_FAILED, f"yt-dlp command failed: {stderr_text}")
+                error_msg = self._extract_ytdlp_error(stderr_text)
+                return create_error_result(ErrorCode.PROCESS_FAILED, f"yt-dlp command failed: {error_msg}")
 
             # Check for downloaded file
             downloaded_file = None
