@@ -719,8 +719,13 @@ class TaskOrchestratorV2:
 
                 # Handle failure tracking and logging
                 if status == 'failed':
+                    # Extract error_code and permanent flag from result
+                    error_code = result.get('error_code') if isinstance(result, dict) else None
+                    is_permanent = result.get('permanent', False) if isinstance(result, dict) else False
+
                     should_pause = self.failure_tracker.record_failure(
-                        worker_id, task_type, error_message
+                        worker_id, task_type, error_message,
+                        error_code=error_code, is_permanent=is_permanent
                     )
                     if should_pause:
                         logger.warning(f"Task type {task_type} paused for worker {worker_id} due to failures")

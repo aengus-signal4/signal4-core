@@ -28,24 +28,40 @@ class FailureTracker:
         self.pause_duration = 1800  # 30 minutes pause duration
         self.youtube_auth_pause_duration = 50400  # 14 hours for YouTube auth failures (was 86400 * 10 = 10 days)
         
-    def record_failure(self, worker_id: str, task_type: str, error_message: str = "") -> bool:
+    def record_failure(self, worker_id: str, task_type: str, error_message: str = "",
+                       error_code: Optional[str] = None, is_permanent: bool = False) -> bool:
         """
         Record a task failure for a worker/task_type combination.
         Returns True if task type should be paused for this worker.
+
+        Args:
+            worker_id: The worker that failed
+            task_type: The type of task that failed
+            error_message: Human-readable error message
+            error_code: Optional error code from ErrorCode enum
+            is_permanent: Whether this is marked as a permanent content failure
         """
         now = datetime.now(timezone.utc)
+
+        # Check if this is a permanent content-level error (not a worker issue)
+        # These should NOT count toward worker pausing
+        if is_permanent or self._is_permanent_content_error(error_message, error_code):
+            logger.info(f"Permanent content error for worker {worker_id} task type {task_type} "
+                       f"(not counting toward worker pause): {error_message}")
+            return False
+
         failure_info = self.worker_task_failures[worker_id][task_type]
-        
+
         # Reset count if enough time has passed since last failure
-        if (failure_info['last_failure_time'] and 
+        if (failure_info['last_failure_time'] and
             (now - failure_info['last_failure_time']).total_seconds() > self.failure_reset_timeout):
             failure_info['count'] = 0
             logger.debug(f"Reset failure count for worker {worker_id} task type {task_type}")
-        
+
         # Record the failure
         failure_info['count'] += 1
         failure_info['last_failure_time'] = now
-        
+
         logger.warning(f"Recorded failure #{failure_info['count']} for worker {worker_id} task type {task_type}: {error_message}")
         
         # Check if we should pause this task type
@@ -186,9 +202,52 @@ class FailureTracker:
             "401",
             "403"
         ]
-        
+
         error_lower = error_message.lower()
         return any(keyword in error_lower for keyword in auth_error_keywords)
+
+    def _is_permanent_content_error(self, error_message: str, error_code: Optional[str] = None) -> bool:
+        """
+        Check if error indicates a permanent content-level failure.
+
+        These errors are specific to individual content items (bad URLs, deleted content, etc.)
+        and should NOT trigger worker-level pausing since other content can still be processed.
+        """
+        # Check by error code first (most reliable)
+        permanent_error_codes = [
+            'not_found',
+            'bad_url',
+            'content_gone',
+            'video_unavailable',
+            'access_denied',
+            'age_restricted',
+            'members_only',
+            'private_content',
+            'corrupt_media',
+            'invalid_format',
+            'unsupported_format',
+        ]
+
+        if error_code and error_code in permanent_error_codes:
+            return True
+
+        # Fallback: check error message for HTTP status codes indicating content issues
+        permanent_error_patterns = [
+            "HTTP Error 400",
+            "HTTP Error 404",
+            "HTTP Error 410",
+            "400: Bad Request",
+            "404: Not Found",
+            "410: Gone",
+            "not found",
+            "content no longer available",
+            "content unavailable",
+            "video unavailable",
+            "bad url",
+        ]
+
+        error_lower = error_message.lower()
+        return any(pattern.lower() in error_lower for pattern in permanent_error_patterns)
     
     def get_stats(self) -> Dict[str, Any]:
         """Get failure tracking statistics"""
