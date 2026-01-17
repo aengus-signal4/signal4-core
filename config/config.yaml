@@ -472,7 +472,7 @@ processing:
       eth: 10.0.0.195
       wifi: 10.0.0.196
       enabled: false
-      task_types: ["convert:1","transcribe:1","cleanup:1","stitch:1"]
+      task_types: ["convert:1","transcribe:1","cleanup:1"]
       max_concurrent_tasks: 1
       type: "worker"
       services:
@@ -484,7 +484,7 @@ processing:
       eth: 10.0.0.203
       wifi: 10.0.0.76
       enabled: true
-      task_types: ["convert:1","cleanup:1","stitch:1","transcribe:1"]
+      task_types: ["convert:1","cleanup:1","transcribe:1","stitch:1"]
       type: "worker"
       services:
         task_processor:
@@ -495,7 +495,7 @@ processing:
       eth: 10.0.0.51
       wifi: 10.0.0.163
       enabled: true
-      task_types: ["convert:1","cleanup:1","stitch:1","transcribe:1"] #"cleanup",
+      task_types: ["convert:1","cleanup:1","transcribe:1"] #"cleanup",
       max_concurrent_tasks: 1
       type: "worker"
       services:
@@ -507,7 +507,7 @@ processing:
       eth: 10.0.0.209
       wifi: 10.0.0.99
       enabled: true
-      task_types: ["convert:1","diarize:1","transcribe:1"]
+      task_types: ["convert:1","transcribe:1","diarize:1"]
       max_concurrent_tasks: 1
       type: "worker"
       services:
@@ -791,7 +791,7 @@ error_handling:
 # Replaces individual managers (indexing, task_creation, embedding_hydration, speaker_clustering, podcast_collection)
 # and pg_cron jobs (cache refresh, clustering)
 scheduled_tasks:
-  enabled: true  # Enabled for testing new orchestrator
+  enabled: false  # Disabled - routine tasks not running
   state_file: "/Users/signal4/logs/content_processing/scheduled_tasks_state.json"
 
   tasks:

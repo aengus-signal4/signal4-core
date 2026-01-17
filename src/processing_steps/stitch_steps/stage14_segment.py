@@ -73,8 +73,8 @@ class TranscriptSegmenter:
         # Load config if not provided
         if config is None:
             self.config = load_config()
-
-        self.config = config
+        else:
+            self.config = config
 
         # Segmentation parameters
         seg_config = self.config.get('embedding', {}).get('embedding_segmentation', {})
@@ -771,7 +771,7 @@ def get_current_segment_version() -> str:
         Current segment version (e.g., 'segment_v14.2_xlmr')
     """
     try:
-        self.config = load_config()
+        config = load_config()
 
         # Get stitch version (e.g., 'stitch_v14.2')
         stitch_version = config.get('processing', {}).get('stitch', {}).get('current_version', 'stitch_v14')

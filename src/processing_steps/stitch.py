@@ -35,10 +35,16 @@ import os
 # Set tokenizers parallelism before any imports to avoid fork warning
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+# Ensure homebrew libraries (ffmpeg for torchcodec/pyannote) are discoverable on macOS
+_homebrew_lib = '/opt/homebrew/lib'
+for _dyld_var in ['DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH']:
+    if _homebrew_lib not in os.environ.get(_dyld_var, ''):
+        os.environ[_dyld_var] = f"{_homebrew_lib}:{os.environ.get(_dyld_var, '')}"
+
 # PyTorch 2.6+ changed default weights_only=True which breaks loading older models
-# that contain pickle-serialized objects like pytorch_lightning callbacks.
-# Monkey-patch torch.load BEFORE any pyannote imports to ensure the patched version
-# is used throughout. This is safe for pyannote models which are from a trusted source.
+# that contain pickle-serialized objects like pytorch_lightning callbacks and omegaconf.
+# Monkey-patch torch.load to use weights_only=False for all model loading.
+# This must happen BEFORE any pyannote imports.
 import torch
 _original_torch_load = torch.load
 def _patched_torch_load(*args, **kwargs):

@@ -15,8 +15,15 @@ Usage:
     python diarize.py --content <content_id> [--test] [--rewrite]
 """
 
+import os
 import sys
 from pathlib import Path
+
+# Ensure homebrew libraries (ffmpeg for torchcodec/pyannote) are discoverable on macOS
+_homebrew_lib = '/opt/homebrew/lib'
+for _dyld_var in ['DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH']:
+    if _homebrew_lib not in os.environ.get(_dyld_var, ''):
+        os.environ[_dyld_var] = f"{_homebrew_lib}:{os.environ.get(_dyld_var, '')}"
 
 from src.utils.paths import get_project_root
 from src.utils.config import load_config

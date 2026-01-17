@@ -66,14 +66,12 @@ import argparse
 import torch
 import os
 
-# PyTorch 2.6+ changed default weights_only=True which breaks loading older models
-# Monkey-patch torch.load to use weights_only=False for pyannote models (trusted source)
-_original_torch_load = torch.load
-def _patched_torch_load(*args, **kwargs):
-    if 'weights_only' not in kwargs:
-        kwargs['weights_only'] = False
-    return _original_torch_load(*args, **kwargs)
-torch.load = _patched_torch_load
+# Ensure homebrew libraries (ffmpeg for torchcodec/pyannote) are discoverable
+_homebrew_lib = '/opt/homebrew/lib'
+for _dyld_var in ['DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH']:
+    if _homebrew_lib not in os.environ.get(_dyld_var, ''):
+        os.environ[_dyld_var] = f"{_homebrew_lib}:{os.environ.get(_dyld_var, '')}"
+
 
 from src.utils.logger import setup_worker_logger
 from .stage3_tables import WordTable

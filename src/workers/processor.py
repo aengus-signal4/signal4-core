@@ -14,6 +14,13 @@ _homebrew_bin = '/opt/homebrew/bin'
 if _homebrew_bin not in os.environ.get('PATH', ''):
     os.environ['PATH'] = f"{_homebrew_bin}:{os.environ.get('PATH', '')}"
 
+# Ensure homebrew libraries (ffmpeg libs for torchcodec) are discoverable
+# Use DYLD_FALLBACK_LIBRARY_PATH as it's less restricted by SIP than DYLD_LIBRARY_PATH
+_homebrew_lib = '/opt/homebrew/lib'
+for _dyld_var in ['DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH']:
+    if _homebrew_lib not in os.environ.get(_dyld_var, ''):
+        os.environ[_dyld_var] = f"{_homebrew_lib}:{os.environ.get(_dyld_var, '')}"
+
 # Standard library imports
 import asyncio
 import contextlib
@@ -816,6 +823,13 @@ async def run_processing_script(task_type: str, task_data: Dict[str, Any]) -> Di
             env['PYTHONPATH'] = f"{project_root}:{current_pythonpath}"
         else:
             env['PYTHONPATH'] = str(project_root)
+
+        # Ensure homebrew libraries are discoverable for torchcodec/pyannote on macOS
+        homebrew_lib = '/opt/homebrew/lib'
+        for dyld_var in ['DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH']:
+            current = env.get(dyld_var, '')
+            if homebrew_lib not in current:
+                env[dyld_var] = f"{homebrew_lib}:{current}" if current else homebrew_lib
 
         process = await asyncio.create_subprocess_exec(
             *cmd,
