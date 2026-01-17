@@ -977,21 +977,36 @@ class S3Storage:
 
     def _convert_audio_to_wav(self, input_path: str, output_path: str, format_type: str) -> bool:
         """Convert audio file to WAV format using ffmpeg.
-        
+
         Args:
             input_path: Path to input audio file
             output_path: Path where WAV file should be saved
             format_type: Type of input audio ('opus', 'mp3', etc.)
-            
+
         Returns:
             True if successful, False otherwise
         """
         try:
             import subprocess
-            
+
+            # Find ffmpeg in common locations
+            ffmpeg_paths = ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', 'ffmpeg']
+            ffmpeg_cmd = None
+            for path in ffmpeg_paths:
+                try:
+                    subprocess.run([path, '-version'], capture_output=True, timeout=5)
+                    ffmpeg_cmd = path
+                    break
+                except (subprocess.SubprocessError, FileNotFoundError):
+                    continue
+
+            if not ffmpeg_cmd:
+                self.logger.error("ffmpeg not found in any standard location")
+                return False
+
             # Use ffmpeg for all audio conversions
             cmd = [
-                'ffmpeg', '-i', input_path,
+                ffmpeg_cmd, '-i', input_path,
                 '-acodec', 'pcm_s16le',  # 16-bit PCM
                 '-ar', '16000',          # 16kHz sample rate
                 '-ac', '1',              # Mono

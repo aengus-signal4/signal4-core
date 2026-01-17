@@ -83,29 +83,24 @@ class FluidDiarizationProcessor:
         logger.info(f"Swift script path: {self.swift_script_path}")
 
     async def _check_swift_dependencies(self) -> bool:
-        """Check if Swift and required dependencies are available."""
+        """Check if the compiled FluidDiarization binary is available."""
         try:
-            # Check if swift is available
-            result = subprocess.run(['swift', '--version'], 
-                                  capture_output=True, text=True, timeout=10)
-            if result.returncode != 0:
-                logger.error("Swift compiler not found. Please install Xcode or Swift toolchain.")
-                return False
-            
-            logger.info(f"Swift version: {result.stdout.strip().split()[0]}")
-            
             # Check if we're on macOS (required for FluidAudio)
             import platform
             if platform.system() != 'Darwin':
                 logger.error("FluidAudio requires macOS. Current platform: " + platform.system())
                 return False
-                
-            logger.info("✅ Swift and macOS dependencies satisfied")
+
+            # Check if the compiled binary exists (don't require Swift toolchain)
+            swift_executable = self.swift_script_path.parent / ".build" / "debug" / "FluidDiarization"
+            if not swift_executable.exists():
+                logger.error(f"FluidDiarization binary not found at {swift_executable}. "
+                           "Build it with: cd src/processing_steps/swift && swift build")
+                return False
+
+            logger.info(f"✅ FluidDiarization binary found at {swift_executable}")
             return True
-            
-        except subprocess.TimeoutExpired:
-            logger.error("Swift version check timed out")
-            return False
+
         except Exception as e:
             logger.error(f"Error checking Swift dependencies: {e}")
             return False
