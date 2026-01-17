@@ -809,11 +809,20 @@ async def run_processing_script(task_type: str, task_data: Dict[str, Any]) -> Di
     # Run the script using asyncio.create_subprocess_exec
     process = None
     try:
+        # Set up environment with PYTHONPATH to ensure src imports work
+        env = os.environ.copy()
+        current_pythonpath = env.get('PYTHONPATH', '')
+        if current_pythonpath:
+            env['PYTHONPATH'] = f"{project_root}:{current_pythonpath}"
+        else:
+            env['PYTHONPATH'] = str(project_root)
+
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=str(project_root)  # Required for 'src' imports to resolve
+            cwd=str(project_root),
+            env=env
         )
 
         # Store process reference for potential cancellation
