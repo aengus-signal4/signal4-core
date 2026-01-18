@@ -55,6 +55,8 @@ from sqlalchemy import text
 from src.database.session import get_session
 from src.utils.logger import setup_worker_logger
 from src.utils.config import get_project_date_range
+from src.speaker_identification.core.llm_client import MLXLLMClient
+from src.speaker_identification.prompts import PromptRegistry
 
 # Path to name aliases config and suggestions output
 NAME_ALIASES_PATH = Path(project_root) / 'config' / 'name_aliases.yaml'
@@ -85,6 +87,16 @@ class NameStandardizationConfig:
     # Number of audio samples per name
     n_samples: int = 2
 
+    # LLM settings
+    use_llm: bool = True  # Use LLM to verify name pairs
+    llm_batch_size: int = 10  # Name pairs per LLM call
+    llm_min_hours: float = 0.5  # Only LLM-verify pairs with sufficient data
+    llm_tier: str = "tier_1"  # LLM tier to use
+
+    # Auto-approve thresholds (skip LLM for obvious cases)
+    auto_approve_sim: float = 0.995  # Very high similarity
+    auto_approve_patterns: bool = True  # Dr. X -> X, etc.
+
 
 class NameStandardizationStrategy:
     """
@@ -110,10 +122,19 @@ class NameStandardizationStrategy:
             'unique_names_before': 0,
             'unique_names_after': 0,
             'static_alias_merges': 0,
+            'auto_approved_merges': 0,
+            'llm_verified_merges': 0,
+            'llm_rejected_pairs': 0,
             'suggested_merges': 0,
             'flagged_handles': 0,
             'potential_do_not_merge': 0,
+            'llm_calls': 0,
         }
+
+        # Initialize LLM client if enabled
+        self.llm_client = None
+        if self.config.use_llm:
+            self.llm_client = MLXLLMClient(tier=self.config.llm_tier)
 
     def _load_verified_speakers(self, project: str) -> Dict[str, List[Dict]]:
         """Load Phase 2 verified speakers grouped by name."""
@@ -360,14 +381,157 @@ class NameStandardizationStrategy:
 
         return samples
 
-    def _analyze_embeddings(
+    def _is_auto_approvable(self, name_a: str, name_b: str, similarity: float) -> Tuple[bool, str]:
+        """
+        Check if a name pair can be auto-approved without LLM verification.
+
+        Returns (is_auto_approvable, reason)
+        """
+        if not self.config.auto_approve_patterns:
+            return False, ""
+
+        # Pattern 1: Very high similarity
+        if similarity >= self.config.auto_approve_sim:
+            return True, "very_high_similarity"
+
+        # Pattern 2: Title prefixes (Dr., Prof., etc.)
+        title_prefixes = ['Dr. ', 'Prof. ', 'The Honourable ', 'Hon. ', 'Rev. ', 'Pastor ', 'Sir ']
+        for prefix in title_prefixes:
+            if name_a.startswith(prefix) and name_a[len(prefix):] == name_b:
+                return True, "title_prefix"
+            if name_b.startswith(prefix) and name_b[len(prefix):] == name_a:
+                return True, "title_prefix"
+
+        # Pattern 3: Exact match ignoring case
+        if name_a.lower() == name_b.lower():
+            return True, "case_match"
+
+        return False, ""
+
+    async def _verify_pairs_with_llm(
+        self,
+        pairs: List[Dict],
+        name_data: Dict[str, Dict]
+    ) -> List[Dict]:
+        """
+        Verify name pairs using LLM in batches.
+
+        Returns list of decisions with structure:
+        {
+            'name_a': str,
+            'name_b': str,
+            'decision': 'same_person' | 'different_people' | 'needs_review',
+            'canonical_name': str or None,
+            'confidence': str,
+            'reasoning': str
+        }
+        """
+        if not self.llm_client or not pairs:
+            return []
+
+        decisions = []
+
+        # Process in batches
+        for batch_start in range(0, len(pairs), self.config.llm_batch_size):
+            batch = pairs[batch_start:batch_start + self.config.llm_batch_size]
+
+            # Build batch data for prompt
+            batch_data = []
+            for p in batch:
+                name_a, name_b = p['name_a'], p['name_b']
+                data_a, data_b = name_data[name_a], name_data[name_b]
+
+                # Check for co-occurrence
+                episodes_a = set(sp.get('content_id') for sp in data_a['speakers'])
+                episodes_b = set(sp.get('content_id') for sp in data_b['speakers'])
+                shared = len(episodes_a & episodes_b)
+
+                # Get sample text
+                samples_a = self._get_sample_segments(name_a, data_a['speakers'], 1)
+                samples_b = self._get_sample_segments(name_b, data_b['speakers'], 1)
+
+                batch_data.append({
+                    'name_a': name_a,
+                    'name_b': name_b,
+                    'similarity': p['similarity'],
+                    'hours_a': data_a['total_hours'],
+                    'hours_b': data_b['total_hours'],
+                    'episodes_a': data_a['n_episodes'],
+                    'episodes_b': data_b['n_episodes'],
+                    'shared_episodes': shared,
+                    'sample_a': samples_a[0]['text'] if samples_a else "",
+                    'sample_b': samples_b[0]['text'] if samples_b else "",
+                })
+
+            # Call LLM
+            prompt = PromptRegistry.phase3_name_pair_batch(batch_data)
+
+            try:
+                self.stats['llm_calls'] += 1
+                response = await self.llm_client._call_llm(prompt, priority=3)
+
+                # Parse JSON response
+                json_match = re.search(r'\[[\s\S]*\]', response)
+                if json_match:
+                    llm_decisions = json.loads(json_match.group())
+
+                    for i, decision in enumerate(llm_decisions):
+                        if i < len(batch):
+                            decisions.append({
+                                'name_a': batch[i]['name_a'],
+                                'name_b': batch[i]['name_b'],
+                                'decision': decision.get('decision', 'needs_review'),
+                                'canonical_name': decision.get('canonical_name'),
+                                'confidence': decision.get('confidence', 'low'),
+                                'reasoning': decision.get('reasoning', ''),
+                            })
+                else:
+                    logger.warning(f"Could not parse LLM response for batch starting at {batch_start}")
+                    # Mark all as needs_review
+                    for p in batch:
+                        decisions.append({
+                            'name_a': p['name_a'],
+                            'name_b': p['name_b'],
+                            'decision': 'needs_review',
+                            'canonical_name': None,
+                            'confidence': 'low',
+                            'reasoning': 'LLM parse error',
+                        })
+
+            except Exception as e:
+                logger.error(f"LLM call failed: {e}")
+                for p in batch:
+                    decisions.append({
+                        'name_a': p['name_a'],
+                        'name_b': p['name_b'],
+                        'decision': 'needs_review',
+                        'canonical_name': None,
+                        'confidence': 'low',
+                        'reasoning': f'LLM error: {str(e)[:50]}',
+                    })
+
+            logger.info(f"  LLM verified batch {batch_start//self.config.llm_batch_size + 1}: "
+                       f"{len([d for d in decisions[-len(batch):] if d['decision'] == 'same_person'])} same, "
+                       f"{len([d for d in decisions[-len(batch):] if d['decision'] == 'different_people'])} different, "
+                       f"{len([d for d in decisions[-len(batch):] if d['decision'] == 'needs_review'])} review")
+
+        return decisions
+
+    async def _analyze_embeddings(
         self,
         speakers_by_name: Dict[str, List[Dict]],
         alias_to_canonical: Dict[str, str],
         unresolved_handles: Set[str],
         do_not_merge: Set[frozenset]
     ) -> Dict:
-        """Analyze embeddings and generate suggestions."""
+        """
+        Analyze embeddings and generate/verify merge suggestions.
+
+        Uses three-tier approach:
+        1. Auto-approve obvious matches (very high sim, title prefixes)
+        2. LLM verify borderline cases
+        3. Output remaining uncertain pairs for human review
+        """
         # Build centroids for each name
         name_data = {}
         for name, speakers in speakers_by_name.items():
@@ -400,7 +564,16 @@ class NameStandardizationStrategy:
             }
 
         if len(name_data) < 2:
-            return {'suggested_merges': [], 'flagged_handles': [], 'potential_do_not_merge': []}
+            return {
+                'generated_at': datetime.now(timezone.utc).isoformat(),
+                'threshold_used': self.config.merge_threshold,
+                'auto_approved': [],
+                'llm_approved': [],
+                'llm_rejected': [],
+                'suggested_merges': [],
+                'flagged_handles': [],
+                'potential_do_not_merge': [],
+            }
 
         # Build similarity matrix
         names = list(name_data.keys())
@@ -408,7 +581,7 @@ class NameStandardizationStrategy:
         centroids = np.array([name_data[n]['centroid'] for n in names], dtype=np.float32)
         sim_matrix = centroids @ centroids.T
 
-        # Build lookup structures
+        # Build lookup structures for idempotency
         existing_aliases_lower = set(alias_to_canonical.keys())
         for canonical in alias_to_canonical.values():
             existing_aliases_lower.add(canonical.lower())
@@ -417,16 +590,13 @@ class NameStandardizationStrategy:
         for alias, canonical in alias_to_canonical.items():
             canonical_to_variants[canonical.lower()].add(alias)
 
-        suggestions = {
-            'generated_at': datetime.now(timezone.utc).isoformat(),
-            'threshold_used': self.config.merge_threshold,
-            'suggested_merges': [],
-            'flagged_handles': [],
-            'potential_do_not_merge': [],
-        }
-
-        # Find merge candidates
+        # Categorize pairs
+        auto_approved = []  # Auto-merge without LLM
+        llm_candidates = []  # Need LLM verification
         processed_pairs = set()
+
+        logger.info("  Categorizing name pairs...")
+
         for i in range(n_names):
             for j in range(i + 1, n_names):
                 sim = float(sim_matrix[i, j])
@@ -436,10 +606,11 @@ class NameStandardizationStrategy:
                 name_a, name_b = names[i], names[j]
                 pair_key = frozenset([name_a.lower(), name_b.lower()])
 
+                # Skip if in do_not_merge
                 if pair_key in do_not_merge:
                     continue
 
-                # Check if already merged
+                # Skip if already merged
                 a_canonical = alias_to_canonical.get(name_a.lower(), name_a.lower())
                 b_canonical = alias_to_canonical.get(name_b.lower(), name_b.lower())
                 if a_canonical == b_canonical:
@@ -454,39 +625,141 @@ class NameStandardizationStrategy:
                     continue
                 processed_pairs.add(pair_key)
 
-                # Determine canonical
+                # Check for co-occurrence (strong signal they're different people)
+                episodes_a = set(sp.get('content_id') for sp in name_data[name_a]['speakers'])
+                episodes_b = set(sp.get('content_id') for sp in name_data[name_b]['speakers'])
+                shared_episodes = len(episodes_a & episodes_b)
+
+                # Determine canonical based on quality score
                 data_a, data_b = name_data[name_a], name_data[name_b]
                 if data_a['quality_score'] >= data_b['quality_score']:
                     canonical, variant = name_a, name_b
-                    canonical_data, variant_data = data_a, data_b
                 else:
                     canonical, variant = name_b, name_a
-                    canonical_data, variant_data = data_b, data_a
 
-                canonical_samples = self._get_sample_segments(
-                    canonical, canonical_data['speakers'], self.config.n_samples
-                )
-                variant_samples = self._get_sample_segments(
-                    variant, variant_data['speakers'], self.config.n_samples
-                )
-
-                suggestions['suggested_merges'].append({
+                pair_info = {
+                    'name_a': name_a,
+                    'name_b': name_b,
                     'canonical': canonical,
                     'variant': variant,
-                    'similarity': round(sim, 3),
-                    'evidence': {
-                        'canonical_hours': round(canonical_data['total_hours'], 1),
-                        'canonical_episodes': canonical_data['n_episodes'],
-                        'canonical_quality_score': canonical_data['quality_score'],
-                        'variant_hours': round(variant_data['total_hours'], 1),
-                        'variant_episodes': variant_data['n_episodes'],
-                        'variant_quality_score': variant_data['quality_score'],
-                    },
-                    'samples': {
-                        'canonical': canonical_samples,
-                        'variant': variant_samples,
-                    }
-                })
+                    'similarity': sim,
+                    'shared_episodes': shared_episodes,
+                }
+
+                # Co-hosts: skip auto-approve, let LLM or human decide
+                if shared_episodes > 0:
+                    # Only LLM-verify if enough data
+                    max_hours = max(data_a['total_hours'], data_b['total_hours'])
+                    if self.config.use_llm and max_hours >= self.config.llm_min_hours:
+                        llm_candidates.append(pair_info)
+                    continue
+
+                # Check for auto-approve patterns
+                is_auto, reason = self._is_auto_approvable(name_a, name_b, sim)
+                if is_auto:
+                    auto_approved.append({**pair_info, 'reason': reason})
+                    continue
+
+                # Otherwise, candidate for LLM verification
+                max_hours = max(data_a['total_hours'], data_b['total_hours'])
+                if self.config.use_llm and max_hours >= self.config.llm_min_hours:
+                    llm_candidates.append(pair_info)
+
+        logger.info(f"  Found {len(auto_approved)} auto-approvable, {len(llm_candidates)} for LLM verification")
+
+        # LLM verification
+        llm_approved = []
+        llm_rejected = []
+        needs_review = []
+
+        if llm_candidates and self.config.use_llm:
+            logger.info(f"  Running LLM verification on {len(llm_candidates)} pairs...")
+            decisions = await self._verify_pairs_with_llm(llm_candidates, name_data)
+
+            for decision in decisions:
+                pair_info = next(
+                    (p for p in llm_candidates if p['name_a'] == decision['name_a'] and p['name_b'] == decision['name_b']),
+                    None
+                )
+                if not pair_info:
+                    continue
+
+                if decision['decision'] == 'same_person' and decision['confidence'] in ['certain', 'high']:
+                    llm_approved.append({
+                        **pair_info,
+                        'llm_canonical': decision['canonical_name'],
+                        'llm_confidence': decision['confidence'],
+                        'llm_reasoning': decision['reasoning'],
+                    })
+                elif decision['decision'] == 'different_people':
+                    llm_rejected.append({
+                        **pair_info,
+                        'llm_confidence': decision['confidence'],
+                        'llm_reasoning': decision['reasoning'],
+                    })
+                else:
+                    needs_review.append({
+                        **pair_info,
+                        'llm_decision': decision['decision'],
+                        'llm_confidence': decision['confidence'],
+                        'llm_reasoning': decision['reasoning'],
+                    })
+
+            logger.info(f"  LLM results: {len(llm_approved)} approved, {len(llm_rejected)} rejected, {len(needs_review)} needs review")
+
+        # Build final suggestions (only items needing human review)
+        suggestions = {
+            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'threshold_used': self.config.merge_threshold,
+            'auto_approved': auto_approved,
+            'llm_approved': llm_approved,
+            'llm_rejected': llm_rejected,
+            'suggested_merges': [],
+            'flagged_handles': [],
+            'potential_do_not_merge': [],
+        }
+
+        # Add needs_review to suggested_merges with full evidence
+        for pair in needs_review:
+            name_a, name_b = pair['name_a'], pair['name_b']
+            data_a, data_b = name_data[name_a], name_data[name_b]
+
+            canonical = pair['canonical']
+            variant = pair['variant']
+            canonical_data = name_data[canonical]
+            variant_data = name_data[variant]
+
+            canonical_samples = self._get_sample_segments(
+                canonical, canonical_data['speakers'], self.config.n_samples
+            )
+            variant_samples = self._get_sample_segments(
+                variant, variant_data['speakers'], self.config.n_samples
+            )
+
+            suggestions['suggested_merges'].append({
+                'canonical': canonical,
+                'variant': variant,
+                'similarity': round(pair['similarity'], 3),
+                'evidence': {
+                    'canonical_hours': round(canonical_data['total_hours'], 1),
+                    'canonical_episodes': canonical_data['n_episodes'],
+                    'canonical_quality_score': canonical_data['quality_score'],
+                    'variant_hours': round(variant_data['total_hours'], 1),
+                    'variant_episodes': variant_data['n_episodes'],
+                    'variant_quality_score': variant_data['quality_score'],
+                    'shared_episodes': pair.get('shared_episodes', 0),
+                    'llm_reasoning': pair.get('llm_reasoning', ''),
+                },
+                'samples': {
+                    'canonical': canonical_samples,
+                    'variant': variant_samples,
+                }
+            })
+
+        # Update stats
+        self.stats['auto_approved_merges'] = len(auto_approved)
+        self.stats['llm_verified_merges'] = len(llm_approved)
+        self.stats['llm_rejected_pairs'] = len(llm_rejected)
 
         # Flag handles
         for name, data in name_data.items():
@@ -507,7 +780,7 @@ class NameStandardizationStrategy:
                     'samples': handle_samples,
                 })
 
-        # Find potential do-not-merge (co-hosts)
+        # Find potential do-not-merge (co-hosts that LLM didn't process)
         for i in range(n_names):
             for j in range(i + 1, n_names):
                 sim = float(sim_matrix[i, j])
@@ -520,6 +793,10 @@ class NameStandardizationStrategy:
                 if pair_key in do_not_merge:
                     continue
 
+                # Skip if LLM already rejected (we'll add to do_not_merge)
+                if any(p['name_a'] == name_a and p['name_b'] == name_b for p in llm_rejected):
+                    continue
+
                 a_canonical = alias_to_canonical.get(name_a.lower(), name_a.lower())
                 b_canonical = alias_to_canonical.get(name_b.lower(), name_b.lower())
                 if a_canonical == b_canonical:
@@ -529,7 +806,11 @@ class NameStandardizationStrategy:
                 episodes_b = set(sp.get('content_id') for sp in name_data[name_b]['speakers'])
                 shared_episodes = episodes_a & episodes_b
 
-                if shared_episodes:
+                if shared_episodes and not any(
+                    (p['name_a'] == name_a and p['name_b'] == name_b) or
+                    (p['name_a'] == name_b and p['name_b'] == name_a)
+                    for p in llm_candidates
+                ):
                     samples_a = self._get_sample_segments(
                         name_a, name_data[name_a]['speakers'], self.config.n_samples
                     )
@@ -652,28 +933,103 @@ class NameStandardizationStrategy:
         self.stats['unique_names_after'] = len(speakers_by_name)
         logger.info(f"Applied {len(static_mappings)} static merges: {self.stats['unique_names_before']} -> {self.stats['unique_names_after']} names")
 
-        # Analyze embeddings
+        # Analyze embeddings and run LLM verification
         logger.info("-" * 80)
-        logger.info("Analyzing embeddings for suggestions...")
-        suggestions = self._analyze_embeddings(
+        if self.config.use_llm:
+            logger.info("Analyzing embeddings with LLM verification...")
+        else:
+            logger.info("Analyzing embeddings (LLM disabled)...")
+
+        suggestions = await self._analyze_embeddings(
             speakers_by_name, alias_to_canonical, unresolved_handles, do_not_merge
         )
+
+        # Apply auto-approved and LLM-approved merges to aliases file
+        auto_approved = suggestions.get('auto_approved', [])
+        llm_approved = suggestions.get('llm_approved', [])
+        llm_rejected = suggestions.get('llm_rejected', [])
+
+        if auto_approved or llm_approved or llm_rejected:
+            logger.info("-" * 80)
+            logger.info("Updating name_aliases.yaml...")
+
+            # Load current aliases
+            try:
+                with open(NAME_ALIASES_PATH, 'r') as f:
+                    aliases_config = yaml.safe_load(f) or {}
+            except:
+                aliases_config = {}
+
+            if 'aliases' not in aliases_config:
+                aliases_config['aliases'] = {}
+            if 'do_not_merge' not in aliases_config:
+                aliases_config['do_not_merge'] = []
+
+            # Add auto-approved merges
+            for pair in auto_approved:
+                canonical = pair['canonical']
+                variant = pair['variant']
+                if canonical not in aliases_config['aliases']:
+                    aliases_config['aliases'][canonical] = []
+                if variant not in aliases_config['aliases'][canonical]:
+                    aliases_config['aliases'][canonical].append(variant)
+                    logger.info(f"  [AUTO] {variant} -> {canonical} ({pair['reason']})")
+
+            # Add LLM-approved merges
+            for pair in llm_approved:
+                # Use LLM's canonical suggestion if available
+                canonical = pair.get('llm_canonical') or pair['canonical']
+                variant = pair['variant'] if pair['canonical'] == canonical else pair['canonical']
+                if canonical not in aliases_config['aliases']:
+                    aliases_config['aliases'][canonical] = []
+                if variant not in aliases_config['aliases'][canonical]:
+                    aliases_config['aliases'][canonical].append(variant)
+                    logger.info(f"  [LLM] {variant} -> {canonical}")
+
+            # Add LLM-rejected to do_not_merge
+            for pair in llm_rejected:
+                dnm_pair = [pair['name_a'], pair['name_b']]
+                # Check if already exists
+                exists = any(
+                    set(p) == set(dnm_pair)
+                    for p in aliases_config['do_not_merge']
+                )
+                if not exists:
+                    aliases_config['do_not_merge'].append(dnm_pair)
+                    logger.info(f"  [DO-NOT-MERGE] {pair['name_a']} / {pair['name_b']}")
+
+            # Write updated aliases
+            try:
+                with open(NAME_ALIASES_PATH, 'w') as f:
+                    yaml.dump(aliases_config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+                logger.info(f"  Updated {NAME_ALIASES_PATH}")
+            except Exception as e:
+                logger.error(f"  Failed to write aliases: {e}")
 
         self.stats['suggested_merges'] = len(suggestions['suggested_merges'])
         self.stats['flagged_handles'] = len(suggestions['flagged_handles'])
         self.stats['potential_do_not_merge'] = len(suggestions['potential_do_not_merge'])
 
-        logger.info(f"Generated: {self.stats['suggested_merges']} merge suggestions, "
-                   f"{self.stats['flagged_handles']} flagged handles, "
-                   f"{self.stats['potential_do_not_merge']} potential do-not-merge")
+        logger.info("-" * 80)
+        logger.info("SUMMARY")
+        logger.info("-" * 80)
+        logger.info(f"  Auto-approved merges: {self.stats['auto_approved_merges']}")
+        logger.info(f"  LLM-verified merges: {self.stats['llm_verified_merges']}")
+        logger.info(f"  LLM-rejected pairs: {self.stats['llm_rejected_pairs']}")
+        logger.info(f"  Needs human review: {self.stats['suggested_merges']}")
+        logger.info(f"  Flagged handles: {self.stats['flagged_handles']}")
+        logger.info(f"  LLM calls made: {self.stats['llm_calls']}")
 
-        # Write suggestions
+        # Write suggestions (only uncertain items)
         self._write_suggestions(suggestions)
 
         logger.info("-" * 80)
         logger.info("PHASE 3 COMPLETE")
         logger.info("-" * 80)
-        logger.info(f"Review suggestions: streamlit run dashboards/name_review.py --server.port 8502")
+        if self.stats['suggested_merges'] > 0:
+            logger.info(f"Review {self.stats['suggested_merges']} items: streamlit run dashboards/name_review.py")
+        else:
+            logger.info("All name pairs resolved! No human review needed.")
 
         return self.stats
 
@@ -684,6 +1040,9 @@ async def main():
     parser.add_argument('--threshold', type=float, default=0.70, help='Similarity threshold for merges')
     parser.add_argument('--start-date', type=str, help='Start date (YYYY-MM-DD)')
     parser.add_argument('--end-date', type=str, help='End date (YYYY-MM-DD)')
+    parser.add_argument('--no-llm', action='store_true', help='Disable LLM verification (faster, outputs all as suggestions)')
+    parser.add_argument('--llm-batch-size', type=int, default=10, help='Name pairs per LLM call')
+    parser.add_argument('--llm-min-hours', type=float, default=0.5, help='Min speaking hours to LLM-verify')
     args = parser.parse_args()
 
     # Get date range from config if not specified
@@ -694,6 +1053,9 @@ async def main():
 
     config = NameStandardizationConfig(
         merge_threshold=args.threshold,
+        use_llm=not args.no_llm,
+        llm_batch_size=args.llm_batch_size,
+        llm_min_hours=args.llm_min_hours,
     )
 
     strategy = NameStandardizationStrategy(

@@ -653,11 +653,11 @@ Respond with JSON:
 ```"""
 
     # =========================================================================
-    # PHASE 5: Identity Merge Detection
+    # PHASE 4: Identity Merge Detection
     # =========================================================================
 
     @classmethod
-    def phase5_identity_merge_verification(
+    def phase4_identity_merge_verification(
         cls,
         name_a: str,
         count_a: int,
@@ -756,6 +756,176 @@ CONFIDENCE GUIDE:
 - "very_likely": Names are very similar AND no contradictory evidence
 - "probably": Some similarity but uncertain
 - "unlikely": Names are clearly different or contradictory evidence found"""
+
+    # =========================================================================
+    # PHASE 3: Name Standardization (Batch)
+    # =========================================================================
+
+    @classmethod
+    def phase3_name_pair_batch(
+        cls,
+        pairs: List[Dict]
+    ) -> str:
+        """
+        Build prompt for batch verification of name pairs.
+
+        Version: 1.0
+        Used by: strategies/name_standardization.py
+
+        Each pair contains:
+        - name_a, name_b: The two names
+        - similarity: Embedding similarity (0-1)
+        - hours_a, hours_b: Speaking hours
+        - episodes_a, episodes_b: Episode counts
+        - shared_episodes: If >0, they co-appear (likely different people)
+        - sample_a, sample_b: Transcript excerpts
+
+        Returns batched decisions to minimize LLM calls.
+        """
+        pairs_text = ""
+        for i, p in enumerate(pairs):
+            co_host_warning = ""
+            if p.get('shared_episodes', 0) > 0:
+                co_host_warning = f"\n  ⚠️ CO-APPEAR in {p['shared_episodes']} episodes (likely different people!)"
+
+            pairs_text += f"""
+PAIR {i+1}:
+  Name A: "{p['name_a']}" ({p['hours_a']:.1f}h across {p['episodes_a']} episodes)
+  Name B: "{p['name_b']}" ({p['hours_b']:.1f}h across {p['episodes_b']} episodes)
+  Voice similarity: {p['similarity']:.3f}{co_host_warning}
+  Sample A: "{p.get('sample_a', 'N/A')[:150]}..."
+  Sample B: "{p.get('sample_b', 'N/A')[:150]}..."
+"""
+
+        return f"""You are verifying if name pairs refer to the same speaker based on voice embeddings and names.
+
+{pairs_text}
+
+For each pair, determine:
+1. SAME PERSON: Names match (accounting for typos, "Dr." prefix, nicknames) AND no co-appearance
+2. DIFFERENT PEOPLE: They co-appear in episodes, OR names are clearly different people
+3. NEEDS REVIEW: Uncertain - names could go either way
+
+IMPORTANT PATTERNS:
+- "Dr. X" and "X" = SAME (title prefix)
+- "Viva Frei" and "David Freiheit" = SAME (known alias)
+- Similar names but CO-APPEAR in episodes = DIFFERENT (co-hosts have similar voices!)
+- Very high similarity (>0.95) + similar names = likely SAME
+- First-name only matches are risky - could be different people with same first name
+
+Return JSON array with one decision per pair:
+```json
+[
+  {{
+    "pair": 1,
+    "decision": "same_person" | "different_people" | "needs_review",
+    "canonical_name": "The preferred name form" or null,
+    "confidence": "certain" | "high" | "medium" | "low",
+    "reasoning": "Brief explanation"
+  }},
+  ...
+]
+```"""
+
+    # =========================================================================
+    # PHASE 6: Speaker Hydration
+    # =========================================================================
+
+    @classmethod
+    def phase5_speaker_hydration(
+        cls,
+        name: str,
+        wikipedia_bio: Optional[str] = None,
+        wikipedia_description: Optional[str] = None,
+        linkedin_data: Optional[str] = None,
+        channels: Optional[List[str]] = None,
+        role: Optional[str] = None
+    ) -> str:
+        """
+        Build prompt for synthesizing speaker profile from gathered data.
+
+        Version: 1.0
+        Used by: strategies/speaker_hydration.py
+
+        Args:
+            name: Speaker's name
+            wikipedia_bio: Raw Wikipedia extract (if found)
+            wikipedia_description: Short Wikipedia description (if found)
+            linkedin_data: LinkedIn profile data (if available)
+            channels: List of channels the speaker appears on
+            role: Known role (host, guest, etc.)
+
+        Returns:
+            Formatted prompt string
+        """
+        # Build context sections
+        sources_section = ""
+
+        if wikipedia_bio:
+            sources_section += f"""
+WIKIPEDIA:
+Description: {wikipedia_description or 'N/A'}
+Bio: {wikipedia_bio[:1500]}
+"""
+
+        if linkedin_data:
+            sources_section += f"""
+LINKEDIN:
+{linkedin_data}
+"""
+
+        if channels:
+            sources_section += f"""
+APPEARS ON: {', '.join(channels[:10])}
+"""
+
+        if role:
+            sources_section += f"""
+ROLE: {role}
+"""
+
+        if not sources_section.strip():
+            sources_section = "(No external data found - use only the name)"
+
+        return f"""Create a concise speaker profile from the available data.
+
+SPEAKER NAME: {name}
+
+AVAILABLE DATA:
+{sources_section}
+
+YOUR TASK: Extract/synthesize the following fields. Use ONLY information from the sources above.
+If a field cannot be determined, use null.
+
+FIELDS TO EXTRACT:
+1. bio: A concise 1-2 sentence description of who this person is. Write fresh text, don't copy verbatim.
+2. country: Country of origin or primary residence (e.g., "Canada", "United States")
+3. occupation: Their primary role/profession (e.g., "Media commentator", "Politician", "Neuroscientist")
+4. organization: Primary affiliation/employer (e.g., "Rebel News", "Stanford University")
+5. website: Personal or organization website domain only, no https:// (e.g., "rebelnews.com")
+6. twitter: Twitter/X handle only, no @ symbol (e.g., "ezralevant")
+7. youtube: YouTube channel handle only (e.g., "RebelNewsOnline")
+8. linkedin: LinkedIn profile slug only (e.g., "ezra-levant-123")
+
+IMPORTANT:
+- For social handles, extract ONLY the handle/slug, not full URLs
+- If you're unsure about a social handle, use null rather than guessing
+- Bio should be factual and neutral in tone
+- Do NOT include birth dates or ages in the bio
+
+Return JSON:
+```json
+{{
+  "bio": "string or null",
+  "country": "string or null",
+  "occupation": "string or null",
+  "organization": "string or null",
+  "website": "string or null",
+  "twitter": "string or null",
+  "youtube": "string or null",
+  "linkedin": "string or null"
+}}
+```"""
 
     # =========================================================================
     # UTILITY METHODS

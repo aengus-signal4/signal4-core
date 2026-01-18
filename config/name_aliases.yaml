@@ -1,56 +1,60 @@
-# Name Aliases for Speaker Identification
-# ========================================
-# Maps non-standard names (handles, nicknames, typos) to canonical real names.
-# Used by Phase 3 label propagation to standardize anchor names.
-#
-# Format:
-#   canonical_name:
-#     - alias1
-#     - alias2
-#
-# The canonical name should be the "First Last" format when known.
-# Aliases are case-insensitive during matching.
-
-# Known mappings (manually verified)
 aliases:
-  # Rebel News hosts
-  "David Freiheit":
-    - "Viva Frei"
-    - "Viva Fry"  # Typo variant
-    - "Viva"
-    - "Viva Barnes"  # When appearing solo (not with Robert Barnes)
-    - "Viva Freiheit"
-
-  "Robert Barnes":
-    - "Barnes"
-
-  "Sheila Gunn Reid":
-    - "Sheila Gunn-Reed"  # Hyphenated variant
-
-  "Adam Soos":
-    - "Adam Sos"  # Typo
-
-  # Handles that need real name mapping (TODO: verify)
-  # "John Smith":
-  #   - "mistersunshinebaby"
-
-  # "Jane Doe":
-  #   - "MisterWhite"
-
-# Names flagged as handles (need manual research to find real names)
-# These will be logged during processing for review
+  David Freiheit:
+  - Viva Frei
+  - Viva Fry
+  - Viva
+  - Viva Barnes
+  - Viva Freiheit
+  Robert Barnes:
+  - Barnes
+  Sheila Gunn Reid:
+  - Sheila Gunn-Reed
+  Adam Soos:
+  - Adam Sos
+  Artur Pawlowski:
+  - Pastor Artur Pawlowski
+  Gad Saad:
+  - Dr. Gad Saad
+  James Lindsay:
+  - Dr. James Lindsay
+  Pastor Tim Stephens:
+  - Tim Stephens
+  Patrick Moore:
+  - Dr. Patrick Moore
+  W. Keith Campbell:
+  - Dr. W. Keith Campbell
+  Phil Hutchings:
+  - Pastor Phil Hutchings
+  Karim Elayoubi:
+  - Dr. Karim Elayoubi
+  Carol Swain:
+  - Dr. Carol Swain
+  Tony Abbott:
+  - The Honourable Tony Abbott
+  Donald Hoffman:
+  - Dr. Donald Hoffman
+  Richard Lindzen:
+  - Dr. Richard Lindzen
+  Yoram Hazony:
+  - Dr. Yoram Hazony
+  Julie Ponesse:
+  - Dr. Julie Ponesse
+  Sylvain Charlebois:
+  - Dr. Sylvain Charlebois
+  Derek Reimer:
+  - Pastor Derek Reimer
 unresolved_handles:
-  - "mistersunshinebaby"
-  - "MisterWhite"
-  - "the pleb"
-  - "Endeavour"
-  - "Billboard Chris"
-  - "The Distributist"
-  - "An0maly"
-
-# Names that should NEVER be merged (different people with similar embeddings)
-# Typically co-hosts who appear together frequently
+- mistersunshinebaby
+- MisterWhite
+- the pleb
+- Endeavour
+- Billboard Chris
+- The Distributist
+- An0maly
 do_not_merge:
-  - ["Ian Sénéchal", "Frank"]       # Co-hosts on "Ian et Frank" podcast
-  - ["Ian Sénéchal", "François Fournier"]  # Co-hosts
-  - ["Stéphane Hamel", "Amélie Paul"]      # Co-hosts on "En toute franchise"
+- - Ian Sénéchal
+  - Frank
+- - Ian Sénéchal
+  - François Fournier
+- - Stéphane Hamel
+  - Amélie Paul
