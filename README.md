@@ -73,6 +73,10 @@ git pull
 uv sync
 ```
 
+## Worker Setup
+
+See [docs/worker_setup.md](docs/worker_setup.md) for worker machine setup and troubleshooting.
+
 ## Architecture
 
 See [CLAUDE.md](CLAUDE.md) for detailed architecture documentation.
