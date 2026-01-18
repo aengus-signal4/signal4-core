@@ -18,20 +18,27 @@ Phase 2: Text Evidence Collection
     - Binary output: "certain" or "none"
     → Populates: speakers.identification_details['phase2']
 
-Phase 3: Anchor-Canopy Clustering (NEW - replaces old Phase 3+4)
-    - Text-verified speakers become anchors
-    - Multi-gate validation for cluster expansion
-    - Name collision detection (same name, different people)
-    - Unnamed identity creation for clusters without text evidence
-    - Pure embedding-based (no LLM calls)
+Phase 3: Speaker Clustering (two modes available via --phase3-mode)
+    Mode 'anchor' (default): Anchor-Canopy Clustering
+        - Text-verified speakers become anchors
+        - Multi-gate validation for cluster expansion
+        - More conservative, higher precision
+    Mode 'propagation': Label Propagation
+        - k-NN weighted voting from labeled neighbors
+        - Confidence scores based on neighbor agreement
+        - Faster, handles gradual transitions better
+    Both modes: Name collision detection, pure embedding-based (no LLM calls)
     → Populates: speaker_identities, speakers.speaker_identity_id
 
-Phase 4: DEPRECATED (merged into Phase 3)
-    - Now handled by Phase 3 anchor-canopy clustering
-
-Phase 5: Identity Merge Detection
+Phase 4: Identity Merge Detection
     - Find duplicate identities via centroid similarity
     - LLM verification + merge
+    → Merges duplicate speaker_identities
+
+Phase 5: Speaker Hydration
+    - Retrieve detailed biographical information about identified speakers
+    - Uses external APIs (LinkedIn, etc.) to enrich speaker profiles
+    → Populates: speaker_identities.bio, occupation, organization, social_profiles, etc.
 
 Usage:
     # Dry run on project
@@ -65,6 +72,8 @@ from src.speaker_identification.strategies.metadata_identification import Metada
 from src.speaker_identification.strategies.identity_merge_detection import IdentityMergeDetectionStrategy
 from src.speaker_identification.strategies.text_evidence_collection import TextEvidenceCollectionStrategy
 from src.speaker_identification.strategies.anchor_verified_clustering import AnchorVerifiedClusteringStrategy
+from src.speaker_identification.strategies.label_propagation_clustering import LabelPropagationStrategy
+from src.speaker_identification.strategies.speaker_hydration import SpeakerHydrationStrategy
 from src.database.session import get_session
 from src.utils.logger import setup_worker_logger
 from sqlalchemy import text
@@ -97,7 +106,9 @@ class SpeakerIdentificationOrchestrator:
         end_date: Optional[str] = None,
         include_assigned: bool = False,
         max_concurrent: int = 15,
-        batch_size: int = None
+        batch_size: int = None,
+        max_anchors: int = None,
+        phase3_mode: str = 'anchor'
     ):
         """
         Initialize orchestrator.
@@ -115,11 +126,15 @@ class SpeakerIdentificationOrchestrator:
             include_assigned: If True, re-verify speakers already assigned
             max_concurrent: Max concurrent LLM requests for Phase 2 (default: 15)
             batch_size: Process N speakers per batch, then recheck priority (default: None = all at once)
+            max_anchors: Max anchor name groups to process in Phase 3 (for testing)
+            phase3_mode: Phase 3 algorithm: 'anchor' (anchor-canopy) or 'propagation' (label propagation)
         """
         self.dry_run = dry_run
         self.include_assigned = include_assigned
         self.max_concurrent = max_concurrent
         self.batch_size = batch_size
+        self.max_anchors = max_anchors
+        self.phase3_mode = phase3_mode
 
         # Default phases
         if phases is None:
@@ -139,8 +154,8 @@ class SpeakerIdentificationOrchestrator:
             'phase1': {},
             'phase2': {},
             'phase3': {},
-            'phase4': {},
-            'phase5': {},
+            'phase4': {},  # Identity Merge Detection (was Phase 5)
+            'phase5': {},  # Speaker Hydration (new)
             'total_time': 0
         }
 
@@ -305,25 +320,45 @@ class SpeakerIdentificationOrchestrator:
 
     async def run_phase3(self, project: str = None, channel_id: int = None):
         """
-        Phase 3: Anchor-Canopy Clustering with Text-Verified Anchors.
+        Phase 3: Speaker Clustering and Assignment.
 
-        Uses text-verified speakers from Phase 2 as trusted anchors,
-        then expands clusters using multi-gate validation.
+        Two modes available (controlled by --phase3-mode):
+
+        1. 'anchor' (default): Anchor-Canopy Clustering
+           - Uses text-verified speakers from Phase 2 as trusted anchors
+           - Expands clusters using multi-gate validation
+           - More conservative, higher precision
+
+        2. 'propagation': Single-Pass Label Propagation
+           - Uses k-NN weighted voting to propagate labels
+           - Assigns confidence scores based on neighbor agreement
+           - Faster, handles gradual transitions better
+
         Creates/updates speaker identities and assigns all cluster members.
-
-        This replaces both old Phase 3 (verified_centroid_generation) and
-        Phase 4 (embedding_propagation).
         """
         logger.info("")
         logger.info("=" * 80)
-        logger.info("PHASE 3: ANCHOR-CANOPY CLUSTERING")
-        logger.info("=" * 80)
 
-        strategy = AnchorVerifiedClusteringStrategy(
-            dry_run=self.dry_run,
-            start_date=self.start_date,
-            end_date=self.end_date
-        )
+        if self.phase3_mode == 'propagation':
+            logger.info("PHASE 3: LABEL PROPAGATION (Single-Pass)")
+            logger.info("=" * 80)
+
+            strategy = LabelPropagationStrategy(
+                dry_run=self.dry_run,
+                start_date=self.start_date,
+                end_date=self.end_date,
+                max_anchors=self.max_anchors
+            )
+        else:
+            logger.info("PHASE 3: ANCHOR-CANOPY CLUSTERING")
+            logger.info("=" * 80)
+
+            strategy = AnchorVerifiedClusteringStrategy(
+                dry_run=self.dry_run,
+                start_date=self.start_date,
+                end_date=self.end_date,
+                max_anchors=self.max_anchors
+            )
 
         stats = await strategy.run(project=project)
 
@@ -332,33 +367,38 @@ class SpeakerIdentificationOrchestrator:
 
     async def run_phase4(self, project: str = None, channel_id: int = None):
         """
-        Phase 4: DEPRECATED - Now merged into Phase 3.
-
-        Phase 4 functionality (embedding propagation) is now handled
-        by Phase 3's anchor-canopy clustering approach.
-        """
-        logger.info("")
-        logger.info("=" * 80)
-        logger.info("PHASE 4: SKIPPED (merged into Phase 3)")
-        logger.info("=" * 80)
-        logger.info("Phase 4 functionality is now handled by Phase 3 anchor-canopy clustering.")
-
-        self.stats['phase4'] = {'status': 'deprecated', 'message': 'merged into Phase 3'}
-        return self.stats['phase4']
-
-    async def run_phase5(self, project: str = None, channel_id: int = None):
-        """
-        Phase 5: Identity merge detection.
+        Phase 4: Identity merge detection.
 
         Detects and merges duplicate speaker identities that were created
         separately due to name variations or transcription errors.
         """
         logger.info("")
         logger.info("=" * 80)
-        logger.info("PHASE 5: IDENTITY MERGE DETECTION")
+        logger.info("PHASE 4: IDENTITY MERGE DETECTION")
         logger.info("=" * 80)
 
         strategy = IdentityMergeDetectionStrategy(
+            dry_run=self.dry_run
+        )
+
+        stats = await strategy.run(project=project)
+
+        self.stats['phase4'] = stats
+        return stats
+
+    async def run_phase5(self, project: str = None, channel_id: int = None):
+        """
+        Phase 5: Speaker Hydration.
+
+        Retrieves detailed biographical information about identified speakers
+        using external APIs (LinkedIn, etc.) to enrich speaker profiles.
+        """
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("PHASE 5: SPEAKER HYDRATION")
+        logger.info("=" * 80)
+
+        strategy = SpeakerHydrationStrategy(
             dry_run=self.dry_run
         )
 
@@ -464,15 +504,12 @@ class SpeakerIdentificationOrchestrator:
 
         if 4 in self.phases:
             p4 = self.stats['phase4']
-            if p4.get('status') == 'deprecated':
-                logger.info(f"Phase 4: Skipped (merged into Phase 3)")
-            else:
-                total_matches = p4.get('auto_matches', 0) + p4.get('llm_matches', 0)
-                logger.info(f"Phase 4: {total_matches} matches, {p4.get('speakers_assigned', 0)} assigned")
+            logger.info(f"Phase 4: {p4.get('llm_confirmed_same', 0)} merges confirmed, {p4.get('merges_executed', 0)} executed")
 
         if 5 in self.phases:
             p5 = self.stats['phase5']
-            logger.info(f"Phase 5: {p5.get('llm_confirmed_same', 0)} merges confirmed, {p5.get('merges_executed', 0)} executed")
+            logger.info(f"Phase 5: {p5.get('identities_hydrated', 0)} identities hydrated, "
+                       f"{p5.get('api_calls', 0)} API calls")
 
         logger.info(f"Total time: {elapsed/60:.1f} minutes")
         logger.info("=" * 80)
@@ -488,9 +525,9 @@ async def main():
 PHASES:
   1 = Metadata extraction (channel hosts, episode speakers from descriptions)
   2 = Text Evidence Collection (find transcript evidence: self-intro, addressed, introduced)
-  3 = Anchor-Canopy Clustering (text-verified anchors + multi-gate expansion)
-  4 = DEPRECATED (merged into Phase 3)
-  5 = Identity Merge Detection (detect and merge duplicate identities)
+  3 = Speaker Clustering (--phase3-mode: 'anchor' or 'propagation')
+  4 = Identity Merge Detection (detect and merge duplicate identities)
+  5 = Speaker Hydration (enrich profiles with external data: LinkedIn, etc.)
 
 Examples:
   # Dry run on project
@@ -522,8 +559,8 @@ Examples:
     parser.add_argument('--max-channels', type=int, help='Max channels to process')
     parser.add_argument('--max-episodes', type=int, help='Max episodes per channel (Phase 1)')
     parser.add_argument('--max-speakers', type=int, help='Max speakers (Phase 2, 4)')
-    parser.add_argument('--min-duration-pct', type=float, default=0.10,
-                       help='Min speaker duration %% (default: 0.10)')
+    parser.add_argument('--min-duration-pct', type=float, default=0.08,
+                       help='Min speaker duration %% (default: 0.08)')
     parser.add_argument('--start-channel-id', type=int,
                        help='Resume from channel ID')
     parser.add_argument('--max-concurrent', type=int, default=15,
@@ -532,6 +569,11 @@ Examples:
                        help='Process N items per batch, then recheck priority for new content. '
                             'Phase 1: N episodes per batch. Phase 2: N speakers per batch. '
                             'Allows recent uploads to jump ahead of backlog between batches.')
+    parser.add_argument('--max-anchors', type=int, default=None,
+                       help='Max anchor name groups to process in Phase 3 (for testing)')
+    parser.add_argument('--phase3-mode', type=str, choices=['anchor', 'propagation'], default='anchor',
+                       help='Phase 3 algorithm: anchor (anchor-canopy clustering, default) or '
+                            'propagation (single-pass label propagation)')
 
     args = parser.parse_args()
 
@@ -578,7 +620,9 @@ Examples:
         start_channel_id=args.start_channel_id,
         include_assigned=args.include_assigned,
         max_concurrent=args.max_concurrent,
-        batch_size=args.batch_size
+        batch_size=args.batch_size,
+        max_anchors=args.max_anchors,
+        phase3_mode=args.phase3_mode
     )
 
     # Set up signal handlers for graceful shutdown
