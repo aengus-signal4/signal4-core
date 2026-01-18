@@ -12,6 +12,10 @@ Top-level orchestrator for transcription tasks. Handles:
 Transcription logic is delegated to self-contained methods in transcribe_methods/
 """
 
+# Centralized environment setup (must be before other imports)
+from src.utils.env_setup import setup_env
+setup_env('transcribe')
+
 import os
 import sys
 from pathlib import Path

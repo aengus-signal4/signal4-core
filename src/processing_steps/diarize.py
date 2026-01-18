@@ -14,6 +14,10 @@ Usage:
     python diarize_fluid.py --content <content_id> [--test] [--rewrite]
 """
 
+# Centralized environment setup (must be before other imports)
+from src.utils.env_setup import setup_env
+setup_env()
+
 import sys
 from pathlib import Path
 

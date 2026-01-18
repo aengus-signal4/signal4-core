@@ -1,25 +1,14 @@
-# Disable MallocStackLogging warnings on macOS (must be before other imports)
+# Centralized environment setup (must be before other imports)
+from src.utils.env_setup import setup_env, get_subprocess_env
+setup_env()
+
 import os
-os.environ['MallocStackLogging'] = '0'
-os.environ['MallocStackLoggingNoCompact'] = '0'
 
 # Load .env file for credentials (S3_ACCESS_KEY, POSTGRES_PASSWORD, etc.)
 from dotenv import load_dotenv
 from pathlib import Path
 _env_path = Path(__file__).resolve().parents[2] / '.env'
 load_dotenv(_env_path)
-
-# Ensure homebrew binaries (ffmpeg, etc.) are in PATH for subprocesses
-_homebrew_bin = '/opt/homebrew/bin'
-if _homebrew_bin not in os.environ.get('PATH', ''):
-    os.environ['PATH'] = f"{_homebrew_bin}:{os.environ.get('PATH', '')}"
-
-# Ensure homebrew libraries (ffmpeg libs for torchcodec) are discoverable
-# Use DYLD_FALLBACK_LIBRARY_PATH as it's less restricted by SIP than DYLD_LIBRARY_PATH
-_homebrew_lib = '/opt/homebrew/lib'
-for _dyld_var in ['DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH']:
-    if _homebrew_lib not in os.environ.get(_dyld_var, ''):
-        os.environ[_dyld_var] = f"{_homebrew_lib}:{os.environ.get(_dyld_var, '')}"
 
 # Standard library imports
 import asyncio
@@ -816,20 +805,14 @@ async def run_processing_script(task_type: str, task_data: Dict[str, Any]) -> Di
     # Run the script using asyncio.create_subprocess_exec
     process = None
     try:
-        # Set up environment with PYTHONPATH to ensure src imports work
-        env = os.environ.copy()
+        # Get subprocess environment with all required paths (PATH, DYLD_*, etc.)
+        env = get_subprocess_env()
+        # Add PYTHONPATH to ensure src imports work
         current_pythonpath = env.get('PYTHONPATH', '')
         if current_pythonpath:
             env['PYTHONPATH'] = f"{project_root}:{current_pythonpath}"
         else:
             env['PYTHONPATH'] = str(project_root)
-
-        # Ensure homebrew libraries are discoverable for torchcodec/pyannote on macOS
-        homebrew_lib = '/opt/homebrew/lib'
-        for dyld_var in ['DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH']:
-            current = env.get(dyld_var, '')
-            if homebrew_lib not in current:
-                env[dyld_var] = f"{homebrew_lib}:{current}" if current else homebrew_lib
 
         process = await asyncio.create_subprocess_exec(
             *cmd,

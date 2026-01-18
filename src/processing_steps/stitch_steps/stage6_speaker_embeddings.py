@@ -47,6 +47,10 @@ Methods:
 - ComprehensiveSpeakerProcessor.process_comprehensive_speaker_assignment(): Core processing
 """
 
+# Centralized environment setup (must be before other imports)
+from src.utils.env_setup import setup_env
+setup_env()
+
 import logging
 import time
 import aiohttp
@@ -65,13 +69,6 @@ import json
 import argparse
 import torch
 import os
-
-# Ensure homebrew libraries (ffmpeg for torchcodec/pyannote) are discoverable
-_homebrew_lib = '/opt/homebrew/lib'
-for _dyld_var in ['DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH']:
-    if _homebrew_lib not in os.environ.get(_dyld_var, ''):
-        os.environ[_dyld_var] = f"{_homebrew_lib}:{os.environ.get(_dyld_var, '')}"
-
 
 from src.utils.logger import setup_worker_logger
 from .stage3_tables import WordTable

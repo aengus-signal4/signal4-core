@@ -13,6 +13,10 @@ Final cleanup step that:
 This step runs after segment_embeddings to optimize storage.
 """
 
+# Centralized environment setup (must be before other imports)
+from src.utils.env_setup import setup_env
+setup_env()
+
 import sys
 from pathlib import Path
 

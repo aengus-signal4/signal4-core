@@ -31,15 +31,11 @@ Examples:
     python stitch.py --content Bdb001 --test             # Run full pipeline
 """
 
-import os
-# Set tokenizers parallelism before any imports to avoid fork warning
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+# Centralized environment setup (must be before other imports)
+from src.utils.env_setup import setup_env
+setup_env('stitch')
 
-# Ensure homebrew libraries (ffmpeg for torchcodec/pyannote) are discoverable on macOS
-_homebrew_lib = '/opt/homebrew/lib'
-for _dyld_var in ['DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH']:
-    if _homebrew_lib not in os.environ.get(_dyld_var, ''):
-        os.environ[_dyld_var] = f"{_homebrew_lib}:{os.environ.get(_dyld_var, '')}"
+import os
 
 # PyTorch 2.6+ changed default weights_only=True which breaks loading older models
 # that contain pickle-serialized objects like pytorch_lightning callbacks and omegaconf.

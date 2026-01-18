@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
+# Centralized environment setup (must be before other imports)
+from src.utils.env_setup import setup_env
+setup_env()
+
 import sys
+import os
 from pathlib import Path
 
 from src.utils.paths import get_project_root
@@ -8,7 +13,6 @@ import asyncio
 import logging
 import json
 import yaml
-import os
 from typing import Dict, List, Optional
 from datetime import datetime
 import tempfile
@@ -217,6 +221,15 @@ class PodcastDownloader:
                             elif response.status in (403, 429, 401, 503):
                                 error_text = await response.text()
                                 logger.warning(f"Download failed with status {response.status}. Will attempt yt-dlp fallback. Reason: {error_text[:200]}")
+                                return await self._try_ytdlp_download(url, output_path)
+                            elif response.status == 400:
+                                error_text = await response.text()
+                                # Check for known permanent failure patterns (e.g., RSS disabled)
+                                if "disabled" in error_text.lower() or "ValidationError" in error_text:
+                                    logger.error(f"HTTP 400 with permanent failure indicator: {error_text[:200]}")
+                                    return create_error_result(ErrorCode.FEED_DISABLED, f"HTTP 400: content/feed disabled", permanent=True)
+                                # Otherwise try yt-dlp fallback
+                                logger.warning(f"Download failed with status 400. Will attempt yt-dlp fallback. Reason: {error_text[:200]}")
                                 return await self._try_ytdlp_download(url, output_path)
                             elif response.status >= 400:
                                 error_text = await response.text()
@@ -485,6 +498,11 @@ class PodcastDownloader:
                 if "[SSL] record layer failure" in stderr_text or "SSLError" in stderr_text:
                     logger.warning(f"yt-dlp SSL error detected - trying requests library with permissive SSL")
                     return await self._try_requests_download(url, output_path)
+
+                # Check for 400 Bad Request - often means content/feed disabled or invalid URL
+                if "400" in stderr_text and "Bad Request" in stderr_text:
+                    logger.error(f"HTTP 400 Bad Request detected - content likely unavailable or feed disabled")
+                    return create_error_result(ErrorCode.FEED_DISABLED, f"HTTP 400 Bad Request: content unavailable", permanent=True)
 
                 # Check for 502 Bad Gateway - typically means content unavailable in redirect chains
                 if "502" in stderr_text and "Bad Gateway" in stderr_text:

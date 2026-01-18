@@ -11,6 +11,10 @@ Provides consistent handling of:
 4. Status updates
 """
 
+# Centralized environment setup (must be before other imports)
+from src.utils.env_setup import setup_env
+setup_env()
+
 import os
 import time
 import logging
@@ -21,13 +25,6 @@ from src.utils.paths import get_project_root, get_config_path
 import yaml
 import torch
 import numpy as np
-
-# Ensure homebrew libraries (ffmpeg for torchcodec/pyannote) are discoverable
-_homebrew_lib = '/opt/homebrew/lib'
-for _dyld_var in ['DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH']:
-    if _homebrew_lib not in os.environ.get(_dyld_var, ''):
-        os.environ[_dyld_var] = f"{_homebrew_lib}:{os.environ.get(_dyld_var, '')}"
-
 
 from .stage3_tables import WordTable
 
