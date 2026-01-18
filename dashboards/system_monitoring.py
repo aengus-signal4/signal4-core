@@ -419,7 +419,7 @@ def get_pipeline_progress_from_db() -> dict:
                     COUNT(*) FILTER (WHERE is_embedded = true) as embedded,
                     COUNT(*) FILTER (WHERE is_stitched = true AND is_embedded = false) as needs_embedding
                 FROM content
-                WHERE status = 'active'
+                WHERE blocked_download = false AND is_duplicate = false AND is_short = false
             """)).fetchone()
 
         total_segments = emb_result.total_segments or 1

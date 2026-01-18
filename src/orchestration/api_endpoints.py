@@ -699,7 +699,7 @@ def create_api_endpoints(orchestrator) -> FastAPI:
                         COUNT(*) FILTER (WHERE is_embedded = true) as embedded,
                         COUNT(*) FILTER (WHERE is_stitched = true AND is_embedded = false) as needs_embedding
                     FROM content
-                    WHERE status = 'active'
+                    WHERE blocked_download = false AND is_duplicate = false AND is_short = false
                 """)).fetchone()
 
             # Calculate percentages
