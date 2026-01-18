@@ -50,7 +50,9 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import faiss
 import numpy as np
+import re
 from tqdm import tqdm
+import yaml
 
 from src.utils.paths import get_project_root
 project_root = str(get_project_root())
@@ -61,6 +63,11 @@ from sqlalchemy import text
 from src.database.session import get_session
 from src.utils.logger import setup_worker_logger
 from src.utils.config import get_project_date_range
+
+# Path to name aliases config and suggestions output
+NAME_ALIASES_PATH = Path(project_root) / 'config' / 'name_aliases.yaml'
+NAME_SUGGESTIONS_PATH = Path(project_root) / 'config' / 'name_suggestions.yaml'
+NAME_SUGGESTIONS_JSON_PATH = Path(project_root) / 'config' / 'name_suggestions.json'
 
 logger = setup_worker_logger('speaker_identification.label_propagation')
 
@@ -106,6 +113,11 @@ class LabelPropagationConfig:
     use_metadata_constraint: bool = True   # Use episode hosts/guests to constrain assignments
     high_duration_pct: float = 0.10        # Speakers with >= this % are high-duration (targets for 3b, matches Phase 2)
     metadata_similarity_boost: float = 0.10  # Bonus similarity when label matches episode metadata
+
+    # Name standardization (merge name variants for same person)
+    standardize_names: bool = True         # Enable embedding-based name merging
+    name_merge_threshold: float = 0.70     # Centroid similarity to merge names
+    prefer_full_names: bool = True         # Prefer "First Last" format over nicknames
 
 
 class LabelPropagationStrategy:
@@ -158,6 +170,13 @@ class LabelPropagationStrategy:
             'high_duration_coverage_pct': 0.0,
             'metadata_boost_assignments': 0,
             'direct_metadata_assignments': 0,
+            # Name standardization metrics
+            'names_before_standardization': 0,
+            'names_after_standardization': 0,
+            'name_merges': 0,
+            'handles_flagged': 0,
+            'suggested_merges': 0,
+            'suggested_do_not_merge': 0,
             'errors': []
         }
 
@@ -275,6 +294,606 @@ class LabelPropagationStrategy:
         """Pre-compute k-NN for all speakers."""
         sims, indices = index.search(embeddings, k)
         return indices, sims
+
+    def _score_name_quality(self, name: str) -> int:
+        """
+        Score a name's quality for canonicalization.
+        Higher score = more likely to be the canonical form.
+
+        Returns:
+            Score from -10 to +10
+        """
+        score = 0
+
+        # Check for "First Last" format (2+ words, each capitalized)
+        words = name.split()
+        if len(words) >= 2:
+            if all(w[0].isupper() for w in words if w):
+                score += 3  # Full name format
+        elif len(words) == 1:
+            score -= 1  # Single word is less ideal
+
+        # Title case bonus
+        if name == name.title():
+            score += 1
+
+        # Handle/pseudonym patterns (negative)
+        # camelCase (lowercase start, uppercase middle)
+        if re.match(r'^[a-z]+[A-Z]', name):
+            score -= 3
+
+        # All lowercase single word
+        if len(words) == 1 and name.islower():
+            score -= 2
+
+        # Contains numbers
+        if re.search(r'\d', name):
+            score -= 3
+
+        # "The X" pattern
+        if name.lower().startswith('the '):
+            score -= 2
+
+        # Known handle patterns
+        handle_patterns = [
+            r'^mister',
+            r'^mr\.',
+            r'sunshine',
+            r'baby$',
+            r'^billboard',
+            r'^viva$',  # Single "Viva" is likely incomplete
+        ]
+        for pattern in handle_patterns:
+            if re.search(pattern, name.lower()):
+                score -= 2
+
+        # Bonus for common name patterns (First Last with reasonable lengths)
+        if len(words) == 2 and 2 <= len(words[0]) <= 15 and 2 <= len(words[1]) <= 20:
+            score += 1
+
+        return score
+
+    def _is_likely_handle(self, name: str) -> bool:
+        """Check if a name looks like a handle/pseudonym rather than a real name."""
+        # camelCase
+        if re.match(r'^[a-z]+[A-Z]', name):
+            return True
+        # Contains numbers
+        if re.search(r'\d', name):
+            return True
+        # All lowercase single word
+        words = name.split()
+        if len(words) == 1 and name.islower():
+            return True
+        # Known handle patterns
+        handle_indicators = ['mister', 'billboard', 'pleb', 'anonymous', 'the ']
+        if any(ind in name.lower() for ind in handle_indicators):
+            return True
+        return False
+
+    def _get_sample_segments_for_name(self, name: str, speakers: List[Dict], n_samples: int = 3) -> List[Dict]:
+        """
+        Get sample audio segments for a name to enable listening/review.
+
+        Returns list of segments with content_id, speaker_id, and timing info.
+        """
+        # Sort by duration descending to get substantial samples
+        sorted_speakers = sorted(speakers, key=lambda s: s.get('duration', 0) or 0, reverse=True)
+
+        samples = []
+        seen_content = set()
+
+        with get_session() as session:
+            for sp in sorted_speakers:
+                if len(samples) >= n_samples:
+                    break
+
+                content_id = sp.get('content_id')
+                speaker_id = sp.get('speaker_id')
+
+                # Prefer different episodes for variety
+                if content_id in seen_content and len(samples) > 0:
+                    continue
+                seen_content.add(content_id)
+
+                # Get a representative segment for this speaker
+                # Note: speaker_transcriptions.content_id is integer FK to content.id
+                result = session.execute(text("""
+                    SELECT
+                        st.id as transcription_id,
+                        st.start_time,
+                        st.end_time,
+                        st.text,
+                        c.title as episode_title,
+                        c.channel_id,
+                        c.content_id as content_id_str
+                    FROM speaker_transcriptions st
+                    JOIN content c ON st.content_id = c.id
+                    WHERE c.content_id = :content_id
+                      AND st.speaker_id = :speaker_id
+                      AND st.end_time - st.start_time BETWEEN 5 AND 30
+                      AND LENGTH(st.text) > 50
+                    ORDER BY st.end_time - st.start_time DESC
+                    LIMIT 1
+                """), {
+                    'content_id': content_id,
+                    'speaker_id': speaker_id
+                }).fetchone()
+
+                if result:
+                    samples.append({
+                        'content_id': content_id,
+                        'speaker_id': speaker_id,
+                        'start_time': float(result.start_time),
+                        'end_time': float(result.end_time),
+                        'duration': round(float(result.end_time - result.start_time), 1),
+                        'text': result.text[:200] + ('...' if len(result.text) > 200 else ''),
+                        'episode_title': result.episode_title,
+                        'channel_id': result.channel_id,
+                    })
+
+        return samples
+
+    def _write_suggestions_file(self, suggestions: Dict) -> None:
+        """
+        Write suggestions to YAML file for human/frontier review.
+
+        The suggestions file is overwritten each run - it's a working document
+        for review, not a persistent store. Approved items should be moved
+        to name_aliases.yaml manually or via frontier model.
+        """
+        output = f"""# Name Standardization Suggestions
+# Generated: {suggestions['generated_at']}
+# Threshold: {suggestions['threshold_used']}
+#
+# INSTRUCTIONS:
+# 1. Review each suggestion below
+# 2. For approved merges: add to config/name_aliases.yaml under 'aliases'
+# 3. For false positives: add to 'do_not_merge' in name_aliases.yaml
+# 4. For handles: research real name and add to 'aliases', or add to 'unresolved_handles'
+#
+# This file is regenerated each Phase 3 run.
+
+"""
+        # Suggested merges
+        output += "# ============================================================================\n"
+        output += "# SUGGESTED MERGES\n"
+        output += "# These name pairs have similar voice embeddings and may be the same person.\n"
+        output += "# ============================================================================\n\n"
+
+        if suggestions['suggested_merges']:
+            output += "suggested_merges:\n"
+            for merge in sorted(suggestions['suggested_merges'], key=lambda x: -x['similarity']):
+                output += f"  - canonical: \"{merge['canonical']}\"\n"
+                output += f"    variant: \"{merge['variant']}\"\n"
+                output += f"    similarity: {merge['similarity']}\n"
+                output += f"    evidence:\n"
+                ev = merge['evidence']
+                output += f"      canonical: {ev['canonical_hours']}h across {ev['canonical_episodes']} episodes (quality={ev['canonical_quality_score']})\n"
+                output += f"      variant: {ev['variant_hours']}h across {ev['variant_episodes']} episodes (quality={ev['variant_quality_score']})\n"
+                output += "\n"
+        else:
+            output += "suggested_merges: []  # No new merges detected\n\n"
+
+        # Flagged handles
+        output += "# ============================================================================\n"
+        output += "# FLAGGED HANDLES\n"
+        output += "# These appear to be pseudonyms/handles without known real names.\n"
+        output += "# Research needed to find real name, or add to 'unresolved_handles'.\n"
+        output += "# ============================================================================\n\n"
+
+        if suggestions['flagged_handles']:
+            output += "flagged_handles:\n"
+            for handle in sorted(suggestions['flagged_handles'], key=lambda x: -x['hours']):
+                output += f"  - handle: \"{handle['handle']}\"\n"
+                output += f"    hours: {handle['hours']}\n"
+                output += f"    episodes: {handle['episodes']}\n"
+                output += "\n"
+        else:
+            output += "flagged_handles: []  # No new handles detected\n\n"
+
+        # Potential do-not-merge
+        output += "# ============================================================================\n"
+        output += "# POTENTIAL DO-NOT-MERGE\n"
+        output += "# These pairs have similar embeddings BUT appear in same episodes (co-hosts).\n"
+        output += "# If confirmed as different people, add to 'do_not_merge' in name_aliases.yaml.\n"
+        output += "# ============================================================================\n\n"
+
+        if suggestions['potential_do_not_merge']:
+            output += "potential_do_not_merge:\n"
+            for pair in sorted(suggestions['potential_do_not_merge'], key=lambda x: -x['similarity']):
+                output += f"  - names: [\"{pair['names'][0]}\", \"{pair['names'][1]}\"]\n"
+                output += f"    similarity: {pair['similarity']}\n"
+                output += f"    shared_episodes: {pair['shared_episodes']}\n"
+                output += f"    reason: \"{pair['reason']}\"\n"
+                output += "\n"
+        else:
+            output += "potential_do_not_merge: []  # No potential false merges detected\n"
+
+        try:
+            with open(NAME_SUGGESTIONS_PATH, 'w') as f:
+                f.write(output)
+        except Exception as e:
+            logger.warning(f"  Failed to write YAML suggestions file: {e}")
+
+        # Also write JSON for the Streamlit dashboard
+        try:
+            with open(NAME_SUGGESTIONS_JSON_PATH, 'w') as f:
+                json.dump(suggestions, f, indent=2, default=str)
+            logger.info(f"  JSON suggestions written to: {NAME_SUGGESTIONS_JSON_PATH}")
+        except Exception as e:
+            logger.warning(f"  Failed to write JSON suggestions file: {e}")
+
+    def _load_name_aliases(self) -> Tuple[Dict[str, str], Set[str], Set[frozenset]]:
+        """
+        Load name aliases from config file.
+
+        Returns:
+            - alias_to_canonical: Dict mapping alias (lowercase) -> canonical name
+            - unresolved_handles: Set of known handles without real name mappings
+            - do_not_merge: Set of frozensets of names that should never be merged
+        """
+        alias_to_canonical = {}
+        unresolved_handles = set()
+        do_not_merge = set()
+
+        if not NAME_ALIASES_PATH.exists():
+            logger.info(f"  No alias file found at {NAME_ALIASES_PATH}")
+            return alias_to_canonical, unresolved_handles, do_not_merge
+
+        try:
+            with open(NAME_ALIASES_PATH, 'r') as f:
+                config = yaml.safe_load(f)
+
+            if not config:
+                return alias_to_canonical, unresolved_handles, do_not_merge
+
+            # Load aliases
+            aliases = config.get('aliases', {})
+            for canonical, alias_list in aliases.items():
+                if alias_list:
+                    for alias in alias_list:
+                        alias_to_canonical[alias.lower()] = canonical
+
+            # Load unresolved handles
+            handles = config.get('unresolved_handles', [])
+            if handles:
+                unresolved_handles = set(h.lower() for h in handles)
+
+            # Load do-not-merge pairs
+            dnm_list = config.get('do_not_merge', [])
+            if dnm_list:
+                for pair in dnm_list:
+                    if isinstance(pair, list) and len(pair) >= 2:
+                        # Create frozenset of lowercase names for O(1) lookup
+                        do_not_merge.add(frozenset(n.lower() for n in pair))
+
+            logger.info(f"  Loaded {len(alias_to_canonical)} aliases, {len(unresolved_handles)} unresolved handles, "
+                       f"{len(do_not_merge)} do-not-merge pairs")
+
+        except Exception as e:
+            logger.warning(f"  Error loading aliases: {e}")
+
+        return alias_to_canonical, unresolved_handles, do_not_merge
+
+    def _apply_static_aliases(
+        self,
+        speakers_by_name: Dict[str, List[Dict]],
+        alias_to_canonical: Dict[str, str],
+        unresolved_handles: Set[str]
+    ) -> Tuple[Dict[str, List[Dict]], Dict[str, str], int]:
+        """
+        Apply static aliases from config file before embedding-based merging.
+
+        This ensures known mappings are always applied consistently (idempotent).
+
+        Returns:
+            - Updated speakers_by_name
+            - Name mappings applied
+            - Count of unresolved handles found
+        """
+        name_mappings = {}
+        merged_speakers_by_name = {}
+        unresolved_count = 0
+
+        # Group names by their canonical form
+        canonical_groups: Dict[str, List[str]] = defaultdict(list)
+
+        for name in speakers_by_name.keys():
+            name_lower = name.lower()
+
+            # Check if this name is an alias
+            if name_lower in alias_to_canonical:
+                canonical = alias_to_canonical[name_lower]
+                canonical_groups[canonical].append(name)
+                if name != canonical:
+                    name_mappings[name] = canonical
+            else:
+                # Check if the name itself is a canonical name
+                # (in case it appears with different casing)
+                canonical_groups[name].append(name)
+
+            # Track unresolved handles
+            if name_lower in unresolved_handles:
+                unresolved_count += 1
+                logger.info(f"  [UNRESOLVED] '{name}' is a known handle without real name mapping")
+
+        # Merge speakers for each canonical group
+        for canonical, name_variants in canonical_groups.items():
+            merged_speakers = []
+            for variant in name_variants:
+                if variant in speakers_by_name:
+                    merged_speakers.extend(speakers_by_name[variant])
+
+            if merged_speakers:
+                merged_speakers_by_name[canonical] = merged_speakers
+
+                if len(name_variants) > 1:
+                    others = [v for v in name_variants if v != canonical]
+                    logger.info(f"  [ALIAS] {others} -> '{canonical}' (from config)")
+
+        return merged_speakers_by_name, name_mappings, unresolved_count
+
+    def _standardize_anchor_names(
+        self,
+        speakers_by_name: Dict[str, List[Dict]],
+        all_speakers: Dict[int, Dict]
+    ) -> Tuple[Dict[str, List[Dict]], Dict[str, str]]:
+        """
+        Standardize anchor names by merging variants of the same person.
+
+        Two-stage process:
+        1. Apply static aliases from config file (idempotent, known mappings)
+        2. Use embedding similarity to detect additional merges
+
+        Args:
+            speakers_by_name: Dict of name -> list of verified speakers
+            all_speakers: All speakers with embeddings
+
+        Returns:
+            - Updated speakers_by_name with merged names
+            - Mapping of original_name -> canonical_name
+        """
+        if not self.config.standardize_names:
+            return speakers_by_name, {}
+
+        logger.info("Standardizing anchor names...")
+        all_name_mappings = {}
+
+        # Stage 1: Apply static aliases from config (idempotent)
+        logger.info("  Stage 1: Applying static aliases from config...")
+        alias_to_canonical, unresolved_handles, do_not_merge = self._load_name_aliases()
+
+        if alias_to_canonical:
+            speakers_by_name, static_mappings, unresolved_count = self._apply_static_aliases(
+                speakers_by_name, alias_to_canonical, unresolved_handles
+            )
+            all_name_mappings.update(static_mappings)
+            self.stats['static_alias_merges'] = len(static_mappings)
+            logger.info(f"  Applied {len(static_mappings)} static alias merges")
+        else:
+            self.stats['static_alias_merges'] = 0
+
+        # Stage 2: Analyze embeddings and generate suggestions (no auto-merge)
+        logger.info("  Stage 2: Analyzing embeddings for suggestions...")
+
+        # Build centroids for each name
+        name_data = {}  # name -> {centroid, speakers, total_hours}
+        for name, speakers in speakers_by_name.items():
+            if not speakers:
+                continue
+
+            # Get embeddings for this name's speakers
+            embeddings = []
+            total_duration = 0
+            for sp in speakers:
+                if sp.get('embedding') is not None:
+                    embeddings.append(sp['embedding'])
+                    total_duration += sp.get('duration', 0) or 0
+
+            if not embeddings:
+                continue
+
+            # Compute centroid
+            emb_array = np.array(embeddings, dtype=np.float32)
+            centroid = np.mean(emb_array, axis=0)
+            norm = np.linalg.norm(centroid)
+            if norm > 0:
+                centroid = centroid / norm
+
+            name_data[name] = {
+                'centroid': centroid,
+                'speakers': speakers,
+                'total_hours': total_duration / 3600,
+                'quality_score': self._score_name_quality(name),
+                'is_handle': self._is_likely_handle(name),
+                'n_episodes': len(set(sp.get('content_id') for sp in speakers))
+            }
+
+        self.stats['names_before_standardization'] = len(name_data)
+        self.stats['names_after_standardization'] = len(name_data)  # No auto-merge
+
+        if len(name_data) < 2:
+            logger.info(f"  Only {len(name_data)} names, skipping analysis")
+            return speakers_by_name, all_name_mappings
+
+        # Build similarity matrix between name centroids
+        names = list(name_data.keys())
+        n_names = len(names)
+        centroids = np.array([name_data[n]['centroid'] for n in names], dtype=np.float32)
+        sim_matrix = centroids @ centroids.T
+
+        # Collect suggestions for review
+        suggestions = {
+            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'threshold_used': self.config.name_merge_threshold,
+            'suggested_merges': [],
+            'flagged_handles': [],
+            'potential_do_not_merge': [],
+        }
+
+        # Build lookup structures for idempotency checks
+        # All names that are either canonical or aliases (already resolved)
+        existing_aliases_lower = set(alias_to_canonical.keys())
+        for canonical in alias_to_canonical.values():
+            existing_aliases_lower.add(canonical.lower())
+
+        # Build reverse lookup: which variants map to each canonical
+        canonical_to_variants: Dict[str, Set[str]] = defaultdict(set)
+        for alias, canonical in alias_to_canonical.items():
+            canonical_to_variants[canonical.lower()].add(alias)
+
+        processed_pairs = set()
+        for i in range(n_names):
+            for j in range(i + 1, n_names):
+                sim = float(sim_matrix[i, j])
+                if sim < self.config.name_merge_threshold:
+                    continue
+
+                name_a, name_b = names[i], names[j]
+                pair_key = frozenset([name_a.lower(), name_b.lower()])
+
+                # Skip if already in do_not_merge
+                if pair_key in do_not_merge:
+                    continue
+
+                # IDEMPOTENCY: Skip if this pair is already merged (one is alias of the other)
+                # Check if name_a is an alias of name_b's canonical, or vice versa
+                a_canonical = alias_to_canonical.get(name_a.lower(), name_a.lower())
+                b_canonical = alias_to_canonical.get(name_b.lower(), name_b.lower())
+                if a_canonical == b_canonical:
+                    # Already merged - same canonical
+                    continue
+
+                # Check if one name is a variant of the other's group
+                a_variants = canonical_to_variants.get(a_canonical, set()) | {a_canonical}
+                b_variants = canonical_to_variants.get(b_canonical, set()) | {b_canonical}
+                if name_b.lower() in a_variants or name_a.lower() in b_variants:
+                    # Already merged
+                    continue
+
+                if pair_key in processed_pairs:
+                    continue
+                processed_pairs.add(pair_key)
+
+                # Determine suggested canonical (higher quality score)
+                data_a, data_b = name_data[name_a], name_data[name_b]
+                if data_a['quality_score'] >= data_b['quality_score']:
+                    canonical, variant = name_a, name_b
+                    canonical_data, variant_data = data_a, data_b
+                else:
+                    canonical, variant = name_b, name_a
+                    canonical_data, variant_data = data_b, data_a
+
+                # Get sample audio segments for both names
+                canonical_samples = self._get_sample_segments_for_name(
+                    canonical, canonical_data['speakers'], n_samples=2
+                )
+                variant_samples = self._get_sample_segments_for_name(
+                    variant, variant_data['speakers'], n_samples=2
+                )
+
+                suggestions['suggested_merges'].append({
+                    'canonical': canonical,
+                    'variant': variant,
+                    'similarity': round(sim, 3),
+                    'evidence': {
+                        'canonical_hours': round(canonical_data['total_hours'], 1),
+                        'canonical_episodes': canonical_data['n_episodes'],
+                        'canonical_quality_score': canonical_data['quality_score'],
+                        'variant_hours': round(variant_data['total_hours'], 1),
+                        'variant_episodes': variant_data['n_episodes'],
+                        'variant_quality_score': variant_data['quality_score'],
+                    },
+                    'samples': {
+                        'canonical': canonical_samples,
+                        'variant': variant_samples,
+                    }
+                })
+
+        # Flag handles without known real names
+        # IDEMPOTENCY: Skip if already in aliases OR unresolved_handles
+        for name, data in name_data.items():
+            name_lower = name.lower()
+            if data['is_handle']:
+                # Skip if already resolved (in aliases as canonical or variant)
+                if name_lower in existing_aliases_lower:
+                    continue
+                # Skip if already flagged as unresolved
+                if name_lower in unresolved_handles:
+                    continue
+
+                handle_samples = self._get_sample_segments_for_name(
+                    name, data['speakers'], n_samples=2
+                )
+                suggestions['flagged_handles'].append({
+                    'handle': name,
+                    'hours': round(data['total_hours'], 1),
+                    'episodes': data['n_episodes'],
+                    'samples': handle_samples,
+                })
+
+        # Find potential do-not-merge pairs (high similarity but appear as co-hosts)
+        # IDEMPOTENCY: Skip if already in do_not_merge OR already merged as aliases
+        for i in range(n_names):
+            for j in range(i + 1, n_names):
+                sim = float(sim_matrix[i, j])
+                if sim < 0.60:  # Only check reasonably similar pairs
+                    continue
+
+                name_a, name_b = names[i], names[j]
+                pair_key = frozenset([name_a.lower(), name_b.lower()])
+
+                # Skip if already in do_not_merge
+                if pair_key in do_not_merge:
+                    continue
+
+                # Skip if already merged (one is alias of the other)
+                a_canonical = alias_to_canonical.get(name_a.lower(), name_a.lower())
+                b_canonical = alias_to_canonical.get(name_b.lower(), name_b.lower())
+                if a_canonical == b_canonical:
+                    continue
+
+                # Check if they co-host (appear in same episode)
+                episodes_a = set(sp.get('content_id') for sp in name_data[name_a]['speakers'])
+                episodes_b = set(sp.get('content_id') for sp in name_data[name_b]['speakers'])
+                shared_episodes = episodes_a & episodes_b
+
+                if shared_episodes:
+                    # They appear in same episodes - likely co-hosts, not same person
+                    # Get samples for comparison
+                    samples_a = self._get_sample_segments_for_name(
+                        name_a, name_data[name_a]['speakers'], n_samples=2
+                    )
+                    samples_b = self._get_sample_segments_for_name(
+                        name_b, name_data[name_b]['speakers'], n_samples=2
+                    )
+                    suggestions['potential_do_not_merge'].append({
+                        'names': [name_a, name_b],
+                        'similarity': round(sim, 3),
+                        'shared_episodes': len(shared_episodes),
+                        'reason': 'Co-occur in same episodes (likely co-hosts)',
+                        'samples': {
+                            name_a: samples_a,
+                            name_b: samples_b,
+                        }
+                    })
+
+        # Write suggestions file
+        self._write_suggestions_file(suggestions)
+
+        # Log summary
+        self.stats['suggested_merges'] = len(suggestions['suggested_merges'])
+        self.stats['handles_flagged'] = len(suggestions['flagged_handles'])
+        self.stats['suggested_do_not_merge'] = len(suggestions['potential_do_not_merge'])
+
+        logger.info(f"  Generated suggestions: {len(suggestions['suggested_merges'])} merges, "
+                   f"{len(suggestions['flagged_handles'])} handles, "
+                   f"{len(suggestions['potential_do_not_merge'])} potential do-not-merge pairs")
+        logger.info(f"  Suggestions written to: {NAME_SUGGESTIONS_PATH}")
+
+        # Return unchanged - no auto-merging
+        return speakers_by_name, all_name_mappings
 
     def _detect_name_collisions(
         self,
@@ -800,6 +1419,18 @@ class LabelPropagationStrategy:
             speakers_by_name = dict(sorted_names[:self.max_anchors])
             logger.info(f"Limited to {len(speakers_by_name)} name groups")
 
+        # Step 4b: Standardize names (merge variants of same person)
+        logger.info("-" * 80)
+        logger.info("NAME STANDARDIZATION (embedding-based)")
+        logger.info("-" * 80)
+
+        speakers_by_name, name_mappings = self._standardize_anchor_names(
+            speakers_by_name, all_speakers
+        )
+
+        if name_mappings:
+            logger.info(f"Name mappings applied: {len(name_mappings)} names merged")
+
         self.stats['unique_names'] = len(speakers_by_name)
 
         # Build labels dict and handle collisions
@@ -1008,6 +1639,19 @@ class LabelPropagationStrategy:
         logger.info("=" * 80)
         logger.info("SUMMARY")
         logger.info("=" * 80)
+
+        # Name standardization
+        if self.stats.get('names_before_standardization', 0) > 0:
+            logger.info("NAME STANDARDIZATION:")
+            logger.info(f"  Names before: {self.stats['names_before_standardization']}")
+            logger.info(f"  Names after:  {self.stats['names_after_standardization']}")
+            static_merges = self.stats.get('static_alias_merges', 0)
+            embedding_merges = self.stats['name_merges']
+            logger.info(f"  Static alias merges: {static_merges}")
+            logger.info(f"  Embedding-based merges: {embedding_merges}")
+            if self.stats['handles_flagged'] > 0:
+                logger.info(f"  Handles flagged: {self.stats['handles_flagged']} (may need manual review)")
+            logger.info("")
 
         # Speaker counts
         logger.info("SPEAKER COUNTS:")
