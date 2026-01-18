@@ -59,10 +59,6 @@ class ServiceManager:
         self.project_dir = config.get('storage', {}).get('local', {}).get(
             'base_path', '/Users/signal4/signal4/core'
         )
-        self.conda_source_path = config.get('processing', {}).get(
-            'conda_source_path', '/opt/homebrew/Caskroom/miniforge/base/etc/profile.d/conda.sh'
-        )
-        self.conda_env = config.get('processing', {}).get('conda_env', 'content-processing')
 
         # Service configurations
         self.service_configs = {
@@ -505,8 +501,6 @@ class ServiceManager:
     def _create_model_server_script(self, worker_id: str, port: int, models: str) -> str:
         """Create startup script for model server"""
         project_dir = self.project_dir
-        conda_source = self.conda_source_path
-        conda_env = self.conda_env
 
         return f"""#!/bin/bash
 # Model server startup script for {worker_id}
@@ -514,12 +508,7 @@ class ServiceManager:
 set -e
 cd {project_dir}
 
-# Source conda
-source {conda_source}
-conda activate {conda_env}
-
 # Set environment variables
-export PYTHONPATH={project_dir}:$PYTHONPATH
 export MallocStackLogging=0
 export MallocStackLoggingNoCompact=0
 
@@ -527,12 +516,12 @@ export MallocStackLoggingNoCompact=0
 mkdir -p logs/content_processing
 
 # Kill any existing model server
-pkill -f "model_server.py" || true
+pkill -f "mlx_server.py" || true
 sleep 2
 
 # Start model server
 echo "[$(date)] Starting model server with models: {models}"
-python src/services/llm/mlx_server.py \\
+uv run python src/services/llm/mlx_server.py \\
     --port {port} \\
     --models {models} \\
     2>&1 | tee -a logs/content_processing/model_server_{worker_id}.log &
@@ -544,8 +533,6 @@ echo "[$(date)] Model server started with PID $!"
     def _create_llm_server_script(self, worker_id: str, port: int) -> str:
         """Create startup script for LLM server (thread-safe Ollama wrapper)"""
         project_dir = self.project_dir
-        conda_source = self.conda_source_path
-        conda_env = self.conda_env
 
         return f"""#!/bin/bash
 # LLM server startup script for {worker_id}
@@ -553,12 +540,7 @@ echo "[$(date)] Model server started with PID $!"
 set -e
 cd {project_dir}
 
-# Source conda
-source {conda_source}
-conda activate {conda_env}
-
 # Set environment variables
-export PYTHONPATH={project_dir}:$PYTHONPATH
 export MallocStackLogging=0
 export MallocStackLoggingNoCompact=0
 export LLM_MAX_CONCURRENT=5  # Ollama supports concurrent requests
@@ -567,13 +549,12 @@ export LLM_MAX_CONCURRENT=5  # Ollama supports concurrent requests
 mkdir -p logs/content_processing
 
 # Kill any existing LLM server
-pkill -f "llm_server.py" || true
+pkill -f "llm/server.py" || true
 sleep 2
 
 # Start LLM server
 echo "[$(date)] Starting LLM server (thread-safe Ollama wrapper)"
-echo "[$(date)] This replaces the deprecated model_server.py for LLM requests"
-python src/services/llm/server.py \\
+uv run python src/services/llm/server.py \\
     2>&1 | tee -a logs/content_processing/llm_server_{worker_id}.log &
 
 echo $! > /tmp/llm_server_{worker_id}.pid
@@ -583,8 +564,6 @@ echo "[$(date)] LLM server started with PID $!"
     def _create_task_processor_script(self, worker_id: str, port: int) -> str:
         """Create startup script for task processor"""
         project_dir = self.project_dir
-        conda_source = self.conda_source_path
-        conda_env = self.conda_env
 
         return f"""#!/bin/bash
 # Task processor startup script for {worker_id}
@@ -592,12 +571,7 @@ echo "[$(date)] LLM server started with PID $!"
 set -e
 cd {project_dir}
 
-# Source conda
-source {conda_source}
-conda activate {conda_env}
-
 # Set environment variables
-export PYTHONPATH={project_dir}:$PYTHONPATH
 export MallocStackLogging=0
 export MallocStackLoggingNoCompact=0
 
@@ -605,12 +579,13 @@ export MallocStackLoggingNoCompact=0
 mkdir -p logs/content_processing
 
 # Kill any existing task processor
-pkill -f "task_processor.py" || true
+pkill -f "src.workers.processor" || true
+pkill -f "src/workers/processor" || true
 sleep 2
 
-# Start task processor
-echo "[$(date)] Starting task processor"
-python src/workers/processor.py \\
+# Start task processor with uvicorn
+echo "[$(date)] Starting task processor on port {port}"
+uv run python -m uvicorn src.workers.processor:app --host 0.0.0.0 --port {port} \\
     2>&1 | tee -a logs/content_processing/task_processor_{worker_id}.log &
 
 echo $! > /tmp/task_processor_{worker_id}.pid
