@@ -6,13 +6,24 @@ Modular, incremental speaker identification system achieving 90%+ coverage throu
 
 **Current Coverage**: 4.7% (50K/1M speakers)
 **Target Coverage**: 90%+
-**Approach**: Signal-first (metadata, transcripts, embeddings) → clustering fallback
+**Approach**: Signal-first (metadata, transcripts, embeddings) → clustering → enrichment
+
+## Pipeline Phases
+
+| Phase | Name | Purpose | Script |
+|-------|------|---------|--------|
+| 1 | Metadata Extraction | Extract hosts from channels + speakers from episodes | `metadata_identification.py` |
+| 2 | Text Evidence | Find transcript evidence (self-intro, addressed) | `text_evidence_collection.py` |
+| 3 | Name Standardization | Merge name variants, generate suggestions for review | `name_standardization.py` |
+| 4 | Label Propagation | Propagate labels from anchors to unlabeled speakers | `label_propagation_clustering.py` |
+| 5 | Identity Merge | Find and merge duplicate identities | `identity_merge_detection.py` |
+| 6 | Speaker Hydration | Enrich profiles with external data | `speaker_hydration.py` |
 
 ## Architecture
 
-### Two-Phase Identification (Phase 1)
+### Phase 1: Metadata Extraction
 
-#### Phase 1A: Channel Host Identification
+#### Phase 1A: Channel Host Extraction
 Extract hosts from channel descriptions using LLM.
 
 **Example**:
@@ -239,21 +250,35 @@ Return JSON:
 - Medium confidence (0.70-0.84): ~45% (inferred)
 - Low confidence (0.60-0.69): ~15% (ambiguous)
 
-## Future Phases
+## Phase Details
 
-### Phase 2: Transcript Analysis
-- Add self-introduction detection ("I'm X")
-- Add conversational patterns
-- Improve confidence scores
+### Phase 2: Text Evidence Collection
+- Self-introduction detection ("I'm X", "My name is X")
+- Being addressed ("X, what do you think?")
+- Being introduced ("Welcome X", "Joining us is X")
+- Binary output: "certain" evidence or "none"
 
-### Phase 3: Frequency & Similarity
-- Channel-level frequency analysis
-- Embedding similarity matching
-- Cross-episode validation
+### Phase 3: Name Standardization
+- Applies verified aliases from `config/name_aliases.yaml`
+- Analyzes embeddings to discover potential merges
+- Generates suggestions for human/frontier review
+- Review dashboard: `streamlit run dashboards/name_review.py`
 
-### Phase 4: Clustering Fallback
-- Anchor-canopy clustering for remainder
-- Target remaining 5-10% coverage
+### Phase 4: Label Propagation
+- Uses Phase 2/3 verified speakers as labeled anchors
+- Builds FAISS index, pre-computes k-NN
+- Single pass weighted voting to assign labels
+- Metadata-constrained assignment for high-duration speakers
+
+### Phase 5: Identity Merge Detection
+- Find duplicate identities via centroid similarity
+- LLM verification before merge
+- Co-appearance veto (never merge if in same episode)
+
+### Phase 6: Speaker Hydration
+- Enrich speaker profiles with external data
+- Data sources: Web search, Wikipedia, LinkedIn (future)
+- Populates: bio, occupation, organization, location, social_profiles
 
 ## Development Workflow
 

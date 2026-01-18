@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Speaker Hydration (Phase 5)
+Speaker Hydration (Phase 6)
 ============================
 
 Retrieves detailed biographical information about identified speakers
@@ -72,7 +72,7 @@ console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(
 logger.addHandler(console_handler)
 
 # Phase key for verification_metadata JSONB
-PHASE_KEY = "phase5_hydration"
+PHASE_KEY = "phase6_hydration"
 
 
 # =============================================================================
@@ -781,7 +781,7 @@ Return JSON only:
 
 class SpeakerHydrationStrategy:
     """
-    Phase 5: Hydrate speaker identities with external biographical data.
+    Phase 6: Hydrate speaker identities with external biographical data.
 
     This strategy queries configured data sources (LinkedIn, Wikipedia, etc.)
     to enrich speaker profiles with detailed biographical information.
@@ -1202,7 +1202,7 @@ class SpeakerHydrationStrategy:
             Stats dict
         """
         logger.info("=" * 80)
-        logger.info("SPEAKER HYDRATION (Phase 5)")
+        logger.info("SPEAKER HYDRATION (Phase 6)")
         logger.info("=" * 80)
         logger.info(f"Mode: {'DRY RUN' if self.dry_run else 'APPLY'}")
         logger.info(f"Force re-hydration: {self.force}")
@@ -1281,7 +1281,7 @@ class SpeakerHydrationStrategy:
 
 async def main():
     parser = argparse.ArgumentParser(
-        description='Phase 5: Speaker Hydration',
+        description='Phase 6: Speaker Hydration',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

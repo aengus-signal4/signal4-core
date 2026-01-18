@@ -1,29 +1,25 @@
 #!/usr/bin/env python3
 """
-Single-Pass Label Propagation for Speaker Identification (Phase 3 Alternative)
-===============================================================================
+Phase 4: Label Propagation for Speaker Identification
+=====================================================
 
-Alternative Phase 3 approach: Instead of iterative cluster expansion from anchors,
-perform a SINGLE PASS over all speakers and assign each a "likely score" based on
-neighboring labels.
+Propagates speaker labels from Phase 2/3 anchors to unlabeled speakers
+using embedding similarity and k-NN weighted voting.
 
-Key Differences from Anchor-Canopy Clustering:
-----------------------------------------------
-1. SINGLE PASS: O(n) pass over all speakers, no iterative expansion
-2. CONFIDENCE SCORES: Each assignment gets a 0.0-1.0 confidence based on neighbor agreement
-3. SOFT BOUNDARIES: Handles gradual transitions between speakers naturally
-4. NO GATES: Simple weighted voting instead of multi-gate validation
-5. FASTER: Much faster than iterative expansion for large speaker sets
+Prerequisites:
+- Phase 2: Text evidence collection (creates verified anchors)
+- Phase 3: Name standardization (applies aliases, generates suggestions)
 
 Algorithm:
 1. Load all speakers with embeddings
-2. Build FAISS index, pre-compute k-NN (k=50-100)
-3. For text-verified speakers, set their label as known (from Phase 2)
-4. Single pass over ALL unlabeled speakers:
+2. Build FAISS index, pre-compute k-NN (k=75)
+3. Load Phase 2 verified speakers as labeled anchors
+4. Apply Phase 3 name aliases to standardize anchor names
+5. Single pass over unlabeled speakers:
    - Look at k nearest neighbors
-   - Count label occurrences among neighbors (weighted by similarity)
-   - Assign most common label with confidence = weighted_votes / total_weight
-5. Output: Each speaker gets (predicted_name, confidence_score)
+   - Count weighted votes from labeled neighbors
+   - Assign most common label with confidence score
+6. Stage 4b: Use episode metadata to constrain high-duration speakers
 
 Usage:
     # Dry run
@@ -78,7 +74,7 @@ console_handler.setLevel(logging.INFO)
 console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 logger.addHandler(console_handler)
 
-PHASE_KEY = "phase3_lp"  # Distinct from anchor-canopy phase3
+PHASE_KEY = "phase4"  # Label propagation
 
 
 @dataclass

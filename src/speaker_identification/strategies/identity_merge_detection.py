@@ -363,7 +363,7 @@ class IdentityMergeDetectionStrategy:
             return f"{hours:.1f} hours"
 
         # Build prompt
-        prompt = PromptRegistry.phase5_identity_merge_verification(
+        prompt = PromptRegistry.phase4_identity_merge_verification(
             name_a=identity_a['name'],
             count_a=identity_a['speaker_count'],
             episode_count_a=identity_a['episode_count'],
