@@ -14,15 +14,39 @@ from src.utils.content_id import generate_content_id
 import xml.etree.ElementTree as ET
 import logging
 from sqlalchemy import text
+from sqlalchemy.orm.attributes import flag_modified
 import pytz
 from src.utils.config import load_config
 import time
 
+# Lazy import for thumbnail downloader to avoid circular imports
+_thumbnail_downloader = None
+
+def _get_thumbnail_downloader():
+    """Lazy initialization of thumbnail downloader."""
+    global _thumbnail_downloader
+    if _thumbnail_downloader is None:
+        try:
+            from src.ingestion.podcast_thumbnails import PodcastThumbnailDownloader
+            from src.storage.s3_utils import S3Storage, S3StorageConfig
+            s3_config = S3StorageConfig()
+            s3_storage = S3Storage(s3_config)
+            _thumbnail_downloader = PodcastThumbnailDownloader(
+                s3_storage=s3_storage,
+                request_delay=0.5  # Faster since we're processing one at a time
+            )
+        except Exception as e:
+            logging.getLogger('podcast_indexer').warning(f"Could not initialize thumbnail downloader: {e}")
+            return None
+    return _thumbnail_downloader
+
+
 class PodcastIndexer:
-    def __init__(self, test_mode: bool = False, logger=None):
+    def __init__(self, test_mode: bool = False, logger=None, download_thumbnails: bool = True):
         self.test_mode = test_mode
         self.logger = logger or setup_indexer_logger('podcast')
         self.task_logger = setup_task_logger('podcast')  # Add task logger
+        self.download_thumbnails = download_thumbnails  # Whether to download thumbnails during indexing
         self.session = None  # aiohttp session for making requests
         
     async def _get_feed_content(self, feed_url: str) -> str:
@@ -213,6 +237,66 @@ class PodcastIndexer:
             self.logger.error(f"Error getting/creating channel for {feed_url}: {e}")
             return None
 
+    async def _download_channel_thumbnail(self, channel_id: int, feed_url: str, stored_image_url: str = None) -> bool:
+        """
+        Download and store thumbnail for a podcast channel.
+
+        This is a best-effort operation - failures are logged but don't stop indexing.
+        Supports change detection: if the RSS image URL differs from stored_image_url,
+        the thumbnail will be re-downloaded.
+
+        Args:
+            channel_id: Database channel ID
+            feed_url: RSS feed URL
+            stored_image_url: Previously stored image URL (for change detection)
+
+        Returns:
+            True if thumbnail was downloaded successfully, False otherwise
+        """
+        try:
+            downloader = _get_thumbnail_downloader()
+            if downloader is None:
+                return False
+
+            result = await downloader.download_thumbnail(
+                channel_id, feed_url, force=False, stored_image_url=stored_image_url
+            )
+
+            if result['success']:
+                # Update image_url in database if it changed or is new
+                if result.get('image_url') and (result.get('url_changed') or result['message'] == 'Downloaded successfully'):
+                    self._update_channel_image_url(channel_id, result['image_url'])
+
+                if result['message'] == 'Already exists':
+                    pass  # Silent skip
+                elif result.get('url_changed'):
+                    self.logger.info(f"Updated thumbnail for channel {channel_id} (URL changed): {result.get('s3_key', 'unknown')}")
+                else:
+                    self.logger.info(f"Downloaded thumbnail for channel {channel_id}: {result.get('s3_key', 'unknown')}")
+                return True
+            else:
+                self.logger.debug(f"Could not download thumbnail for channel {channel_id}: {result['message']}")
+                return False
+
+        except Exception as e:
+            self.logger.warning(f"Error downloading thumbnail for channel {channel_id}: {e}")
+            return False
+
+    def _update_channel_image_url(self, channel_id: int, image_url: str) -> None:
+        """Update the image_url in channel's platform_metadata."""
+        try:
+            with get_session() as session:
+                channel = session.query(Channel).filter(Channel.id == channel_id).first()
+                if channel:
+                    pm = dict(channel.platform_metadata or {})  # Make a copy
+                    pm['image_url'] = image_url
+                    pm['thumbnail_updated_at'] = datetime.utcnow().isoformat()
+                    channel.platform_metadata = pm
+                    flag_modified(channel, 'platform_metadata')  # Required for JSONB updates
+                    session.commit()
+        except Exception as e:
+            self.logger.warning(f"Failed to update image_url for channel {channel_id}: {e}")
+
     async def index_feeds(self, feed_urls: List[str], project: str, progress_callback=None, project_sources: dict = None) -> List[Dict]:
         """Index multiple podcast feeds"""
         results = []
@@ -292,10 +376,21 @@ class PodcastIndexer:
                 raise ValueError(f"No episodes found in feed: {feed_url}")
 
             # Get or create channel record with RSS metadata
+            stored_image_url = None
             with get_session() as session:
                 channel_id = self._get_or_create_channel(session, feed_url, feed)
                 if not channel_id:
                     self.logger.warning(f"Could not get/create channel for {feed_url}, episodes will not be linked")
+                else:
+                    # Get stored image URL for change detection
+                    channel = session.query(Channel).filter(Channel.id == channel_id).first()
+                    if channel and channel.platform_metadata:
+                        stored_image_url = channel.platform_metadata.get('image_url')
+
+            # Download thumbnail for the channel (non-blocking, best effort)
+            # Pass stored_image_url to detect changes and re-download if needed
+            if channel_id and self.download_thumbnails:
+                await self._download_channel_thumbnail(channel_id, feed_url, stored_image_url)
 
             # Get channel info
             channel_name = feed.feed.title

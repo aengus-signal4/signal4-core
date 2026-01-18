@@ -11,12 +11,39 @@ import asyncio
 from dateutil.parser import parse
 import isodate
 from dotenv import load_dotenv
+from pathlib import Path
 import pytz
 import logging
 import re
 from urllib.parse import unquote
 from sqlalchemy import text
+from sqlalchemy.orm.attributes import flag_modified
 import time
+
+# Load environment variables from core/.env
+_env_path = Path(__file__).parent.parent.parent / '.env'
+load_dotenv(_env_path)
+
+# Lazy import for thumbnail downloader to avoid circular imports
+_youtube_thumbnail_downloader = None
+
+def _get_youtube_thumbnail_downloader():
+    """Lazy initialization of YouTube thumbnail downloader."""
+    global _youtube_thumbnail_downloader
+    if _youtube_thumbnail_downloader is None:
+        try:
+            from src.ingestion.youtube_thumbnails import YouTubeThumbnailDownloader
+            from src.storage.s3_utils import S3Storage, S3StorageConfig
+            s3_config = S3StorageConfig()
+            s3_storage = S3Storage(s3_config)
+            _youtube_thumbnail_downloader = YouTubeThumbnailDownloader(
+                s3_storage=s3_storage,
+                request_delay=5.0  # 5 seconds between requests
+            )
+        except Exception as e:
+            logging.getLogger('youtube_indexer').warning(f"Could not initialize thumbnail downloader: {e}")
+            return None
+    return _youtube_thumbnail_downloader
 
 def parse_duration(duration_str: str) -> int:
     """Convert ISO 8601 duration to seconds"""
@@ -39,7 +66,7 @@ class YouTubeIndexer:
     
     DAILY_QUOTA_LIMIT = 10000  # YouTube API daily quota limit
     
-    def __init__(self, test_mode: bool = False, logger=None):
+    def __init__(self, test_mode: bool = False, logger=None, download_thumbnails: bool = True):
         # Load environment variables from .env file
         self.test_mode = test_mode
         self.api_keys = []
@@ -48,6 +75,7 @@ class YouTubeIndexer:
         self.youtube = None
         self.logger = logger or setup_indexer_logger('youtube')
         self.task_logger = setup_task_logger('youtube')  # Add task logger
+        self.download_thumbnails = download_thumbnails  # Whether to download thumbnails during indexing
         
         # Load API keys
         api_keys_str = os.getenv('YOUTUBE_API_KEYS')
@@ -120,6 +148,80 @@ class YouTubeIndexer:
     def get_total_quota_usage(self) -> int:
         """Get total quota usage across all keys"""
         return sum(self.quota_usage.values())
+
+    async def _download_channel_thumbnail(self, youtube_channel_id: str, thumbnail_url: str = None) -> bool:
+        """
+        Download and store thumbnail for a YouTube channel.
+
+        This is a best-effort operation - failures are logged but don't stop indexing.
+
+        Args:
+            youtube_channel_id: YouTube channel ID (UC...)
+            thumbnail_url: Thumbnail URL from API (optional, will be fetched if not provided)
+
+        Returns:
+            True if thumbnail was downloaded successfully, False otherwise
+        """
+        try:
+            downloader = _get_youtube_thumbnail_downloader()
+            if downloader is None:
+                return False
+
+            # Find the database channel ID for this YouTube channel
+            with get_session() as session:
+                channel = session.query(Channel).filter(
+                    Channel.platform == 'youtube',
+                    Channel.primary_url.like(f'%{youtube_channel_id}%')
+                ).first()
+
+                if not channel:
+                    self.logger.debug(f"No database channel found for YouTube ID {youtube_channel_id}")
+                    return False
+
+                channel_id = channel.id
+                stored_image_url = (channel.platform_metadata or {}).get('image_url')
+
+            result = await downloader.download_thumbnail(
+                channel_id=channel_id,
+                youtube_channel_id=youtube_channel_id,
+                force=False,
+                stored_image_url=stored_image_url or thumbnail_url
+            )
+
+            if result['success']:
+                # Update image_url in database if it changed or is new
+                if result.get('image_url') and (result.get('url_changed') or result['message'] == 'Downloaded successfully'):
+                    self._update_channel_image_url(channel_id, result['image_url'])
+
+                if result['message'] == 'Already exists':
+                    pass  # Silent skip
+                elif result.get('url_changed'):
+                    self.logger.info(f"Updated thumbnail for channel {channel_id} (URL changed)")
+                else:
+                    self.logger.info(f"Downloaded thumbnail for YouTube channel {youtube_channel_id}")
+                return True
+            else:
+                self.logger.debug(f"Could not download thumbnail for {youtube_channel_id}: {result['message']}")
+                return False
+
+        except Exception as e:
+            self.logger.warning(f"Error downloading thumbnail for {youtube_channel_id}: {e}")
+            return False
+
+    def _update_channel_image_url(self, channel_id: int, image_url: str) -> None:
+        """Update the image_url in channel's platform_metadata."""
+        try:
+            with get_session() as session:
+                channel = session.query(Channel).filter(Channel.id == channel_id).first()
+                if channel:
+                    pm = dict(channel.platform_metadata or {})
+                    pm['image_url'] = image_url
+                    pm['thumbnail_updated_at'] = datetime.utcnow().isoformat()
+                    channel.platform_metadata = pm
+                    flag_modified(channel, 'platform_metadata')
+                    session.commit()
+        except Exception as e:
+            self.logger.warning(f"Failed to update image_url for channel {channel_id}: {e}")
 
     async def _get_channel_id(self, channel_url: str) -> Optional[str]:
         """Get channel ID from URL"""
@@ -383,9 +485,21 @@ class YouTubeIndexer:
             channel = channel_response['items'][0]
             channel_title = channel['snippet']['title']
             total_videos = int(channel['statistics']['videoCount'])
-            
+
             self.logger.info(f"Found channel {channel_title} with {total_videos} total videos")
-            
+
+            # Download thumbnail for the channel (non-blocking, best effort)
+            if self.download_thumbnails:
+                # Get thumbnail URL from API response
+                thumbnails = channel['snippet'].get('thumbnails', {})
+                thumbnail_url = None
+                for quality in ['high', 'medium', 'default']:
+                    if quality in thumbnails:
+                        thumbnail_url = thumbnails[quality]['url']
+                        break
+
+                await self._download_channel_thumbnail(channel_id, thumbnail_url)
+
             # Get last indexed date
             with get_session() as session:
                 db = DatabaseManager(session)
