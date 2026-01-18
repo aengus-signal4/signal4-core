@@ -50,6 +50,11 @@ class ServiceManager:
         # LLM server management disabled - managed independently
         self.llm_server_management_enabled = False
 
+        # Health check failure tracking - require consecutive failures before marking unhealthy
+        self.health_check_failures: Dict[str, Dict[str, int]] = {}  # worker_id -> {service_name -> failure_count}
+        self.health_check_failure_threshold = 3  # Consecutive failures before marking unhealthy
+        self.health_check_timeout = 15  # Increased timeout for busy workers
+
         # Project directory - use config or derive from storage.local.base_path
         self.project_dir = config.get('storage', {}).get('local', {}).get(
             'base_path', '/Users/signal4/signal4/core'
@@ -455,23 +460,46 @@ class ServiceManager:
         return self._get_worker_services(worker_id).copy()
     
     async def health_check_services(self, worker_id: str) -> Dict[str, bool]:
-        """Perform health checks on all services for a worker"""
+        """Perform health checks on all services for a worker.
+
+        Uses consecutive failure tracking to avoid false positives when workers
+        are busy processing tasks. A service is only marked unhealthy after
+        `health_check_failure_threshold` consecutive failures.
+        """
         services = self._get_worker_services(worker_id)
         results = {}
-        
+
         for service_name, service_info in services.items():
             if service_info.status == ServiceStatus.RUNNING:
                 healthy = await self._check_service_health(worker_id, service_name)
-                results[service_name] = healthy
-                
-                if not healthy:
-                    service_info.status = ServiceStatus.UNHEALTHY
-                    service_info.error = "Health check failed"
-                else:
+
+                if healthy:
+                    results[service_name] = True
                     service_info.last_health_check = datetime.now(timezone.utc)
+                    # Status stays RUNNING, failures already reset in _check_service_health
+                else:
+                    # Increment failure count and check threshold
+                    failure_count = self._increment_health_check_failures(worker_id, service_name)
+
+                    if failure_count >= self.health_check_failure_threshold:
+                        # Only mark unhealthy after consecutive failures
+                        results[service_name] = False
+                        service_info.status = ServiceStatus.UNHEALTHY
+                        service_info.error = f"Health check failed {failure_count} consecutive times"
+                        self.logger.warning(
+                            f"Service {service_name} on {worker_id} marked unhealthy after "
+                            f"{failure_count} consecutive failures"
+                        )
+                    else:
+                        # Still within tolerance, report as healthy for now
+                        results[service_name] = True
+                        self.logger.debug(
+                            f"Health check failed for {service_name} on {worker_id} "
+                            f"({failure_count}/{self.health_check_failure_threshold})"
+                        )
             else:
                 results[service_name] = False
-        
+
         return results
     
     def _create_model_server_script(self, worker_id: str, port: int, models: str) -> str:
@@ -682,9 +710,32 @@ echo "[$(date)] Task processor started with PID $!"
             health_url = f"http://{worker_ip}:{port}{health_endpoint}"
 
             async with aiohttp.ClientSession() as session:
-                async with session.get(health_url, timeout=aiohttp.ClientTimeout(total=5)) as response:
-                    return response.status == 200
+                async with session.get(health_url, timeout=aiohttp.ClientTimeout(total=self.health_check_timeout)) as response:
+                    if response.status == 200:
+                        # Reset failure count on success
+                        self._reset_health_check_failures(worker_id, service_name)
+                        return True
+                    return False
 
         except Exception as e:
             self.logger.debug(f"Health check failed for {service_name} on {worker_id}: {str(e)}")
             return False
+
+    def _get_health_check_failures(self, worker_id: str, service_name: str) -> int:
+        """Get current failure count for a service"""
+        if worker_id not in self.health_check_failures:
+            return 0
+        return self.health_check_failures[worker_id].get(service_name, 0)
+
+    def _increment_health_check_failures(self, worker_id: str, service_name: str) -> int:
+        """Increment failure count and return new count"""
+        if worker_id not in self.health_check_failures:
+            self.health_check_failures[worker_id] = {}
+        current = self.health_check_failures[worker_id].get(service_name, 0)
+        self.health_check_failures[worker_id][service_name] = current + 1
+        return current + 1
+
+    def _reset_health_check_failures(self, worker_id: str, service_name: str) -> None:
+        """Reset failure count for a service"""
+        if worker_id in self.health_check_failures:
+            self.health_check_failures[worker_id][service_name] = 0
