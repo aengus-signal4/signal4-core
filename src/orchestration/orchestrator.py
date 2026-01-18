@@ -52,7 +52,8 @@ from src.automation.background_loops import (
 )
 from src.workers.service_manager import ServiceManager
 from src.workers.management import WorkerManager
-from src.processing.pipeline_manager import PipelineManager
+# Use modular PipelineManagerV3 (legacy PipelineManager still available for rollback)
+from src.processing.pipeline_manager_v3 import PipelineManagerV3 as PipelineManager
 from src.utils.human_behavior import HumanBehaviorManager
 from src.utils.logger import setup_worker_logger
 from src.database.session import get_session
