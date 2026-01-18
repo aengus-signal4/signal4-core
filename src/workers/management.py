@@ -109,7 +109,7 @@ class WorkerManager:
         self.uv_path = config.get('processing', {}).get('uv_path', '/Users/signal4/.local/bin/uv')
         
         # Initialize session manager
-        session_type = config.get('processing', {}).get('session_manager', 'tmux')
+        session_type = config.get('processing', {}).get('session_manager', 'screen')
         self.session_manager = SessionManager(session_type)
         logger.info(f"Using session manager: {session_type}")
         
@@ -584,7 +584,8 @@ exec {self.head_python_path} {llm_server_path} 2>&1 | tee -a {log_dir}/llm_serve
                 # Start new screen session using uv
                 uv_path = self.uv_path
                 # Run uv which automatically uses the project's .venv
-                screen_cmd = f"cd {project_root} && export PYTHONPATH={project_root}:$PYTHONPATH && screen -dmS processor {uv_path} run --project {project_root} python {processor_path}"
+                # Wrap in bash -c to keep process attached to screen session
+                screen_cmd = f"screen -dmS processor bash -c 'cd {project_root} && export PYTHONPATH={project_root}:$PYTHONPATH && {uv_path} run --project {project_root} python {processor_path} 2>&1 | tee -a {log_dir}/processor.log'"
                 result = await self._run_command(worker, screen_cmd)
 
                 if hasattr(result, 'returncode') and result.returncode != 0:

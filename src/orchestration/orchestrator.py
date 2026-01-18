@@ -97,6 +97,7 @@ class TaskOrchestratorV2:
         # Core state
         self.should_stop = False
         self.global_pause_until: Optional[datetime] = None
+        self._swift_sync_task: Optional[asyncio.Task] = None
         
         # Initialize worker pool
         self.worker_pool = WorkerPool()
@@ -266,9 +267,9 @@ class TaskOrchestratorV2:
                 logger.info(f"Created worker manager entry for {wid}: {worker_obj.api_url}")
             logger.info(f"Updated WorkerManager with {len(self.worker_manager.workers)} workers")
 
-            # Sync Swift binaries to workers before starting services
-            logger.info("Syncing Swift binaries to workers")
-            await self._sync_swift_binaries_to_workers()
+            # Sync Swift binaries to workers in background (don't block startup)
+            logger.info("Starting Swift binary sync to workers (background)")
+            self._swift_sync_task = asyncio.create_task(self._sync_swift_binaries_to_workers())
 
             # Start worker services
             logger.info("Starting worker services")
@@ -355,15 +356,25 @@ class TaskOrchestratorV2:
             task = asyncio.create_task(self._sync_swift_binary_to_worker(worker_id, worker_info, swift_build_dir))
             sync_tasks.append((worker_id, task))
 
+        successful = 0
+        failed = 0
         for worker_id, task in sync_tasks:
             try:
                 success = await task
                 if success:
                     logger.info(f"Swift binary synced to {worker_id}")
+                    successful += 1
                 else:
                     logger.warning(f"Failed to sync Swift binary to {worker_id}")
+                    failed += 1
+            except asyncio.CancelledError:
+                logger.info(f"Swift sync cancelled for {worker_id}")
+                raise  # Re-raise to properly handle task cancellation
             except Exception as e:
                 logger.error(f"Error syncing Swift binary to {worker_id}: {e}")
+                failed += 1
+
+        logger.info(f"Swift binary sync complete: {successful} succeeded, {failed} failed")
 
     async def _sync_swift_binary_to_worker(self, worker_id: str, worker_info: WorkerInfo, swift_build_dir: Path) -> bool:
         """Sync Swift binary to a single worker using rsync"""
@@ -1025,6 +1036,15 @@ class TaskOrchestratorV2:
         logger.info("Shutting down Task Orchestrator V2...")
 
         self.should_stop = True
+
+        # Cancel background Swift sync if still running
+        if self._swift_sync_task and not self._swift_sync_task.done():
+            logger.info("Cancelling background Swift sync task...")
+            self._swift_sync_task.cancel()
+            try:
+                await self._swift_sync_task
+            except asyncio.CancelledError:
+                pass
 
         # Stop task queue cache
         await self.task_manager.shutdown_cache()
