@@ -356,7 +356,7 @@ class PipelineManagerV3:
         if task_type == "convert" and isinstance(result, dict):
             chunk_plan = result.get('chunk_plan', [])
             if chunk_plan:
-                logger.info(f"Convert completed for {content_id} with {len(chunk_plan)} chunks")
+                logger.debug(f"Convert completed for {content_id} with {len(chunk_plan)} chunks")
                 formatted_chunks = [
                     {
                         'index': chunk.get('index'),
@@ -367,7 +367,7 @@ class PipelineManagerV3:
                     for chunk in chunk_plan
                 ]
                 if store_chunk_plan(session, content, formatted_chunks):
-                    logger.info(f"Stored {len(formatted_chunks)} chunks for {content_id}")
+                    logger.debug(f"Stored {len(formatted_chunks)} chunks for {content_id}")
                     content.last_updated = datetime.now(timezone.utc)
                     session.add(content)
                     session.commit()
@@ -397,7 +397,7 @@ class PipelineManagerV3:
 
             if sentence_count > 0:
                 if not content.is_stitched or content.stitch_version != current_version:
-                    logger.info(
+                    logger.debug(
                         f"Stitch completed - found {sentence_count} sentences, "
                         f"updating flags for {content_id}"
                     )
@@ -420,7 +420,7 @@ class PipelineManagerV3:
 
         # Cleanup task: mark compressed and skip further processing
         elif task_type == "cleanup":
-            logger.info(f"Cleanup completed for {content_id}")
+            logger.debug(f"Cleanup completed for {content_id}")
             content.is_compressed = True
             content.last_updated = datetime.now(timezone.utc)
             session.add(content)
@@ -460,7 +460,7 @@ class PipelineManagerV3:
             return None
 
         if skip_behavior_wait:
-            logger.info(f"Worker {worker_id} skipping behavior wait for {task_type}")
+            logger.debug(f"Worker {worker_id} skipping behavior wait for {task_type}")
             return None
 
         if not self.behavior_manager:
@@ -485,7 +485,7 @@ class PipelineManagerV3:
         post_task_delay = self.behavior_manager.calculate_post_task_delay(worker_id, task_type)
 
         wait_duration = max(behavior_wait, post_task_delay)
-        logger.info(
+        logger.debug(
             f"Worker {worker_id} delays: behavior={behavior_wait:.1f}s ({reason}), "
             f"post_task={post_task_delay:.1f}s => Max: {wait_duration:.1f}s"
         )

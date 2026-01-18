@@ -105,7 +105,7 @@ class FlagUpdater:
                 session.add(content)
                 session.commit()
                 session.refresh(content)
-                logger.info(f"Updated content state for {content.content_id}: {', '.join(result.flags_updated)}")
+                logger.debug(f"Updated content state for {content.content_id}: {', '.join(result.flags_updated)}")
 
         except Exception as e:
             error_msg = f"Error updating flags for {content.content_id}: {str(e)}"
@@ -124,11 +124,11 @@ class FlagUpdater:
         should_be_downloaded = files.is_downloadable
 
         if should_be_downloaded != content.is_downloaded:
-            logger.info(
+            logger.debug(
                 f"State change for {content.content_id}: "
                 f"is_downloaded {content.is_downloaded} -> {should_be_downloaded}"
             )
-            logger.info(
+            logger.debug(
                 f"  Reason: source={files.source_exists}, audio={files.audio_exists}, "
                 f"manifest={files.storage_manifest_exists}"
             )
@@ -177,7 +177,7 @@ class FlagUpdater:
                     )
 
         if should_be_converted != content.is_converted:
-            logger.info(
+            logger.debug(
                 f"State change for {content.content_id}: "
                 f"is_converted {content.is_converted} -> {should_be_converted}"
             )
@@ -238,7 +238,7 @@ class FlagUpdater:
                             "but was marked as completed. Resetting to pending."
                         )
                     elif not is_safe_model:
-                        logger.info(
+                        logger.debug(
                             f"Transcript exists but model '{chunk.transcribed_with}' not in safe models "
                             f"for {content.content_id} chunk {chunk_index}. Resetting to pending."
                         )
@@ -270,7 +270,7 @@ class FlagUpdater:
             if not hasattr(chunk, '_legacy_checked'):
                 chunk.transcribed_with = 'legacy_whisper'
                 chunk._legacy_checked = True
-                logger.info(
+                logger.debug(
                     f"Found legacy transcript for {content.content_id} chunk {chunk.chunk_index} - "
                     "setting transcribed_with='legacy_whisper'"
                 )
@@ -330,7 +330,7 @@ class FlagUpdater:
             session.add(content)
             session.commit()
             session.refresh(content)
-            logger.info(
+            logger.debug(
                 f"Updated is_transcribed to {all_chunks_transcribed} for {content.content_id} "
                 f"(all {len(chunks)} chunks have transcripts)"
             )
@@ -378,7 +378,7 @@ class FlagUpdater:
         # Determine if content should be considered stitched
         if files.stitched_exists and any_sentences_exist and not sentences_exist:
             # File exists with old version sentences - needs re-stitching
-            logger.info(
+            logger.debug(
                 f"Found sentences for {content.content_id} with version(s) {version_list}, "
                 f"but current version is '{current_version}'. Content needs re-stitching."
             )

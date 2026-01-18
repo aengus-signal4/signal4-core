@@ -118,7 +118,7 @@ class TaskFactory:
                 existing.started_at = None
                 existing.completed_at = None
                 session.flush()
-                logger.info(
+                logger.debug(
                     f"Reset failed task {existing.id} ({task_type}) for {content.content_id} "
                     f"to pending (attempt {existing.attempts + 1}/{existing.max_attempts})"
                 )
@@ -153,7 +153,7 @@ class TaskFactory:
             if task_type == 'transcribe' and 'chunk_index' in base_input_data:
                 chunk_info = f" (chunk {base_input_data['chunk_index']})"
 
-            logger.info(
+            logger.debug(
                 f"Created new task: {task_type} (ID: {task_id}) for {content.content_id}"
                 f"{chunk_info} with priority {final_priority}"
             )
