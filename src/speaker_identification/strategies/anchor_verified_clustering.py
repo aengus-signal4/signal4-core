@@ -296,7 +296,8 @@ class AnchorVerifiedClusteringStrategy:
         force: bool = False,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        name_filter: Optional[str] = None
+        name_filter: Optional[str] = None,
+        max_anchors: Optional[int] = None
     ):
         self.config = config or Phase3ClusterConfig()
         self.dry_run = dry_run
@@ -304,6 +305,7 @@ class AnchorVerifiedClusteringStrategy:
         self.start_date = start_date
         self.end_date = end_date
         self.name_filter = name_filter  # Filter to specific speaker name (for testing)
+        self.max_anchors = max_anchors  # Limit number of anchor groups to process (for testing)
 
         # Tracking
         self.claimed_speakers: Set[int] = set()
@@ -1707,6 +1709,8 @@ class AnchorVerifiedClusteringStrategy:
                    f"tau_sent={self.config.tau_sent}")
         logger.info(f"Confidence: min_verified={self.config.min_verified_for_high_confidence}, "
                    f"expand_single_verified={self.config.expand_single_verified}")
+        if self.max_anchors:
+            logger.info(f"Max anchors: {self.max_anchors} (testing mode)")
         logger.info("-" * 80)
 
         # Step 1: Load Phase 1 alias mappings
@@ -1783,6 +1787,11 @@ class AnchorVerifiedClusteringStrategy:
 
         # Sort by priority descending (full names first, then by length)
         sorted_names = sorted(valid_names, key=lambda x: name_priority(x[0]), reverse=True)
+
+        # Apply max_anchors limit if specified (for testing)
+        if self.max_anchors and len(sorted_names) > self.max_anchors:
+            logger.info(f"Limiting to first {self.max_anchors} name groups (of {len(sorted_names)})")
+            sorted_names = sorted_names[:self.max_anchors]
 
         logger.info(f"Processing {len(sorted_names)} name groups (full names first)")
 

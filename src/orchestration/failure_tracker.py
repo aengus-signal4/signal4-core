@@ -218,6 +218,7 @@ class FailureTracker:
             'not_found',
             'bad_url',
             'content_gone',
+            'feed_disabled',
             'video_unavailable',
             'access_denied',
             'age_restricted',

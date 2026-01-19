@@ -189,20 +189,28 @@ class AnalysisPipeline:
     def retrieve_segments_by_search(
         self,
         k: int = 500,
-        threshold: float = 0.4,
+        threshold: float = 0.42,
         time_window_days: Optional[int] = None,
+        must_contain: Optional[List[str]] = None,
+        must_contain_any: Optional[List[str]] = None,
         **filters
     ) -> "AnalysisPipeline":
         """
-        Add segment retrieval step using semantic search (FAISS).
+        Add segment retrieval step using semantic search with optional keyword filtering.
 
         Requires expand_query() to have been called first to generate query embeddings.
         Uses expanded queries from context["expanded_queries"] and context["query_embeddings"].
+
+        Supports hybrid search: semantic similarity + keyword filtering.
 
         Args:
             k: Maximum results per query embedding
             threshold: Minimum similarity threshold
             time_window_days: Time window filter (days)
+            must_contain: Keywords that ALL must appear in text (AND logic)
+                          Useful for entity queries like "Mark Carney"
+            must_contain_any: Keywords where AT LEAST ONE must appear (OR logic)
+                              Useful for variant names like ["Carney", "Mark Carney"]
             **filters: Additional filters for search
                 - projects: List[str]
                 - languages: List[str]
@@ -211,13 +219,24 @@ class AnalysisPipeline:
         Returns:
             Self for chaining
 
-        Example:
-            pipeline.expand_query("climate policy").retrieve_segments_by_search(k=100, time_window_days=30)
+        Examples:
+            # Pure semantic search
+            pipeline.expand_query("climate policy").retrieve_segments_by_search(k=100)
+
+            # Hybrid: semantic + entity filter
+            pipeline.expand_query("What is being said about Mark Carney")
+                    .retrieve_segments_by_search(must_contain=["Carney"], threshold=0.42)
+
+            # Hybrid with name variants (OR logic)
+            pipeline.expand_query("economy criticism")
+                    .retrieve_segments_by_search(must_contain_any=["Carney", "Trudeau"])
         """
         self.steps.append(("retrieve_segments_by_search", {
             "k": k,
             "threshold": threshold,
             "time_window_days": time_window_days,
+            "must_contain": must_contain,
+            "must_contain_any": must_contain_any,
             **filters
         }))
         return self
@@ -482,6 +501,64 @@ class AnalysisPipeline:
             "strategy": strategy,
             "n": n,
             **kwargs
+        }))
+        return self
+
+    def rerank_segments(
+        self,
+        best_per_episode: bool = True,
+        max_per_channel: Optional[int] = None,
+        similarity_weight: float = 0.4,
+        popularity_weight: float = 0.2,
+        recency_weight: float = 0.2,
+        single_speaker_weight: float = 0.1,
+        named_speaker_weight: float = 0.1,
+        time_window_days: int = 30
+    ) -> "AnalysisPipeline":
+        """
+        Add segment reranking step.
+
+        Reranks retrieved segments based on multiple quality signals:
+        - Semantic similarity (from search)
+        - Channel popularity (importance_score)
+        - Recency (publish_date freshness)
+        - Single speaker (60%+ from one speaker)
+        - Named speaker (speaker has identified name)
+
+        Also applies diversity constraints:
+        - Best match per episode (one segment per content_id)
+        - Max segments per channel
+
+        Call AFTER retrieve_segments_by_search and BEFORE select_segments.
+
+        Args:
+            best_per_episode: Keep only best segment per episode (default True)
+            max_per_channel: Optional max segments per channel
+            similarity_weight: Weight for semantic similarity (default 0.4)
+            popularity_weight: Weight for channel popularity (default 0.2)
+            recency_weight: Weight for recency (default 0.2)
+            single_speaker_weight: Weight for single speaker bonus (default 0.1)
+            named_speaker_weight: Weight for named speaker bonus (default 0.1)
+            time_window_days: Time window for recency normalization (default 30)
+
+        Returns:
+            Self for chaining
+
+        Example:
+            pipeline.expand_query("climate policy")
+                    .retrieve_segments_by_search(k=500, time_window_days=30)
+                    .rerank_segments(best_per_episode=True, popularity_weight=0.3)
+                    .select_segments(n=20)
+        """
+        self.steps.append(("rerank_segments", {
+            "best_per_episode": best_per_episode,
+            "max_per_channel": max_per_channel,
+            "similarity_weight": similarity_weight,
+            "popularity_weight": popularity_weight,
+            "recency_weight": recency_weight,
+            "single_speaker_weight": single_speaker_weight,
+            "named_speaker_weight": named_speaker_weight,
+            "time_window_days": time_window_days
         }))
         return self
 
@@ -830,12 +907,18 @@ class AnalysisPipeline:
             if "channels" in params:
                 search_filters["channels"] = params["channels"]
 
+            # Entity/keyword filters for hybrid search
+            must_contain = params.get("must_contain")
+            must_contain_any = params.get("must_contain_any")
+
             # Use unified batch search - returns all segments above threshold
             unique_segments = self._search_service.batch_search_unified(
                 embeddings,
                 time_window_days=time_window_days,
                 k=k,  # None = no limit, returns all above threshold
                 threshold=threshold,
+                must_contain=must_contain,
+                must_contain_any=must_contain_any,
                 **search_filters
             )
 
@@ -843,7 +926,15 @@ class AnalysisPipeline:
             context["query_embeddings"] = embeddings
             # Store embeddings as serializable lists for caching
             context["query_embeddings_cached"] = [emb.tolist() for emb in embeddings]
-            logger.info(f"Retrieved {len(unique_segments)} unique segments from unified batch search")
+
+            # Log with keyword info
+            keyword_info = []
+            if must_contain:
+                keyword_info.append(f"must_contain={must_contain}")
+            if must_contain_any:
+                keyword_info.append(f"must_contain_any={must_contain_any}")
+            keyword_str = f" [{', '.join(keyword_info)}]" if keyword_info else ""
+            logger.info(f"Retrieved {len(unique_segments)} unique segments from unified batch search{keyword_str}")
             return context
 
         elif step_type == "retrieve_segments":
@@ -879,6 +970,49 @@ class AnalysisPipeline:
             context["segments"] = segments
             context["all_segments"] = segments  # Store for corpus analysis
             logger.info(f"Retrieved all {len(segments)} segments for time window {time_window_days}d")
+            return context
+
+        elif step_type == "rerank_segments":
+            # Rerank segments based on multiple quality signals
+            from .segment_reranker import SegmentReranker, RerankerWeights, DiversityConstraints
+
+            segments = context.get("segments", [])
+            if not segments:
+                logger.warning("No segments available for reranking")
+                return context
+
+            # Build weights from params
+            weights = RerankerWeights(
+                similarity=params.get("similarity_weight", 0.4),
+                popularity=params.get("popularity_weight", 0.2),
+                recency=params.get("recency_weight", 0.2),
+                single_speaker=params.get("single_speaker_weight", 0.1),
+                named_speaker=params.get("named_speaker_weight", 0.1)
+            )
+
+            # Build diversity constraints
+            diversity = DiversityConstraints(
+                best_per_episode=params.get("best_per_episode", True),
+                max_per_channel=params.get("max_per_channel")
+            )
+
+            time_window_days = params.get("time_window_days", 30)
+
+            # Initialize reranker (uses embedded psycopg2 connection)
+            reranker = SegmentReranker()
+            reranked = reranker.rerank(
+                segments,
+                weights=weights,
+                diversity=diversity,
+                time_window_days=time_window_days
+            )
+
+            # Update context with reranked segments
+            context["segments"] = reranked
+            context["segments_before_rerank"] = len(segments)
+            context["segments_after_rerank"] = len(reranked)
+            logger.info(f"Reranked segments: {len(segments)} -> {len(reranked)} "
+                       f"(best_per_episode={diversity.best_per_episode})")
             return context
 
         elif step_type == "corpus_analysis":
@@ -1106,7 +1240,66 @@ class AnalysisPipeline:
                 }
                 return context
 
-            # Fetch embeddings for dict segments if needed
+            method = params.get("method", "hdbscan")
+
+            # FAST PATH: Use PCA + KMeans (no UMAP, much faster)
+            if method == "fast":
+                logger.info(f"Running FAST cluster check on {len(segments)} segments (PCA + KMeans)...")
+                from .fast_clustering import cluster_segments_fast
+                from .theme_extractor import Theme
+
+                # Fast clustering works directly on dict segments with embeddings
+                groups, cluster_result = cluster_segments_fast(
+                    segments,
+                    min_cluster_size=params.get("min_cluster_size", 10),
+                    min_silhouette=min_silhouette,
+                    max_clusters=params.get("max_themes", 4)
+                )
+
+                if cluster_result.is_valid and cluster_result.n_clusters >= 2:
+                    # Build Theme objects from groups
+                    themes = []
+                    for i, group in enumerate(groups):
+                        if len(group) >= params.get("min_cluster_size", 10):
+                            theme = Theme(
+                                theme_id=f"cluster_{i}",
+                                theme_name=f"Cluster {i+1}",
+                                segments=group,
+                                representative_segments=group[:5],
+                                keywords=[],
+                                embedding=None,
+                                metadata={"cluster_size": len(group)}
+                            )
+                            themes.append(theme)
+
+                    context["has_subclusters"] = True
+                    context["themes"] = themes
+                    context["cluster_validation"] = {
+                        "skipped": False,
+                        "silhouette_score": cluster_result.silhouette_score,
+                        "num_clusters": cluster_result.n_clusters,
+                        "cluster_sizes": cluster_result.cluster_sizes,
+                        "method": "fast_pca_kmeans",
+                        "elapsed_ms": cluster_result.metadata.get("elapsed_ms", 0)
+                    }
+                    logger.info(f"✓ Fast clustering: {len(themes)} clusters "
+                               f"(sil={cluster_result.silhouette_score:.3f}) in "
+                               f"{cluster_result.metadata.get('elapsed_ms', 0):.1f}ms")
+                else:
+                    context["has_subclusters"] = False
+                    context["themes"] = []
+                    context["cluster_validation"] = {
+                        "skipped": False,
+                        "silhouette_score": cluster_result.silhouette_score,
+                        "reason": "no_valid_clusters",
+                        "method": "fast_pca_kmeans"
+                    }
+                    logger.info(f"✗ Fast clustering: no valid clusters "
+                               f"(sil={cluster_result.silhouette_score:.3f})")
+
+                return context
+
+            # STANDARD PATH: Fetch embeddings for dict segments, use UMAP + HDBSCAN
             if segments and isinstance(segments[0], dict):
                 logger.info(f"Fetching embeddings for {len(segments)} dict segments")
                 from ..rag.segment_retriever import SegmentRetriever
@@ -1119,7 +1312,7 @@ class AnalysisPipeline:
             logger.info(f"Running quick cluster check on {len(segments)} segments...")
             themes = extractor.extract_by_clustering(
                 segments=segments,
-                method=params.get("method", "hdbscan"),
+                method=method,
                 n_clusters=params.get("n_clusters"),
                 min_cluster_size=params.get("min_cluster_size", 10),
                 min_segments_per_theme=params.get("min_cluster_size", 10),
@@ -1664,10 +1857,16 @@ class AnalysisPipeline:
 
         elif step_type == "retrieve_segments_by_search":
             # Stream semantic search retrieval progress
-            # Get expanded queries from context
+            # Get expanded queries from context (or fall back to original query for quick_summary)
             expanded_queries = context.get("expanded_queries")
             if not expanded_queries:
-                raise ValueError("expand_query step must be called before retrieve_segments_by_search")
+                # Support direct query embedding without expand_query step (quick_summary workflow)
+                original_query = context.get("original_query")
+                if original_query:
+                    expanded_queries = [original_query]
+                    logger.info(f"Using original query directly (no expansion): '{original_query[:60]}...'")
+                else:
+                    raise ValueError("expand_query step must be called before retrieve_segments_by_search, or original_query must be in context")
 
             # Check if embeddings are already in context (from cache)
             embeddings = context.get("query_embeddings")
@@ -1769,6 +1968,68 @@ class AnalysisPipeline:
 
             context["segments"] = segments
             logger.info(f"Retrieved {len(segments)} segments")
+            yield {"type": "result", "data": context}
+
+        elif step_type == "rerank_segments":
+            # Stream reranking progress
+            from .segment_reranker import SegmentReranker, RerankerWeights, DiversityConstraints
+
+            segments = context.get("segments", [])
+            if not segments:
+                logger.warning("No segments available for reranking")
+                yield {"type": "result", "data": context}
+                return
+
+            yield {
+                "type": "partial",
+                "data": {"input_segments": len(segments)},
+                "progress": 0.3,
+                "message": f"Reranking {len(segments)} segments..."
+            }
+
+            # Build weights from params
+            weights = RerankerWeights(
+                similarity=params.get("similarity_weight", 0.4),
+                popularity=params.get("popularity_weight", 0.2),
+                recency=params.get("recency_weight", 0.2),
+                single_speaker=params.get("single_speaker_weight", 0.1),
+                named_speaker=params.get("named_speaker_weight", 0.1)
+            )
+
+            # Build diversity constraints
+            diversity = DiversityConstraints(
+                best_per_episode=params.get("best_per_episode", True),
+                max_per_channel=params.get("max_per_channel")
+            )
+
+            time_window_days = params.get("time_window_days", 30)
+
+            # Initialize reranker (uses embedded psycopg2 connection)
+            reranker = SegmentReranker()
+            reranked = reranker.rerank(
+                segments,
+                weights=weights,
+                diversity=diversity,
+                time_window_days=time_window_days
+            )
+
+            # Update context with reranked segments
+            context["segments"] = reranked
+            context["segments_before_rerank"] = len(segments)
+            context["segments_after_rerank"] = len(reranked)
+
+            yield {
+                "type": "partial",
+                "data": {
+                    "input_segments": len(segments),
+                    "output_segments": len(reranked),
+                    "best_per_episode": diversity.best_per_episode
+                },
+                "progress": 1.0,
+                "message": f"Reranked: {len(segments)} -> {len(reranked)} segments"
+            }
+
+            logger.info(f"Reranked segments: {len(segments)} -> {len(reranked)}")
             yield {"type": "result", "data": context}
 
         elif step_type == "select_segments":
@@ -2493,14 +2754,27 @@ Source transcripts:
                 "original_query": context.get("query"),
                 "expanded_queries": context.get("expanded_queries", []),
                 "keywords": context.get("keywords", []),
-                "expansion_strategy": context.get("expansion_strategy")
+                "expansion_strategy": context.get("expansion_strategy"),
+                # Include serialized embeddings for caching
+                "query_embeddings_cached": context.get("query_embeddings_cached", [])
             }
 
         elif step_type == "retrieve_segments_by_search":
             segments = context.get("segments", [])
             return {
                 "segment_count": len(segments),
-                "segments": segments  # Already dicts from search
+                "segments": segments,  # Already dicts from search
+                # Include serialized embeddings for caching (generated during search)
+                "query_embeddings_cached": context.get("query_embeddings_cached", [])
+            }
+
+        elif step_type == "rerank_segments":
+            segments = context.get("segments", [])
+            return {
+                "segment_count": len(segments),
+                "segments_before_rerank": context.get("segments_before_rerank", 0),
+                "segments_after_rerank": context.get("segments_after_rerank", 0),
+                "segments": segments  # Reranked dicts
             }
 
         elif step_type == "quick_cluster_check":

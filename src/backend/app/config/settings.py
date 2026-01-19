@@ -14,8 +14,21 @@ from dotenv import load_dotenv
 env_path = get_project_root() / '.env'
 load_dotenv(env_path)
 
-# Database
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://signal4@localhost/av_content')
+# Database - use centralized config
+def _get_database_url():
+    """Get database URL from environment variables."""
+    password = os.getenv('POSTGRES_PASSWORD')
+    if not password:
+        # For backwards compatibility, allow DATABASE_URL override
+        return os.getenv('DATABASE_URL', '')
+
+    return (
+        f"postgresql://{os.getenv('POSTGRES_USER', 'signal4')}:{password}"
+        f"@{os.getenv('POSTGRES_HOST', '10.0.0.4')}:{os.getenv('POSTGRES_PORT', '5432')}"
+        f"/{os.getenv('POSTGRES_DB', 'av_content')}"
+    )
+
+DATABASE_URL = _get_database_url()
 
 # API Keys
 XAI_API_KEY = os.getenv('XAI_API_KEY', '')

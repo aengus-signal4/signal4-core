@@ -12,7 +12,6 @@ import asyncio
 import logging
 import json
 import yaml
-import torch
 import numpy as np
 from typing import Dict, List, Optional
 from datetime import datetime

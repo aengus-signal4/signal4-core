@@ -2,17 +2,53 @@
 Workflow Cache Service
 ======================
 
-Two-level caching strategy for RAG workflows:
+Multi-level caching for RAG workflows. See workflows.py for full architecture docs.
 
-Level 1: Query Expansion Cache (Long TTL - 30 days)
-- Cache Key: query only (time-agnostic)
-- Cached Data: expanded_queries, keywords
-- Rationale: Query expansion doesn't depend on time window
+Cache Levels:
+-------------
 
-Level 2: Workflow Result Cache (Dynamic TTL - 6-24 hours)
-- Cache Key: query + time_window + filters
-- Cached Data: selected_segments, summary, segment_ids
-- Rationale: Time-sensitive results, dynamic TTL based on time window
+1. **ExpandQueryCache** (via QueryVariationService)
+   - Uses normalized query_variations + query_expansions tables
+   - Stores: expanded_queries + embeddings (reusable across queries)
+   - Time-agnostic (same expansion regardless of time window)
+   - Permanent storage (variations grow over time)
+
+2. **WorkflowResultCache** (llm_cache table)
+   - Stores: selected_segments, summaries, segment_ids
+   - Cache key: query + time_window + projects + languages
+   - TTL: 6h (7d queries), 12h (30d), 24h (longer)
+
+3. **LandingPageCache** (llm_cache table)
+   - Stores: themes, corpus_stats, summaries (no query)
+   - Cache key: time_window + projects + languages
+   - TTL: 24h fixed
+
+4. **SemanticQueryCache** (future)
+   - Will match semantically similar queries
+   - TTL: 1h (7d), 8h (30d)
+
+Performance:
+------------
+- Full cache hit (quick_summary): ~740ms (instant)
+- Partial cache (expand only): ~10s (skip LLM expansion)
+- Cold (no cache): ~14s (full pipeline)
+
+Usage:
+------
+    # Check caches before running pipeline
+    cache_results = check_caches_sequential(query, time_window, projects, languages, dashboard_id)
+
+    if cache_results['workflow'] and cache_results['expand_query']:
+        # Full cache hit - return immediately for quick_summary
+        return cached_result
+
+    if cache_results['expand_query']:
+        # Partial hit - use cached embeddings, skip expand_query step
+        initial_context = {'query_embeddings': cached_embeddings, ...}
+
+    # After pipeline completes, cache results
+    expand_cache.put(query, {'expanded_queries': ..., 'query_embeddings': ...})
+    workflow_cache.put(query, time_window, projects, languages, {'selected_segments': ...})
 """
 
 import hashlib
@@ -27,12 +63,187 @@ from src.utils.logger import setup_worker_logger
 logger = setup_worker_logger("backend.workflow_cache")
 
 
+class SemanticQueryCache:
+    """
+    Level 0: Semantic query similarity cache (fastest path).
+
+    Uses query embedding to find semantically similar cached results.
+    Returns complete workflow result immediately if found.
+
+    Examples of matches:
+    - "What is being said about Mark Carney?" ≈ "Mark Carney discussion"
+    - "Climate policy debate" ≈ "What are people saying about climate policy?"
+
+    TTL varies by time window:
+    - 7d queries: 1 hour (breaking/current topics change quickly)
+    - 30d queries: 8 hours (more stable)
+    """
+
+    # Similarity threshold for semantic cache hits (higher = more strict)
+    SIMILARITY_THRESHOLD = 0.92  # 92% similar required
+
+    def __init__(self, dashboard_id: str):
+        """
+        Initialize semantic query cache.
+
+        Args:
+            dashboard_id: Dashboard identifier for logging
+        """
+        self.dashboard_id = dashboard_id
+        self.cache = PgLLMCache(
+            dashboard_id=dashboard_id,
+            similarity_threshold=self.SIMILARITY_THRESHOLD,
+            ttl_hours=None  # Dynamic per-request
+        )
+        logger.debug(f"[{dashboard_id}] SemanticQueryCache initialized (threshold={self.SIMILARITY_THRESHOLD})")
+
+    def get_ttl_for_time_window(self, time_window_days: int) -> int:
+        """
+        Determine cache TTL based on time window.
+
+        Args:
+            time_window_days: Analysis time window in days
+
+        Returns:
+            TTL in hours
+        """
+        if time_window_days <= 7:
+            return 1   # 1 hour for 7-day queries (current events)
+        elif time_window_days <= 30:
+            return 8   # 8 hours for 30-day queries
+        else:
+            return 24  # 24 hours for historical queries
+
+    def build_cache_key(
+        self,
+        time_window: int,
+        projects: list,
+        languages: list
+    ) -> str:
+        """
+        Build cache key from filters (query is matched via embedding).
+
+        Args:
+            time_window: Time window in days
+            projects: Project filter list
+            languages: Language filter list
+
+        Returns:
+            Cache key string
+        """
+        projects_str = ",".join(sorted(projects or []))
+        languages_str = ",".join(sorted(languages or []))
+        return f"semantic_query:{time_window}d:{projects_str}:{languages_str}"
+
+    def get(
+        self,
+        query: str,
+        query_embedding,
+        time_window: int,
+        projects: list,
+        languages: list
+    ):
+        """
+        Check cache for semantically similar query result.
+
+        Args:
+            query: User query string
+            query_embedding: Query embedding vector (numpy array)
+            time_window: Time window in days
+            projects: Project filter list
+            languages: Language filter list
+
+        Returns:
+            Cached result dict or None if not found
+        """
+        if query_embedding is None:
+            return None
+
+        # Build filter-specific cache key
+        cache_key = self.build_cache_key(time_window, projects, languages)
+        ttl_hours = self.get_ttl_for_time_window(time_window)
+
+        result = self.cache.get(
+            cache_key,
+            query_embedding=query_embedding,
+            cache_type='semantic_query'
+        )
+
+        if result:
+            age_seconds = result.get('_cache_age_seconds', 0)
+            similarity = result.get('_cache_similarity', 0)
+            original_query = result.get('_original_query', 'unknown')
+
+            # Check if within TTL
+            if age_seconds / 3600 > ttl_hours:
+                logger.debug(
+                    f"[{self.dashboard_id}] SemanticQueryCache EXPIRED "
+                    f"(age={age_seconds/3600:.1f}h > ttl={ttl_hours}h)"
+                )
+                return None
+
+            logger.info(
+                f"[{self.dashboard_id}] SemanticQueryCache HIT "
+                f"(similarity={similarity:.3f}, age={age_seconds/60:.1f}m, ttl={ttl_hours}h) "
+                f"'{query[:40]}...' ≈ '{original_query[:40]}...'"
+            )
+
+        return result
+
+    def put(
+        self,
+        query: str,
+        query_embedding,
+        time_window: int,
+        projects: list,
+        languages: list,
+        data: dict
+    ) -> None:
+        """
+        Cache workflow result with query embedding for semantic matching.
+
+        Args:
+            query: User query string
+            query_embedding: Query embedding vector
+            time_window: Time window in days
+            projects: Project filter list
+            languages: Language filter list
+            data: Result dict with segments, summary, etc.
+        """
+        if query_embedding is None:
+            logger.warning(f"[{self.dashboard_id}] Cannot cache without query embedding")
+            return
+
+        cache_key = self.build_cache_key(time_window, projects, languages)
+        ttl_hours = self.get_ttl_for_time_window(time_window)
+
+        # Add original query for logging
+        data_with_query = {**data, '_original_query': query}
+
+        self.cache.put(
+            cache_key,
+            query_embedding=query_embedding,
+            response=data_with_query,
+            cache_type='semantic_query',
+            ttl_hours=ttl_hours
+        )
+
+        logger.info(
+            f"[{self.dashboard_id}] SemanticQueryCache PUT "
+            f"(ttl={ttl_hours}h, {time_window}d query) '{query[:50]}...'"
+        )
+
+
 class ExpandQueryCache:
     """
-    Level 1: Query expansion cache with long TTL.
+    Level 1: Query expansion cache using normalized variation library.
 
-    Caches query expansions independently of time filters since
-    query expansion is time-agnostic (e.g., "Mark Carney" expands
+    Uses query_variations and query_expansions tables to:
+    - Deduplicate query texts (same text = same embedding)
+    - Reuse embeddings across different original queries
+    - Build a growing library of embedded variations over time
+
+    Query expansion is time-agnostic (e.g., "Mark Carney" expands
     the same way regardless of time window).
     """
 
@@ -44,66 +255,82 @@ class ExpandQueryCache:
             dashboard_id: Dashboard identifier for logging
         """
         self.dashboard_id = dashboard_id
-        self.cache = PgLLMCache(
-            dashboard_id=dashboard_id,
-            similarity_threshold=0.85,
-            ttl_hours=720  # 30 days
-        )
-        logger.debug(f"[{dashboard_id}] ExpandQueryCache initialized (ttl=30d)")
-
-    def build_cache_key(self, query: str) -> str:
-        """
-        Build cache key from query only.
-
-        Args:
-            query: User query string
-
-        Returns:
-            Cache key string
-        """
-        query_hash = hashlib.md5(query.encode()).hexdigest()[:12]
-        return f"expand_query:{query_hash}"
+        from .query_variation_service import QueryVariationService
+        self.variation_service = QueryVariationService(dashboard_id)
+        logger.debug(f"[{dashboard_id}] ExpandQueryCache initialized (using variation library)")
 
     def get_sync(self, query: str) -> Optional[Dict[str, Any]]:
         """
         Check cache for query expansion result.
 
+        Looks up the original query in query_expansions table
+        and returns all linked variations with their embeddings.
+
         Args:
             query: User query string
 
         Returns:
-            Cached result dict or None if not found
+            Cached result dict with 'expanded_queries' and 'query_embeddings',
+            or None if not found
         """
-        cache_key = self.build_cache_key(query)
-        result = self.cache.get(
-            cache_key,
-            query_embedding=None,
-            cache_type='expand_query'
-        )
+        result = self.variation_service.get_expansion(query)
 
-        if result:
-            age_minutes = result.get('_cache_age_seconds', 0) / 60
-            logger.info(f"[{self.dashboard_id}] ExpandQueryCache HIT (age={age_minutes:.1f}m)")
+        if result and result.get('all_embedded'):
+            # Convert to expected format
+            import numpy as np
+            return {
+                'expanded_queries': result['variations'],
+                'query_embeddings': [emb.tolist() for emb in result['embeddings']],
+                '_cache_hit': True
+            }
+        elif result:
+            # Found variations but missing some embeddings
+            logger.info(
+                f"[{self.dashboard_id}] ExpandQueryCache partial HIT "
+                f"({len(result['variations'])} variations, needs embedding)"
+            )
+            return {
+                'expanded_queries': result['variations'],
+                'query_embeddings': [],  # Need to regenerate
+                '_cache_hit': False,
+                '_needs_embedding': True
+            }
 
-        return result
+        return None
 
     def put(self, query: str, data: Dict[str, Any]) -> None:
         """
-        Cache query expansion result.
+        Cache query expansion result with embeddings.
+
+        Stores the expansion mapping and all variation embeddings
+        in the normalized query_variations library.
 
         Args:
             query: User query string
-            data: Dict with 'expanded_queries' and 'keywords'
+            data: Dict with 'expanded_queries' and 'query_embeddings' (list of lists)
         """
-        cache_key = self.build_cache_key(query)
-        self.cache.put(
-            cache_key,
-            query_embedding=None,
-            response=data,
-            cache_type='expand_query',
-            ttl_hours=720  # 30 days
+        expanded_queries = data.get('expanded_queries', [])
+        query_embeddings = data.get('query_embeddings', [])
+
+        if not expanded_queries:
+            logger.warning(f"[{self.dashboard_id}] No expanded queries to cache")
+            return
+
+        # Convert embeddings from lists to numpy arrays if needed
+        import numpy as np
+        embeddings = None
+        if query_embeddings:
+            embeddings = [
+                np.array(emb, dtype=np.float32) if not isinstance(emb, np.ndarray) else emb
+                for emb in query_embeddings
+            ]
+
+        # Store in normalized library
+        self.variation_service.store_expansion(
+            original_query=query,
+            variations=expanded_queries,
+            embeddings=embeddings
         )
-        logger.debug(f"[{self.dashboard_id}] ExpandQueryCache PUT (ttl=30d)")
 
 
 class WorkflowResultCache:
@@ -129,33 +356,6 @@ class WorkflowResultCache:
         )
         logger.debug(f"[{dashboard_id}] WorkflowResultCache initialized")
 
-    def build_cache_key(
-        self,
-        query: str,
-        time_window: int,
-        projects: Optional[List[str]],
-        languages: Optional[List[str]]
-    ) -> str:
-        """
-        Build cache key from query + time_window + filters.
-
-        Args:
-            query: User query string
-            time_window: Time window in days
-            projects: Project filter list
-            languages: Language filter list
-
-        Returns:
-            Cache key string
-        """
-        # Sort lists for consistent hashing
-        projects_str = ",".join(sorted(projects or []))
-        languages_str = ",".join(sorted(languages or []))
-
-        key_data = f"{query}:{time_window}:{projects_str}:{languages_str}"
-        cache_hash = hashlib.md5(key_data.encode()).hexdigest()[:12]
-        return f"workflow_result:{cache_hash}"
-
     def get_ttl_for_time_window(self, time_window_days: int) -> int:
         """
         Determine cache TTL based on time window.
@@ -176,6 +376,22 @@ class WorkflowResultCache:
         else:
             return 24  # 24 hours for longer queries (historical)
 
+    def _build_cache_query(
+        self,
+        query: str,
+        time_window: int,
+        projects: Optional[List[str]],
+        languages: Optional[List[str]]
+    ) -> str:
+        """
+        Build the query string used for cache key computation.
+
+        This returns the raw string that will be hashed by PgLLMCache.
+        """
+        projects_str = ",".join(sorted(projects or []))
+        languages_str = ",".join(sorted(languages or []))
+        return f"{query}:{time_window}:{projects_str}:{languages_str}"
+
     def get_sync(
         self,
         query: str,
@@ -195,9 +411,11 @@ class WorkflowResultCache:
         Returns:
             Cached result dict or None if not found
         """
-        cache_key = self.build_cache_key(query, time_window, projects, languages)
+        # Build the full query string for cache lookup
+        # PgLLMCache will hash this to create the cache key
+        cache_query = self._build_cache_query(query, time_window, projects, languages)
         result = self.cache.get(
-            cache_key,
+            cache_query,
             query_embedding=None,
             cache_type='workflow_result'
         )
@@ -230,11 +448,13 @@ class WorkflowResultCache:
             languages: Language filter list
             data: Result dict with 'selected_segments', 'summary', 'segment_ids'
         """
-        cache_key = self.build_cache_key(query, time_window, projects, languages)
+        # Build the full query string for cache storage
+        # PgLLMCache will hash this to create the cache key
+        cache_query = self._build_cache_query(query, time_window, projects, languages)
         ttl_hours = self.get_ttl_for_time_window(time_window)
 
         self.cache.put(
-            cache_key,
+            cache_query,
             query_embedding=None,
             response=data,
             cache_type='workflow_result',
@@ -271,30 +491,20 @@ class LandingPageCache:
         )
         logger.debug(f"[{dashboard_id}] LandingPageCache initialized (ttl={self.TTL_HOURS}h)")
 
-    def build_cache_key(
+    def _build_cache_query(
         self,
         time_window: int,
         projects: Optional[List[str]],
         languages: Optional[List[str]]
     ) -> str:
         """
-        Build cache key from filters only (no query).
+        Build the query string used for cache key computation.
 
-        Args:
-            time_window: Time window in days
-            projects: Project filter list
-            languages: Language filter list
-
-        Returns:
-            Cache key string
+        This returns the raw string that will be hashed by PgLLMCache.
         """
-        # Sort lists for consistent hashing
         projects_str = ",".join(sorted(projects or []))
         languages_str = ",".join(sorted(languages or []))
-
-        key_data = f"landing:{time_window}:{projects_str}:{languages_str}"
-        cache_hash = hashlib.md5(key_data.encode()).hexdigest()[:12]
-        return f"landing_page:{cache_hash}"
+        return f"landing:{time_window}:{projects_str}:{languages_str}"
 
     def get_sync(
         self,
@@ -313,9 +523,11 @@ class LandingPageCache:
         Returns:
             Cached result dict or None if not found
         """
-        cache_key = self.build_cache_key(time_window, projects, languages)
+        # Build the full query string for cache lookup
+        # PgLLMCache will hash this to create the cache key
+        cache_query = self._build_cache_query(time_window, projects, languages)
         result = self.cache.get(
-            cache_key,
+            cache_query,
             query_embedding=None,
             cache_type='landing_page'
         )
@@ -349,10 +561,12 @@ class LandingPageCache:
             languages: Language filter list
             data: Result dict with themes, corpus_stats, summaries, etc.
         """
-        cache_key = self.build_cache_key(time_window, projects, languages)
+        # Build the full query string for cache storage
+        # PgLLMCache will hash this to create the cache key
+        cache_query = self._build_cache_query(time_window, projects, languages)
 
         self.cache.put(
-            cache_key,
+            cache_query,
             query_embedding=None,
             response=data,
             cache_type='landing_page',

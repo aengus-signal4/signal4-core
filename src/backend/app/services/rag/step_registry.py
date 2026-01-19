@@ -44,17 +44,32 @@ STEP_REGISTRY: Dict[str, StepMetadata] = {
 
     "retrieve_segments": StepMetadata(
         name="retrieve_segments",
-        description="Retrieve segments using semantic search with pgvector",
+        description="Retrieve segments using semantic search with optional keyword filtering (hybrid search)",
         parameters={
             "k": {
                 "type": "integer",
                 "default": 200,
                 "description": "Maximum results per query embedding"
             },
+            "threshold": {
+                "type": "number",
+                "default": 0.42,
+                "description": "Minimum similarity threshold (0.0-1.0). Minimum 0.42 recommended."
+            },
             "time_window_days": {
                 "type": "integer",
                 "default": 30,
                 "description": "Time window in days"
+            },
+            "must_contain": {
+                "type": "array",
+                "default": None,
+                "description": "Keywords that ALL must appear in text (AND). For entity queries like 'Mark Carney'."
+            },
+            "must_contain_any": {
+                "type": "array",
+                "default": None,
+                "description": "Keywords where AT LEAST ONE must appear (OR). For name variants like ['Carney', 'Mark Carney']."
             },
             "projects": {
                 "type": "array",
@@ -125,9 +140,9 @@ STEP_REGISTRY: Dict[str, StepMetadata] = {
         parameters={
             "method": {
                 "type": "string",
-                "enum": ["hdbscan"],
-                "default": "hdbscan",
-                "description": "Clustering method"
+                "enum": ["hdbscan", "fast"],
+                "default": "fast",
+                "description": "Clustering method: 'fast' (PCA+KMeans, ~50ms) or 'hdbscan' (UMAP+HDBSCAN, ~1-5s)"
             },
             "min_cluster_size": {
                 "type": "integer",
@@ -208,6 +223,54 @@ STEP_REGISTRY: Dict[str, StepMetadata] = {
             }
         },
         method_name="quantitative_analysis"
+    ),
+
+    "rerank_segments": StepMetadata(
+        name="rerank_segments",
+        description="Rerank retrieved segments by popularity, recency, speaker quality; apply diversity constraints",
+        parameters={
+            "best_per_episode": {
+                "type": "boolean",
+                "default": True,
+                "description": "Keep only best segment per episode (content_id)"
+            },
+            "max_per_channel": {
+                "type": "integer",
+                "default": None,
+                "description": "Optional max segments per channel"
+            },
+            "similarity_weight": {
+                "type": "number",
+                "default": 0.4,
+                "description": "Weight for semantic similarity score"
+            },
+            "popularity_weight": {
+                "type": "number",
+                "default": 0.2,
+                "description": "Weight for channel popularity (importance_score)"
+            },
+            "recency_weight": {
+                "type": "number",
+                "default": 0.2,
+                "description": "Weight for recency (newer = higher)"
+            },
+            "single_speaker_weight": {
+                "type": "number",
+                "default": 0.1,
+                "description": "Bonus weight for single-speaker segments"
+            },
+            "named_speaker_weight": {
+                "type": "number",
+                "default": 0.1,
+                "description": "Bonus weight for segments with named speakers"
+            },
+            "time_window_days": {
+                "type": "integer",
+                "default": 30,
+                "description": "Time window for recency normalization"
+            }
+        },
+        method_name="rerank_segments"
     ),
 
     "select_segments": StepMetadata(
@@ -596,7 +659,7 @@ def build_pipeline_from_steps(
         # Merge global filters for retrieval and analysis steps
         # Global filters should override workflow defaults (so config goes first, then global_filters override)
         if step_name in ["retrieve_segments", "quantitative_analysis", "retrieve_segments_by_search",
-                         "batch_retrieve_segments", "retrieve_all_segments"]:
+                         "batch_retrieve_segments", "retrieve_all_segments", "rerank_segments"]:
             config = {**config, **global_filters}
 
         # Get method from pipeline

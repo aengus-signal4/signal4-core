@@ -266,6 +266,10 @@ class SimpleRAGWorkflow:
             pipeline
             .expand_query(query, strategy=expansion_strategy)
             .retrieve_segments_by_search(k=k, time_window_days=time_window_days, **filters)
+            .rerank_segments(
+                best_per_episode=True,
+                time_window_days=time_window_days or 30
+            )
             .custom_step("prepare_segments", prepare_segments)
         )
 
@@ -416,6 +420,10 @@ class SimpleRAGWorkflow:
             pipeline
             .expand_query(query, strategy=expansion_strategy)
             .retrieve_segments_by_search(k=k, time_window_days=time_window_days, **filters)
+            .rerank_segments(
+                best_per_episode=True,
+                time_window_days=time_window_days or 30
+            )
             .custom_step("prepare_segments", prepare_segments)
         )
 

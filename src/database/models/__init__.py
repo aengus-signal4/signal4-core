@@ -140,6 +140,9 @@ from src.database.models.api_keys import ApiKey, ApiKeyUsage
 # Alternative transcription models
 from src.database.models.transcriptions import AlternativeTranscription
 
+# Query cache models
+from src.database.models.query_cache import QueryVariation, QueryExpansion
+
 
 __all__ = [
     # Base
@@ -181,4 +184,7 @@ __all__ = [
     "ApiKeyUsage",
     # Transcriptions
     "AlternativeTranscription",
+    # Query Cache
+    "QueryVariation",
+    "QueryExpansion",
 ]

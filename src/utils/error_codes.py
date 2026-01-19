@@ -47,6 +47,7 @@ class ErrorCode(Enum):
     VIDEO_UNAVAILABLE = "video_unavailable"
     LIVE_STREAM = "live_stream"
     CONTENT_GONE = "content_gone"  # HTTP 410 - permanently deleted
+    FEED_DISABLED = "feed_disabled"  # HTTP 400 - RSS/podcast feed disabled
     
     # Processing results (special handling)
     EMPTY_RESULT = "empty_result"
@@ -186,7 +187,8 @@ ERROR_CATEGORIES = {
         ErrorCode.BAD_URL,
         ErrorCode.VIDEO_UNAVAILABLE,
         ErrorCode.LIVE_STREAM,
-        ErrorCode.CONTENT_GONE
+        ErrorCode.CONTENT_GONE,
+        ErrorCode.FEED_DISABLED
     ],
     'special': [
         ErrorCode.EMPTY_RESULT,

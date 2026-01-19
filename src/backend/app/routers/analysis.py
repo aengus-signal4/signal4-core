@@ -61,8 +61,10 @@ def _clean_event_for_json(event: dict) -> dict:
     """
     import numpy as np
 
-    # Keys to skip entirely
-    SKIP_KEYS = {"_embedding", "embedding", "embeddings", "query_embeddings", "query_embedding", "query_embeddings_cached"}
+    # Keys to skip entirely (remove from SSE events)
+    # Note: query_embeddings_cached is NOT skipped because it's already serializable (list of lists)
+    # and we need it for caching
+    SKIP_KEYS = {"_embedding", "embedding", "embeddings", "query_embeddings", "query_embedding"}
 
     def clean_value(v):
         """Recursively clean a value."""
@@ -346,6 +348,44 @@ async def analyze_stream(request: AnalysisRequest, http_request: Request):
 
                 # Yield cache hit event
                 yield f"data: {json.dumps({'type': 'cache_hit', 'level': 'full'})}\n\n"
+
+                # For quick_summary workflow, return cached result immediately (instant response)
+                # Other workflows refresh retrieval for up-to-date quantitative stats
+                if request.workflow == "quick_summary":
+                    logger.info(f"[{request.dashboard_id}] [CACHE] Returning instant cached result for quick_summary")
+
+                    # Send cached results
+                    segments_event = {
+                        'type': 'result',
+                        'step': 'select_segments',
+                        'data': {
+                            'selected_segments': cache_results['workflow']['selected_segments'],
+                            'selection_strategy': 'cached'
+                        }
+                    }
+                    cleaned_event = _clean_event_for_json(segments_event)
+                    yield f"data: {json.dumps(cleaned_event)}\n\n"
+
+                    summary_event = {
+                        'type': 'result',
+                        'step': 'generate_summaries',
+                        'data': {
+                            'summaries': cache_results['workflow']['summaries'],
+                            'segment_ids': cache_results['workflow'].get('selected_segment_ids', [])
+                        }
+                    }
+                    cleaned_event = _clean_event_for_json(summary_event)
+                    yield f"data: {json.dumps(cleaned_event)}\n\n"
+
+                    # Complete event
+                    complete_event = {
+                        'type': 'complete',
+                        'message': 'Analysis complete (cached)'
+                    }
+                    yield f"data: {json.dumps(complete_event)}\n\n"
+
+                    logger.info(f"[{request.dashboard_id}] Complete (instant cache hit)")
+                    return
 
                 # Use cached embeddings to re-run retrieval + quantitative
                 # This gives us fresh stats while saving on expensive embedding generation + summary

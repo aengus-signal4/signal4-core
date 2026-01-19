@@ -71,3 +71,4 @@ htmlcov/
 # Database
 *.db
 *.sqlite3
+src/processing_steps/swift/.build/

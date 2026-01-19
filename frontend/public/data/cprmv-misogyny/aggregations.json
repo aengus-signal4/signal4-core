@@ -1,0 +1,4565 @@
+{
+  "exportedAt": "2026-01-19T09:50:13.828878",
+  "version": "2.0",
+  "schemaId": 3,
+  "summary_stats": {
+    "n_channels": 52,
+    "min_date": "January 01, 2020",
+    "max_date": "December 31, 2025",
+    "english_hours": 12605.0,
+    "french_hours": 8927.0,
+    "english_episodes": 28878,
+    "french_episodes": 10970,
+    "flagged_videos": 9926,
+    "flagged_pct": 24.9,
+    "segment_pct": 3.6,
+    "total_segments": 1142692
+  },
+  "lang_volume_by_year": [
+    {
+      "year": 2020,
+      "main_language": "en",
+      "hours": 929.5,
+      "episode_count": 2685
+    },
+    {
+      "year": 2020,
+      "main_language": "fr",
+      "hours": 44.7,
+      "episode_count": 75
+    },
+    {
+      "year": 2021,
+      "main_language": "en",
+      "hours": 1461.9,
+      "episode_count": 3501
+    },
+    {
+      "year": 2021,
+      "main_language": "fr",
+      "hours": 342.0,
+      "episode_count": 614
+    },
+    {
+      "year": 2022,
+      "main_language": "en",
+      "hours": 2268.8,
+      "episode_count": 4193
+    },
+    {
+      "year": 2022,
+      "main_language": "fr",
+      "hours": 1015.9,
+      "episode_count": 1388
+    },
+    {
+      "year": 2023,
+      "main_language": "en",
+      "hours": 2197.4,
+      "episode_count": 4809
+    },
+    {
+      "year": 2023,
+      "main_language": "fr",
+      "hours": 2222.6,
+      "episode_count": 2303
+    },
+    {
+      "year": 2024,
+      "main_language": "en",
+      "hours": 2714.6,
+      "episode_count": 6598
+    },
+    {
+      "year": 2024,
+      "main_language": "fr",
+      "hours": 2594.3,
+      "episode_count": 2812
+    },
+    {
+      "year": 2025,
+      "main_language": "en",
+      "hours": 3032.8,
+      "episode_count": 7092
+    },
+    {
+      "year": 2025,
+      "main_language": "fr",
+      "hours": 2707.5,
+      "episode_count": 3778
+    }
+  ],
+  "total_hours": 21532.0,
+  "total_episodes": 39848,
+  "theme_distribution": [
+    {
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "description_en": "Documents portraying men as victims and framing social change as civilizational decline",
+      "description_fr": "Documents pr\u00e9sentant les hommes comme victimes et cadrant le changement social comme d\u00e9clin civilisationnel",
+      "segment_count": 27574,
+      "proportion": 0.6711288516769702,
+      "by_language": {
+        "en": 15794,
+        "fr": 11780
+      }
+    },
+    {
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "description_en": "Documents portraying feminism, LGBTQ+ movements, or progressive ideology as systemic threats, conspiracies, or sources of societal decline",
+      "description_fr": "Documents pr\u00e9sentant le f\u00e9minisme, les mouvements LGBTQ+ ou l'id\u00e9ologie progressiste comme des menaces syst\u00e9miques, des complots ou des sources de d\u00e9clin soci\u00e9tal",
+      "segment_count": 25245,
+      "proportion": 0.6144428759188044,
+      "by_language": {
+        "en": 14212,
+        "fr": 11033
+      }
+    },
+    {
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "description_en": "Documents containing discrimination, dehumanization, or delegitimization targeting women or LGBTQ+ people",
+      "description_fr": "Documents contenant de la discrimination, de la d\u00e9shumanisation ou de la d\u00e9l\u00e9gitimation visant les femmes ou les personnes LGBTQ+",
+      "segment_count": 22027,
+      "proportion": 0.5361193593924938,
+      "by_language": {
+        "fr": 9509,
+        "en": 12518
+      }
+    },
+    {
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "description_en": "Documents advocating for patriarchal, masculinist, or traditionalist responses to perceived feminist or progressive threats",
+      "description_fr": "Documents pr\u00f4nant des r\u00e9ponses patriarcales, masculinistes ou traditionalistes face aux menaces f\u00e9ministes ou progressistes per\u00e7ues",
+      "segment_count": 19780,
+      "proportion": 0.481429197293482,
+      "by_language": {
+        "en": 11300,
+        "fr": 8480
+      }
+    },
+    {
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "description_en": "Documents promoting biological essentialism, natural gender hierarchy, or binary gender ideologies",
+      "description_fr": "Documents promouvant l'essentialisme biologique, la hi\u00e9rarchie de genre naturelle ou les id\u00e9ologies de genre binaire",
+      "segment_count": 13772,
+      "proportion": 0.33519933797400575,
+      "by_language": {
+        "en": 8567,
+        "fr": 5205
+      }
+    }
+  ],
+  "theme_trends": [
+    {
+      "year_month": "2020-01",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 18,
+      "proportion": 0.225
+    },
+    {
+      "year_month": "2020-01",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 20,
+      "proportion": 0.25
+    },
+    {
+      "year_month": "2020-01",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 8,
+      "proportion": 0.1
+    },
+    {
+      "year_month": "2020-01",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 17,
+      "proportion": 0.2125
+    },
+    {
+      "year_month": "2020-01",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 17,
+      "proportion": 0.2125
+    },
+    {
+      "year_month": "2020-02",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 17,
+      "proportion": 0.30357142857142855
+    },
+    {
+      "year_month": "2020-02",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 9,
+      "proportion": 0.16071428571428573
+    },
+    {
+      "year_month": "2020-02",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 6,
+      "proportion": 0.10714285714285714
+    },
+    {
+      "year_month": "2020-02",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 8,
+      "proportion": 0.14285714285714285
+    },
+    {
+      "year_month": "2020-02",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 16,
+      "proportion": 0.2857142857142857
+    },
+    {
+      "year_month": "2020-03",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 33,
+      "proportion": 0.23076923076923078
+    },
+    {
+      "year_month": "2020-03",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 19,
+      "proportion": 0.13286713286713286
+    },
+    {
+      "year_month": "2020-03",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 28,
+      "proportion": 0.1958041958041958
+    },
+    {
+      "year_month": "2020-03",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 30,
+      "proportion": 0.2097902097902098
+    },
+    {
+      "year_month": "2020-03",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 33,
+      "proportion": 0.23076923076923078
+    },
+    {
+      "year_month": "2020-04",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 25,
+      "proportion": 0.29411764705882354
+    },
+    {
+      "year_month": "2020-04",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 6,
+      "proportion": 0.07058823529411765
+    },
+    {
+      "year_month": "2020-04",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 15,
+      "proportion": 0.17647058823529413
+    },
+    {
+      "year_month": "2020-04",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 21,
+      "proportion": 0.24705882352941178
+    },
+    {
+      "year_month": "2020-04",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 18,
+      "proportion": 0.21176470588235294
+    },
+    {
+      "year_month": "2020-05",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 47,
+      "proportion": 0.25824175824175827
+    },
+    {
+      "year_month": "2020-05",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 30,
+      "proportion": 0.16483516483516483
+    },
+    {
+      "year_month": "2020-05",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 24,
+      "proportion": 0.13186813186813187
+    },
+    {
+      "year_month": "2020-05",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 35,
+      "proportion": 0.19230769230769232
+    },
+    {
+      "year_month": "2020-05",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 46,
+      "proportion": 0.25274725274725274
+    },
+    {
+      "year_month": "2020-06",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 46,
+      "proportion": 0.26285714285714284
+    },
+    {
+      "year_month": "2020-06",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 24,
+      "proportion": 0.13714285714285715
+    },
+    {
+      "year_month": "2020-06",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 23,
+      "proportion": 0.13142857142857142
+    },
+    {
+      "year_month": "2020-06",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 35,
+      "proportion": 0.2
+    },
+    {
+      "year_month": "2020-06",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 47,
+      "proportion": 0.26857142857142857
+    },
+    {
+      "year_month": "2020-07",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 54,
+      "proportion": 0.27835051546391754
+    },
+    {
+      "year_month": "2020-07",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 37,
+      "proportion": 0.19072164948453607
+    },
+    {
+      "year_month": "2020-07",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 19,
+      "proportion": 0.0979381443298969
+    },
+    {
+      "year_month": "2020-07",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 38,
+      "proportion": 0.1958762886597938
+    },
+    {
+      "year_month": "2020-07",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 46,
+      "proportion": 0.23711340206185566
+    },
+    {
+      "year_month": "2020-08",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 57,
+      "proportion": 0.30158730158730157
+    },
+    {
+      "year_month": "2020-08",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 34,
+      "proportion": 0.17989417989417988
+    },
+    {
+      "year_month": "2020-08",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 17,
+      "proportion": 0.08994708994708994
+    },
+    {
+      "year_month": "2020-08",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 33,
+      "proportion": 0.1746031746031746
+    },
+    {
+      "year_month": "2020-08",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 48,
+      "proportion": 0.25396825396825395
+    },
+    {
+      "year_month": "2020-09",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 57,
+      "proportion": 0.20357142857142857
+    },
+    {
+      "year_month": "2020-09",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 59,
+      "proportion": 0.21071428571428572
+    },
+    {
+      "year_month": "2020-09",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 37,
+      "proportion": 0.13214285714285715
+    },
+    {
+      "year_month": "2020-09",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 65,
+      "proportion": 0.23214285714285715
+    },
+    {
+      "year_month": "2020-09",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 62,
+      "proportion": 0.22142857142857142
+    },
+    {
+      "year_month": "2020-10",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 68,
+      "proportion": 0.2595419847328244
+    },
+    {
+      "year_month": "2020-10",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 39,
+      "proportion": 0.14885496183206107
+    },
+    {
+      "year_month": "2020-10",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 47,
+      "proportion": 0.17938931297709923
+    },
+    {
+      "year_month": "2020-10",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 47,
+      "proportion": 0.17938931297709923
+    },
+    {
+      "year_month": "2020-10",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 61,
+      "proportion": 0.23282442748091603
+    },
+    {
+      "year_month": "2020-11",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 62,
+      "proportion": 0.24899598393574296
+    },
+    {
+      "year_month": "2020-11",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 41,
+      "proportion": 0.1646586345381526
+    },
+    {
+      "year_month": "2020-11",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 30,
+      "proportion": 0.12048192771084337
+    },
+    {
+      "year_month": "2020-11",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 42,
+      "proportion": 0.1686746987951807
+    },
+    {
+      "year_month": "2020-11",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 74,
+      "proportion": 0.2971887550200803
+    },
+    {
+      "year_month": "2020-12",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 18,
+      "proportion": 0.27692307692307694
+    },
+    {
+      "year_month": "2020-12",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 15,
+      "proportion": 0.23076923076923078
+    },
+    {
+      "year_month": "2020-12",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 6,
+      "proportion": 0.09230769230769231
+    },
+    {
+      "year_month": "2020-12",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 9,
+      "proportion": 0.13846153846153847
+    },
+    {
+      "year_month": "2020-12",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 17,
+      "proportion": 0.26153846153846155
+    },
+    {
+      "year_month": "2021-01",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 41,
+      "proportion": 0.26282051282051283
+    },
+    {
+      "year_month": "2021-01",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 30,
+      "proportion": 0.19230769230769232
+    },
+    {
+      "year_month": "2021-01",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 21,
+      "proportion": 0.1346153846153846
+    },
+    {
+      "year_month": "2021-01",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 19,
+      "proportion": 0.12179487179487179
+    },
+    {
+      "year_month": "2021-01",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 45,
+      "proportion": 0.28846153846153844
+    },
+    {
+      "year_month": "2021-02",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 52,
+      "proportion": 0.24528301886792453
+    },
+    {
+      "year_month": "2021-02",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 38,
+      "proportion": 0.1792452830188679
+    },
+    {
+      "year_month": "2021-02",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 33,
+      "proportion": 0.15566037735849056
+    },
+    {
+      "year_month": "2021-02",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 34,
+      "proportion": 0.16037735849056603
+    },
+    {
+      "year_month": "2021-02",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 55,
+      "proportion": 0.25943396226415094
+    },
+    {
+      "year_month": "2021-03",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 182,
+      "proportion": 0.25742574257425743
+    },
+    {
+      "year_month": "2021-03",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 168,
+      "proportion": 0.2376237623762376
+    },
+    {
+      "year_month": "2021-03",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 105,
+      "proportion": 0.1485148514851485
+    },
+    {
+      "year_month": "2021-03",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 97,
+      "proportion": 0.1371994342291372
+    },
+    {
+      "year_month": "2021-03",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 155,
+      "proportion": 0.21923620933521923
+    },
+    {
+      "year_month": "2021-04",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 111,
+      "proportion": 0.2928759894459103
+    },
+    {
+      "year_month": "2021-04",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 66,
+      "proportion": 0.1741424802110818
+    },
+    {
+      "year_month": "2021-04",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 46,
+      "proportion": 0.12137203166226913
+    },
+    {
+      "year_month": "2021-04",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 84,
+      "proportion": 0.22163588390501318
+    },
+    {
+      "year_month": "2021-04",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 72,
+      "proportion": 0.18997361477572558
+    },
+    {
+      "year_month": "2021-05",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 90,
+      "proportion": 0.2647058823529412
+    },
+    {
+      "year_month": "2021-05",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 64,
+      "proportion": 0.18823529411764706
+    },
+    {
+      "year_month": "2021-05",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 67,
+      "proportion": 0.19705882352941176
+    },
+    {
+      "year_month": "2021-05",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 49,
+      "proportion": 0.14411764705882352
+    },
+    {
+      "year_month": "2021-05",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 70,
+      "proportion": 0.20588235294117646
+    },
+    {
+      "year_month": "2021-06",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 156,
+      "proportion": 0.2689655172413793
+    },
+    {
+      "year_month": "2021-06",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 117,
+      "proportion": 0.20172413793103447
+    },
+    {
+      "year_month": "2021-06",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 101,
+      "proportion": 0.17413793103448275
+    },
+    {
+      "year_month": "2021-06",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 88,
+      "proportion": 0.15172413793103448
+    },
+    {
+      "year_month": "2021-06",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 118,
+      "proportion": 0.20344827586206896
+    },
+    {
+      "year_month": "2021-07",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 69,
+      "proportion": 0.23154362416107382
+    },
+    {
+      "year_month": "2021-07",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 59,
+      "proportion": 0.19798657718120805
+    },
+    {
+      "year_month": "2021-07",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 50,
+      "proportion": 0.16778523489932887
+    },
+    {
+      "year_month": "2021-07",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 50,
+      "proportion": 0.16778523489932887
+    },
+    {
+      "year_month": "2021-07",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 70,
+      "proportion": 0.2348993288590604
+    },
+    {
+      "year_month": "2021-08",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 127,
+      "proportion": 0.3264781491002571
+    },
+    {
+      "year_month": "2021-08",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 55,
+      "proportion": 0.14138817480719795
+    },
+    {
+      "year_month": "2021-08",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 58,
+      "proportion": 0.14910025706940874
+    },
+    {
+      "year_month": "2021-08",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 80,
+      "proportion": 0.20565552699228792
+    },
+    {
+      "year_month": "2021-08",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 69,
+      "proportion": 0.17737789203084833
+    },
+    {
+      "year_month": "2021-09",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 117,
+      "proportion": 0.34411764705882353
+    },
+    {
+      "year_month": "2021-09",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 49,
+      "proportion": 0.14411764705882352
+    },
+    {
+      "year_month": "2021-09",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 39,
+      "proportion": 0.11470588235294117
+    },
+    {
+      "year_month": "2021-09",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 55,
+      "proportion": 0.16176470588235295
+    },
+    {
+      "year_month": "2021-09",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 80,
+      "proportion": 0.23529411764705882
+    },
+    {
+      "year_month": "2021-10",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 143,
+      "proportion": 0.30952380952380953
+    },
+    {
+      "year_month": "2021-10",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 90,
+      "proportion": 0.19480519480519481
+    },
+    {
+      "year_month": "2021-10",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 56,
+      "proportion": 0.12121212121212122
+    },
+    {
+      "year_month": "2021-10",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 63,
+      "proportion": 0.13636363636363635
+    },
+    {
+      "year_month": "2021-10",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 110,
+      "proportion": 0.23809523809523808
+    },
+    {
+      "year_month": "2021-11",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 109,
+      "proportion": 0.28835978835978837
+    },
+    {
+      "year_month": "2021-11",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 67,
+      "proportion": 0.17724867724867724
+    },
+    {
+      "year_month": "2021-11",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 45,
+      "proportion": 0.11904761904761904
+    },
+    {
+      "year_month": "2021-11",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 68,
+      "proportion": 0.17989417989417988
+    },
+    {
+      "year_month": "2021-11",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 89,
+      "proportion": 0.23544973544973544
+    },
+    {
+      "year_month": "2021-12",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 87,
+      "proportion": 0.3210332103321033
+    },
+    {
+      "year_month": "2021-12",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 43,
+      "proportion": 0.15867158671586715
+    },
+    {
+      "year_month": "2021-12",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 34,
+      "proportion": 0.12546125461254612
+    },
+    {
+      "year_month": "2021-12",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 45,
+      "proportion": 0.16605166051660517
+    },
+    {
+      "year_month": "2021-12",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 62,
+      "proportion": 0.22878228782287824
+    },
+    {
+      "year_month": "2022-01",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 140,
+      "proportion": 0.2828282828282828
+    },
+    {
+      "year_month": "2022-01",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 100,
+      "proportion": 0.20202020202020202
+    },
+    {
+      "year_month": "2022-01",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 74,
+      "proportion": 0.1494949494949495
+    },
+    {
+      "year_month": "2022-01",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 65,
+      "proportion": 0.13131313131313133
+    },
+    {
+      "year_month": "2022-01",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 116,
+      "proportion": 0.23434343434343435
+    },
+    {
+      "year_month": "2022-02",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 96,
+      "proportion": 0.2689075630252101
+    },
+    {
+      "year_month": "2022-02",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 55,
+      "proportion": 0.15406162464985995
+    },
+    {
+      "year_month": "2022-02",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 39,
+      "proportion": 0.1092436974789916
+    },
+    {
+      "year_month": "2022-02",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 74,
+      "proportion": 0.20728291316526612
+    },
+    {
+      "year_month": "2022-02",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 93,
+      "proportion": 0.2605042016806723
+    },
+    {
+      "year_month": "2022-03",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 213,
+      "proportion": 0.2074001947419669
+    },
+    {
+      "year_month": "2022-03",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 172,
+      "proportion": 0.16747809152872445
+    },
+    {
+      "year_month": "2022-03",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 230,
+      "proportion": 0.22395326192794549
+    },
+    {
+      "year_month": "2022-03",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 191,
+      "proportion": 0.18597857838364168
+    },
+    {
+      "year_month": "2022-03",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 221,
+      "proportion": 0.21518987341772153
+    },
+    {
+      "year_month": "2022-04",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 253,
+      "proportion": 0.23556797020484171
+    },
+    {
+      "year_month": "2022-04",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 222,
+      "proportion": 0.20670391061452514
+    },
+    {
+      "year_month": "2022-04",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 172,
+      "proportion": 0.1601489757914339
+    },
+    {
+      "year_month": "2022-04",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 205,
+      "proportion": 0.1908752327746741
+    },
+    {
+      "year_month": "2022-04",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 222,
+      "proportion": 0.20670391061452514
+    },
+    {
+      "year_month": "2022-05",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 295,
+      "proportion": 0.24081632653061225
+    },
+    {
+      "year_month": "2022-05",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 257,
+      "proportion": 0.20979591836734693
+    },
+    {
+      "year_month": "2022-05",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 158,
+      "proportion": 0.12897959183673469
+    },
+    {
+      "year_month": "2022-05",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 228,
+      "proportion": 0.18612244897959185
+    },
+    {
+      "year_month": "2022-05",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 287,
+      "proportion": 0.2342857142857143
+    },
+    {
+      "year_month": "2022-06",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 426,
+      "proportion": 0.22468354430379747
+    },
+    {
+      "year_month": "2022-06",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 450,
+      "proportion": 0.23734177215189872
+    },
+    {
+      "year_month": "2022-06",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 286,
+      "proportion": 0.15084388185654007
+    },
+    {
+      "year_month": "2022-06",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 320,
+      "proportion": 0.16877637130801687
+    },
+    {
+      "year_month": "2022-06",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 414,
+      "proportion": 0.21835443037974683
+    },
+    {
+      "year_month": "2022-07",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 271,
+      "proportion": 0.22985581000848176
+    },
+    {
+      "year_month": "2022-07",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 260,
+      "proportion": 0.2205258693808312
+    },
+    {
+      "year_month": "2022-07",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 200,
+      "proportion": 0.16963528413910092
+    },
+    {
+      "year_month": "2022-07",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 176,
+      "proportion": 0.14927905004240882
+    },
+    {
+      "year_month": "2022-07",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 272,
+      "proportion": 0.23070398642917728
+    },
+    {
+      "year_month": "2022-08",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 318,
+      "proportion": 0.24824355971896955
+    },
+    {
+      "year_month": "2022-08",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 282,
+      "proportion": 0.22014051522248243
+    },
+    {
+      "year_month": "2022-08",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 146,
+      "proportion": 0.11397345823575332
+    },
+    {
+      "year_month": "2022-08",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 243,
+      "proportion": 0.18969555035128804
+    },
+    {
+      "year_month": "2022-08",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 292,
+      "proportion": 0.22794691647150664
+    },
+    {
+      "year_month": "2022-09",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 351,
+      "proportion": 0.25379609544468545
+    },
+    {
+      "year_month": "2022-09",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 257,
+      "proportion": 0.18582791033984092
+    },
+    {
+      "year_month": "2022-09",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 211,
+      "proportion": 0.15256688358640635
+    },
+    {
+      "year_month": "2022-09",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 268,
+      "proportion": 0.19378163412870572
+    },
+    {
+      "year_month": "2022-09",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 296,
+      "proportion": 0.21402747650036152
+    },
+    {
+      "year_month": "2022-10",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 287,
+      "proportion": 0.26948356807511736
+    },
+    {
+      "year_month": "2022-10",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 219,
+      "proportion": 0.2056338028169014
+    },
+    {
+      "year_month": "2022-10",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 158,
+      "proportion": 0.14835680751173708
+    },
+    {
+      "year_month": "2022-10",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 181,
+      "proportion": 0.1699530516431925
+    },
+    {
+      "year_month": "2022-10",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 220,
+      "proportion": 0.20657276995305165
+    },
+    {
+      "year_month": "2022-11",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 306,
+      "proportion": 0.26585577758470896
+    },
+    {
+      "year_month": "2022-11",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 235,
+      "proportion": 0.20417028670721113
+    },
+    {
+      "year_month": "2022-11",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 140,
+      "proportion": 0.12163336229365769
+    },
+    {
+      "year_month": "2022-11",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 212,
+      "proportion": 0.1841876629018245
+    },
+    {
+      "year_month": "2022-11",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 258,
+      "proportion": 0.22415291051259775
+    },
+    {
+      "year_month": "2022-12",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 405,
+      "proportion": 0.2426602756141402
+    },
+    {
+      "year_month": "2022-12",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 352,
+      "proportion": 0.21090473337327742
+    },
+    {
+      "year_month": "2022-12",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 236,
+      "proportion": 0.14140203714799282
+    },
+    {
+      "year_month": "2022-12",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 280,
+      "proportion": 0.1677651288196525
+    },
+    {
+      "year_month": "2022-12",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 396,
+      "proportion": 0.2372678250449371
+    },
+    {
+      "year_month": "2023-01",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 466,
+      "proportion": 0.26507394766780434
+    },
+    {
+      "year_month": "2023-01",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 377,
+      "proportion": 0.21444823663253698
+    },
+    {
+      "year_month": "2023-01",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 218,
+      "proportion": 0.12400455062571103
+    },
+    {
+      "year_month": "2023-01",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 292,
+      "proportion": 0.16609783845278725
+    },
+    {
+      "year_month": "2023-01",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 405,
+      "proportion": 0.23037542662116042
+    },
+    {
+      "year_month": "2023-02",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 481,
+      "proportion": 0.23225494929985513
+    },
+    {
+      "year_month": "2023-02",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 452,
+      "proportion": 0.21825205214872043
+    },
+    {
+      "year_month": "2023-02",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 304,
+      "proportion": 0.14678899082568808
+    },
+    {
+      "year_month": "2023-02",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 376,
+      "proportion": 0.1815548044422984
+    },
+    {
+      "year_month": "2023-02",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 458,
+      "proportion": 0.22114920328343796
+    },
+    {
+      "year_month": "2023-03",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 847,
+      "proportion": 0.2351471404775125
+    },
+    {
+      "year_month": "2023-03",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 861,
+      "proportion": 0.23903387007218213
+    },
+    {
+      "year_month": "2023-03",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 524,
+      "proportion": 0.14547473625763466
+    },
+    {
+      "year_month": "2023-03",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 597,
+      "proportion": 0.16574125485841198
+    },
+    {
+      "year_month": "2023-03",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 773,
+      "proportion": 0.21460299833425875
+    },
+    {
+      "year_month": "2023-04",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 1360,
+      "proportion": 0.24126308320028383
+    },
+    {
+      "year_month": "2023-04",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 1338,
+      "proportion": 0.23736029803086747
+    },
+    {
+      "year_month": "2023-04",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 673,
+      "proportion": 0.11938974631896399
+    },
+    {
+      "year_month": "2023-04",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 985,
+      "proportion": 0.17473833599432323
+    },
+    {
+      "year_month": "2023-04",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 1281,
+      "proportion": 0.22724853645556148
+    },
+    {
+      "year_month": "2023-05",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 900,
+      "proportion": 0.24630541871921183
+    },
+    {
+      "year_month": "2023-05",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 765,
+      "proportion": 0.20935960591133004
+    },
+    {
+      "year_month": "2023-05",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 455,
+      "proportion": 0.12452107279693486
+    },
+    {
+      "year_month": "2023-05",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 689,
+      "proportion": 0.18856048166392994
+    },
+    {
+      "year_month": "2023-05",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 845,
+      "proportion": 0.23125342090859333
+    },
+    {
+      "year_month": "2023-06",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 1004,
+      "proportion": 0.24327598740004847
+    },
+    {
+      "year_month": "2023-06",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 870,
+      "proportion": 0.21080688151199417
+    },
+    {
+      "year_month": "2023-06",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 479,
+      "proportion": 0.1160649382117761
+    },
+    {
+      "year_month": "2023-06",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 806,
+      "proportion": 0.1952992488490429
+    },
+    {
+      "year_month": "2023-06",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 968,
+      "proportion": 0.23455294402713836
+    },
+    {
+      "year_month": "2023-07",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 633,
+      "proportion": 0.25249301954527326
+    },
+    {
+      "year_month": "2023-07",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 544,
+      "proportion": 0.21699242122058238
+    },
+    {
+      "year_month": "2023-07",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 298,
+      "proportion": 0.11886717191862785
+    },
+    {
+      "year_month": "2023-07",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 444,
+      "proportion": 0.1771041084962106
+    },
+    {
+      "year_month": "2023-07",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 588,
+      "proportion": 0.23454327881930595
+    },
+    {
+      "year_month": "2023-08",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 771,
+      "proportion": 0.24033665835411472
+    },
+    {
+      "year_month": "2023-08",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 719,
+      "proportion": 0.22412718204488777
+    },
+    {
+      "year_month": "2023-08",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 428,
+      "proportion": 0.13341645885286782
+    },
+    {
+      "year_month": "2023-08",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 578,
+      "proportion": 0.18017456359102244
+    },
+    {
+      "year_month": "2023-08",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 712,
+      "proportion": 0.22194513715710723
+    },
+    {
+      "year_month": "2023-09",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 877,
+      "proportion": 0.240735657425199
+    },
+    {
+      "year_month": "2023-09",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 726,
+      "proportion": 0.19928630249794127
+    },
+    {
+      "year_month": "2023-09",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 417,
+      "proportion": 0.11446609936865221
+    },
+    {
+      "year_month": "2023-09",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 766,
+      "proportion": 0.21026626406807578
+    },
+    {
+      "year_month": "2023-09",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 857,
+      "proportion": 0.23524567664013177
+    },
+    {
+      "year_month": "2023-10",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 697,
+      "proportion": 0.25281102647805587
+    },
+    {
+      "year_month": "2023-10",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 516,
+      "proportion": 0.18715995647442873
+    },
+    {
+      "year_month": "2023-10",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 337,
+      "proportion": 0.12223431265868698
+    },
+    {
+      "year_month": "2023-10",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 555,
+      "proportion": 0.20130576713819368
+    },
+    {
+      "year_month": "2023-10",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 652,
+      "proportion": 0.23648893725063475
+    },
+    {
+      "year_month": "2023-11",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 488,
+      "proportion": 0.2592986184909671
+    },
+    {
+      "year_month": "2023-11",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 408,
+      "proportion": 0.21679064824654623
+    },
+    {
+      "year_month": "2023-11",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 232,
+      "proportion": 0.12327311370882041
+    },
+    {
+      "year_month": "2023-11",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 321,
+      "proportion": 0.17056323060573858
+    },
+    {
+      "year_month": "2023-11",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 433,
+      "proportion": 0.23007438894792773
+    },
+    {
+      "year_month": "2023-12",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 399,
+      "proportion": 0.25675675675675674
+    },
+    {
+      "year_month": "2023-12",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 283,
+      "proportion": 0.1821106821106821
+    },
+    {
+      "year_month": "2023-12",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 227,
+      "proportion": 0.14607464607464607
+    },
+    {
+      "year_month": "2023-12",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 281,
+      "proportion": 0.18082368082368083
+    },
+    {
+      "year_month": "2023-12",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 364,
+      "proportion": 0.23423423423423423
+    },
+    {
+      "year_month": "2024-01",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 522,
+      "proportion": 0.26578411405295316
+    },
+    {
+      "year_month": "2024-01",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 423,
+      "proportion": 0.21537678207739308
+    },
+    {
+      "year_month": "2024-01",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 209,
+      "proportion": 0.10641547861507128
+    },
+    {
+      "year_month": "2024-01",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 333,
+      "proportion": 0.1695519348268839
+    },
+    {
+      "year_month": "2024-01",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 477,
+      "proportion": 0.24287169042769857
+    },
+    {
+      "year_month": "2024-02",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 704,
+      "proportion": 0.24351435489450018
+    },
+    {
+      "year_month": "2024-02",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 619,
+      "proportion": 0.21411276374956761
+    },
+    {
+      "year_month": "2024-02",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 360,
+      "proportion": 0.12452438602559668
+    },
+    {
+      "year_month": "2024-02",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 555,
+      "proportion": 0.19197509512279487
+    },
+    {
+      "year_month": "2024-02",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 653,
+      "proportion": 0.22587340020754065
+    },
+    {
+      "year_month": "2024-03",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 641,
+      "proportion": 0.24070597070972588
+    },
+    {
+      "year_month": "2024-03",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 592,
+      "proportion": 0.2223056702966579
+    },
+    {
+      "year_month": "2024-03",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 332,
+      "proportion": 0.1246714232069095
+    },
+    {
+      "year_month": "2024-03",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 476,
+      "proportion": 0.17874577544123169
+    },
+    {
+      "year_month": "2024-03",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 622,
+      "proportion": 0.23357116034547504
+    },
+    {
+      "year_month": "2024-04",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 605,
+      "proportion": 0.27069351230425054
+    },
+    {
+      "year_month": "2024-04",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 444,
+      "proportion": 0.19865771812080538
+    },
+    {
+      "year_month": "2024-04",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 278,
+      "proportion": 0.1243847874720358
+    },
+    {
+      "year_month": "2024-04",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 372,
+      "proportion": 0.16644295302013423
+    },
+    {
+      "year_month": "2024-04",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 536,
+      "proportion": 0.23982102908277406
+    },
+    {
+      "year_month": "2024-05",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 851,
+      "proportion": 0.24489208633093526
+    },
+    {
+      "year_month": "2024-05",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 677,
+      "proportion": 0.19482014388489208
+    },
+    {
+      "year_month": "2024-05",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 507,
+      "proportion": 0.14589928057553958
+    },
+    {
+      "year_month": "2024-05",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 679,
+      "proportion": 0.1953956834532374
+    },
+    {
+      "year_month": "2024-05",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 761,
+      "proportion": 0.21899280575539568
+    },
+    {
+      "year_month": "2024-06",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 643,
+      "proportion": 0.2611697806661251
+    },
+    {
+      "year_month": "2024-06",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 493,
+      "proportion": 0.20024370430544272
+    },
+    {
+      "year_month": "2024-06",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 265,
+      "proportion": 0.10763606823720552
+    },
+    {
+      "year_month": "2024-06",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 452,
+      "proportion": 0.18359057676685622
+    },
+    {
+      "year_month": "2024-06",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 609,
+      "proportion": 0.24735987002437043
+    },
+    {
+      "year_month": "2024-07",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 501,
+      "proportion": 0.2683449384038565
+    },
+    {
+      "year_month": "2024-07",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 343,
+      "proportion": 0.18371719335832887
+    },
+    {
+      "year_month": "2024-07",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 220,
+      "proportion": 0.11783610069630424
+    },
+    {
+      "year_month": "2024-07",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 329,
+      "proportion": 0.17621853240492769
+    },
+    {
+      "year_month": "2024-07",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 474,
+      "proportion": 0.25388323513658273
+    },
+    {
+      "year_month": "2024-08",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 709,
+      "proportion": 0.25276292335115863
+    },
+    {
+      "year_month": "2024-08",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 625,
+      "proportion": 0.22281639928698752
+    },
+    {
+      "year_month": "2024-08",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 418,
+      "proportion": 0.14901960784313725
+    },
+    {
+      "year_month": "2024-08",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 406,
+      "proportion": 0.1447415329768271
+    },
+    {
+      "year_month": "2024-08",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 647,
+      "proportion": 0.23065953654188948
+    },
+    {
+      "year_month": "2024-09",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 551,
+      "proportion": 0.26188212927756654
+    },
+    {
+      "year_month": "2024-09",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 418,
+      "proportion": 0.19866920152091255
+    },
+    {
+      "year_month": "2024-09",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 216,
+      "proportion": 0.10266159695817491
+    },
+    {
+      "year_month": "2024-09",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 391,
+      "proportion": 0.18583650190114068
+    },
+    {
+      "year_month": "2024-09",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 528,
+      "proportion": 0.2509505703422053
+    },
+    {
+      "year_month": "2024-10",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 742,
+      "proportion": 0.2509299966181941
+    },
+    {
+      "year_month": "2024-10",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 586,
+      "proportion": 0.19817382482245519
+    },
+    {
+      "year_month": "2024-10",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 353,
+      "proportion": 0.11937774771728103
+    },
+    {
+      "year_month": "2024-10",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 574,
+      "proportion": 0.1941156577612445
+    },
+    {
+      "year_month": "2024-10",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 702,
+      "proportion": 0.23740277308082516
+    },
+    {
+      "year_month": "2024-11",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 937,
+      "proportion": 0.25699396599012614
+    },
+    {
+      "year_month": "2024-11",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 689,
+      "proportion": 0.18897421832144817
+    },
+    {
+      "year_month": "2024-11",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 427,
+      "proportion": 0.11711464618760285
+    },
+    {
+      "year_month": "2024-11",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 697,
+      "proportion": 0.1911684037301152
+    },
+    {
+      "year_month": "2024-11",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 896,
+      "proportion": 0.24574876577070762
+    },
+    {
+      "year_month": "2024-12",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 494,
+      "proportion": 0.25675675675675674
+    },
+    {
+      "year_month": "2024-12",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 410,
+      "proportion": 0.2130977130977131
+    },
+    {
+      "year_month": "2024-12",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 225,
+      "proportion": 0.11694386694386695
+    },
+    {
+      "year_month": "2024-12",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 335,
+      "proportion": 0.1741164241164241
+    },
+    {
+      "year_month": "2024-12",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 460,
+      "proportion": 0.2390852390852391
+    },
+    {
+      "year_month": "2025-01",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 637,
+      "proportion": 0.2569584509883017
+    },
+    {
+      "year_month": "2025-01",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 572,
+      "proportion": 0.23073820088745461
+    },
+    {
+      "year_month": "2025-01",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 473,
+      "proportion": 0.190802743041549
+    },
+    {
+      "year_month": "2025-01",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 320,
+      "proportion": 0.1290843081887858
+    },
+    {
+      "year_month": "2025-01",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 477,
+      "proportion": 0.19241629689390882
+    },
+    {
+      "year_month": "2025-02",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 570,
+      "proportion": 0.26474686483975846
+    },
+    {
+      "year_month": "2025-02",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 370,
+      "proportion": 0.17185322805387832
+    },
+    {
+      "year_month": "2025-02",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 252,
+      "proportion": 0.11704598235020901
+    },
+    {
+      "year_month": "2025-02",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 387,
+      "proportion": 0.17974918718067812
+    },
+    {
+      "year_month": "2025-02",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 574,
+      "proportion": 0.2666047375754761
+    },
+    {
+      "year_month": "2025-03",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 601,
+      "proportion": 0.268783542039356
+    },
+    {
+      "year_month": "2025-03",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 383,
+      "proportion": 0.17128801431127014
+    },
+    {
+      "year_month": "2025-03",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 271,
+      "proportion": 0.12119856887298748
+    },
+    {
+      "year_month": "2025-03",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 456,
+      "proportion": 0.2039355992844365
+    },
+    {
+      "year_month": "2025-03",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 525,
+      "proportion": 0.23479427549194992
+    },
+    {
+      "year_month": "2025-04",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 612,
+      "proportion": 0.27692307692307694
+    },
+    {
+      "year_month": "2025-04",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 387,
+      "proportion": 0.1751131221719457
+    },
+    {
+      "year_month": "2025-04",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 234,
+      "proportion": 0.10588235294117647
+    },
+    {
+      "year_month": "2025-04",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 452,
+      "proportion": 0.20452488687782805
+    },
+    {
+      "year_month": "2025-04",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 525,
+      "proportion": 0.23755656108597284
+    },
+    {
+      "year_month": "2025-05",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 673,
+      "proportion": 0.27413441955193485
+    },
+    {
+      "year_month": "2025-05",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 425,
+      "proportion": 0.17311608961303462
+    },
+    {
+      "year_month": "2025-05",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 251,
+      "proportion": 0.10224032586558045
+    },
+    {
+      "year_month": "2025-05",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 490,
+      "proportion": 0.19959266802443992
+    },
+    {
+      "year_month": "2025-05",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 616,
+      "proportion": 0.25091649694501017
+    },
+    {
+      "year_month": "2025-06",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 444,
+      "proportion": 0.21335896203748198
+    },
+    {
+      "year_month": "2025-06",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 532,
+      "proportion": 0.25564632388274866
+    },
+    {
+      "year_month": "2025-06",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 412,
+      "proportion": 0.1979817395482941
+    },
+    {
+      "year_month": "2025-06",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 282,
+      "proportion": 0.1355117731859683
+    },
+    {
+      "year_month": "2025-06",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 411,
+      "proportion": 0.19750120134550697
+    },
+    {
+      "year_month": "2025-07",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 513,
+      "proportion": 0.26872708224201153
+    },
+    {
+      "year_month": "2025-07",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 377,
+      "proportion": 0.19748559455212153
+    },
+    {
+      "year_month": "2025-07",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 239,
+      "proportion": 0.1251964379256155
+    },
+    {
+      "year_month": "2025-07",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 330,
+      "proportion": 0.17286537454164483
+    },
+    {
+      "year_month": "2025-07",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 450,
+      "proportion": 0.2357255107386066
+    },
+    {
+      "year_month": "2025-08",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 407,
+      "proportion": 0.2896797153024911
+    },
+    {
+      "year_month": "2025-08",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 288,
+      "proportion": 0.20498220640569395
+    },
+    {
+      "year_month": "2025-08",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 128,
+      "proportion": 0.0911032028469751
+    },
+    {
+      "year_month": "2025-08",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 234,
+      "proportion": 0.16654804270462634
+    },
+    {
+      "year_month": "2025-08",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 348,
+      "proportion": 0.24768683274021353
+    },
+    {
+      "year_month": "2025-09",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 549,
+      "proportion": 0.28519480519480517
+    },
+    {
+      "year_month": "2025-09",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 360,
+      "proportion": 0.18701298701298702
+    },
+    {
+      "year_month": "2025-09",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 201,
+      "proportion": 0.10441558441558442
+    },
+    {
+      "year_month": "2025-09",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 353,
+      "proportion": 0.1833766233766234
+    },
+    {
+      "year_month": "2025-09",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 462,
+      "proportion": 0.24
+    },
+    {
+      "year_month": "2025-10",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 376,
+      "proportion": 0.26895565092989987
+    },
+    {
+      "year_month": "2025-10",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 244,
+      "proportion": 0.17453505007153075
+    },
+    {
+      "year_month": "2025-10",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 176,
+      "proportion": 0.12589413447782546
+    },
+    {
+      "year_month": "2025-10",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 258,
+      "proportion": 0.18454935622317598
+    },
+    {
+      "year_month": "2025-10",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 344,
+      "proportion": 0.24606580829756797
+    },
+    {
+      "year_month": "2025-11",
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "segment_count": 134,
+      "proportion": 0.2791666666666667
+    },
+    {
+      "year_month": "2025-11",
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "segment_count": 90,
+      "proportion": 0.1875
+    },
+    {
+      "year_month": "2025-11",
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "segment_count": 51,
+      "proportion": 0.10625
+    },
+    {
+      "year_month": "2025-11",
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "segment_count": 88,
+      "proportion": 0.18333333333333332
+    },
+    {
+      "year_month": "2025-11",
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "segment_count": 117,
+      "proportion": 0.24375
+    }
+  ],
+  "themes": [
+    {
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "description_en": "Documents portraying feminism, LGBTQ+ movements, or progressive ideology as systemic threats, conspiracies, or sources of societal decline",
+      "description_fr": "Documents pr\u00e9sentant le f\u00e9minisme, les mouvements LGBTQ+ ou l'id\u00e9ologie progressiste comme des menaces syst\u00e9miques, des complots ou des sources de d\u00e9clin soci\u00e9tal"
+    },
+    {
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "description_en": "Documents advocating for patriarchal, masculinist, or traditionalist responses to perceived feminist or progressive threats",
+      "description_fr": "Documents pr\u00f4nant des r\u00e9ponses patriarcales, masculinistes ou traditionalistes face aux menaces f\u00e9ministes ou progressistes per\u00e7ues"
+    },
+    {
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "description_en": "Documents promoting biological essentialism, natural gender hierarchy, or binary gender ideologies",
+      "description_fr": "Documents promouvant l'essentialisme biologique, la hi\u00e9rarchie de genre naturelle ou les id\u00e9ologies de genre binaire"
+    },
+    {
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "description_en": "Documents containing discrimination, dehumanization, or delegitimization targeting women or LGBTQ+ people",
+      "description_fr": "Documents contenant de la discrimination, de la d\u00e9shumanisation ou de la d\u00e9l\u00e9gitimation visant les femmes ou les personnes LGBTQ+"
+    },
+    {
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "description_en": "Documents portraying men as victims and framing social change as civilizational decline",
+      "description_fr": "Documents pr\u00e9sentant les hommes comme victimes et cadrant le changement social comme d\u00e9clin civilisationnel"
+    }
+  ],
+  "theme_examples": [
+    {
+      "theme_id": "1",
+      "theme_name": "Feminism & LGBTQ+ as Systemic Threat",
+      "description": {
+        "en": "Documents portraying feminism, LGBTQ+ movements, or progressive ideology as systemic threats, conspiracies, or sources of societal decline",
+        "fr": "Documents pr\u00e9sentant le f\u00e9minisme, les mouvements LGBTQ+ ou l'id\u00e9ologie progressiste comme des menaces syst\u00e9miques, des complots ou des sources de d\u00e9clin soci\u00e9tal"
+      },
+      "examples": {
+        "en": [
+          {
+            "segment_id": 6091399,
+            "content_id": 155598,
+            "youtube_id": "6utsr9",
+            "title": "Canadian Nationalist Roundtable-Exposing a Human Trafficking Ring w/Gavin Barry",
+            "channel_name": "postyX",
+            "start_time": 18292.1,
+            "end_time": 18366.06,
+            "text": "That's What can I be like? See, I would think I would lose it even if I just said, like, the crash made me happy Then probably lose it for that No, that would have It's more It's too mysterious Yeah, you more have to, like, imagine, like, imagine how great it would be And, you know, like, they should be hung instead of, like, you know, hang them all now Yeah, you but know what? I got, like, in jail or time out for one time saying, we need more dogs And it was, I guess it was, like, a dog attacki",
+            "language": "en"
+          },
+          {
+            "segment_id": 14608265,
+            "content_id": 371508,
+            "youtube_id": "MU6gaX6Umhs",
+            "title": "Poilievre calls out crime wave, 12-year-old shooter on bail (again), 66K jobs lost | Rebel Roundup",
+            "channel_name": "Rebel News",
+            "start_time": 1279.32,
+            "end_time": 1353.18,
+            "text": "He's totally against Pierre, and at the end of the day, he's just not conservative. So you would expect the way he acts out of a liberal, and he's showing that in full color right now. I couldn't agree with you more, Joe. I mean, so many people, myself included, always thought that Doug Ford and the dearly departed Rob Ford were two peas in a pod. Nothing, nothing could be more further from the truth than that. Rob was sincere. He meant what he said, and he said what he meant. And like you said,",
+            "language": "en"
+          },
+          {
+            "segment_id": 15510054,
+            "content_id": 135553,
+            "youtube_id": "14ppYzVnipM",
+            "title": "Why Is It Okay To Degrade Men Like This",
+            "channel_name": "Roma Army",
+            "start_time": 0,
+            "end_time": 60.48,
+            "text": "Hi guys, just a daily reminder that I never seen a man that I fucking need, bitch. You're all replaceable, don't ever get too comfortable, and don't ever think otherwise. You're a guest in this household, and you can be kicked out just as quickly as you were welcomed in. Thank you. Oh my god, no. What does my shirt say, girl? Repeat after me. What does my shirt say? Men are more than, than what? Disposable? No, no, not disposable. But useless. No, not useless. Dicks and piggy banks. Men are more",
+            "language": "en"
+          }
+        ],
+        "fr": [
+          {
+            "segment_id": 14591443,
+            "content_id": 29323,
+            "youtube_id": "QRmnKDCthmU",
+            "title": "RADIO PIRATE LIVE (10 JAN 2025)",
+            "channel_name": "RadioPirate",
+            "start_time": 2785.64,
+            "end_time": 2833.04,
+            "text": "H\u00e9, que ton bronco me shake. Jeff, Jeff, Jeff, \u00e7a n'a pas de bon sens. Non, non, \u00e7a n'a aucun sens. Non, non, je pense que je vais vendre la maison, je acheter vais un bronco. H\u00e9, \u00e7a, c'est les broncos du temps. \u00c7a, c'est les vrais broncos du temps. Imagine-toi, pas de porte. \u00c7a n'a pas de bon sens. T'enl\u00e8ves les portes, l\u00e0. C'est-tu badass? Il est extraordinaire. Puis, il fait baveux comme elle crisse. Il fait anti-woke. Tu sens qu'il veut manger des woke. T'as l'impression que c'est un bronco ",
+            "language": "fr"
+          },
+          {
+            "segment_id": 15224428,
+            "content_id": 1378,
+            "youtube_id": "VAC-UNgOuRs",
+            "title": "Juste Pour Savoir - \u00c9pisode 5 - F\u00e9minisme et LGBTQ+ 1e partie",
+            "channel_name": "Elo Veut Savoir",
+            "start_time": 1309.62,
+            "end_time": 1385.78,
+            "text": "Et c'\u00e9tait pour, dans le fond, analyser comment, dans telle soci\u00e9t\u00e9, les r\u00f4les sociaux de sexe \u00e9taient r\u00e9partis. Et \u00e9videmment, ces Parce qu'il y a une \u00e9volution, parce que ci, parce que \u00e7a. Mais il y a quand m\u00eame, on peut retrouver dans les soci\u00e9t\u00e9s des hi\u00e9rarchies, des distinctions que les gens aiment faire entre les hommes et les femmes, qui vont m\u00eame au-del\u00e0 des distinctions biologiques qu'on peut constater. Mais on extrapole et puis on... C'est comme si on disait que tout devient un concept",
+            "language": "fr"
+          },
+          {
+            "segment_id": 17286604,
+            "content_id": 32270,
+            "youtube_id": "CkSOcoL1en0",
+            "title": "IF | L'INFLATION : une conspiration des RICHES selon le chef du NPD !",
+            "channel_name": "Ian et Frank",
+            "start_time": 782.12,
+            "end_time": 849.7,
+            "text": "C'est une tendance qui est tr\u00e8s dangereuse. Tout le monde comprend \u00e7a. C'est une tendance qu'on ne veut pas avoir. La population devrait apprendre de \u00e7a, selon moi. Mais heureusement, on est encore une d\u00e9mocratie. Et quand le peuple passe autre chose, bien, les politiciens n'ont pas le choix de suivre. Ils ne sont pas capables, parce que ce ne sont pas des dictateurs, parce qu'on n'est pas dans une dictature, ils ne sont pas capables de nous rentrer de quoi dans le fond de la gauche Il faut qu'o",
+            "language": "fr"
+          }
+        ]
+      },
+      "subthemes": [
+        {
+          "subtheme_id": "Q1",
+          "subtheme_name": {
+            "en": "Woke/progressive conspiracy accusations",
+            "fr": ""
+          },
+          "subtheme_description": {
+            "en": "Documents that contain accusations of conspiracy, agenda, propaganda, or indoctrination related to woke ideology, progressivism, feminism, or trans/LGBTQ+ people",
+            "fr": "Documents qui contiennent des accusations de complot, d'agenda, de propagande ou d'endoctrinement li\u00e9s \u00e0 l'id\u00e9ologie woke, au progressisme, au f\u00e9minisme ou aux personnes trans/LGBTQ+"
+          }
+        },
+        {
+          "subtheme_id": "Q2",
+          "subtheme_name": {
+            "en": "Feminism/LGBTQ+ as manipulation",
+            "fr": ""
+          },
+          "subtheme_description": {
+            "en": "Documents that contain portrayals of feminism or trans/LGBTQ+ rights as manipulation, threat, decadence, invasion, or domination",
+            "fr": "Documents qui contiennent des descriptions du f\u00e9minisme ou des droits trans/LGBTQ+ comme manipulation, menace, d\u00e9cadence, invasion ou domination"
+          }
+        },
+        {
+          "subtheme_id": "Q3",
+          "subtheme_name": {
+            "en": "Responsibility for moral decline",
+            "fr": ""
+          },
+          "subtheme_description": {
+            "en": "Documents that contain claims that feminism, trans/LGBTQ+ rights, veiled women, or immigration are responsible for moral decline, the fall of the West, or social polarization",
+            "fr": "Documents qui contiennent des affirmations selon lesquelles le f\u00e9minisme, les droits trans/LGBTQ+, les femmes voil\u00e9es ou l'immigration sont responsables du d\u00e9clin moral, de la chute de l'Occident ou de la polarisation sociale"
+          }
+        },
+        {
+          "subtheme_id": "Q4",
+          "subtheme_name": {
+            "en": "Progressivism oppresses men",
+            "fr": ""
+          },
+          "subtheme_description": {
+            "en": "Documents that contain claims that radical feminism and the suffering/oppression of men are consequences of liberalism, progressivism, or inclusivity",
+            "fr": "Documents qui contiennent des affirmations selon lesquelles le f\u00e9minisme radical et la souffrance/oppression des hommes sont des cons\u00e9quences du lib\u00e9ralisme, du progressisme ou de l'inclusivit\u00e9"
+          }
+        }
+      ]
+    },
+    {
+      "theme_id": "2",
+      "theme_name": "Patriarchy & Traditionalism as Response",
+      "description": {
+        "en": "Documents advocating for patriarchal, masculinist, or traditionalist responses to perceived feminist or progressive threats",
+        "fr": "Documents pr\u00f4nant des r\u00e9ponses patriarcales, masculinistes ou traditionalistes face aux menaces f\u00e9ministes ou progressistes per\u00e7ues"
+      },
+      "examples": {
+        "en": [
+          {
+            "segment_id": 14812262,
+            "content_id": 34138,
+            "youtube_id": "3753a66c-e2fd-4423-896d-6d4ee5e53fd9",
+            "title": "494. 14,000 Minors, $120 Million: A Pediatric Medical Scandal | Dr. Jared Ross",
+            "channel_name": "The Jordan B. Peterson Podcast",
+            "start_time": 1113.76,
+            "end_time": 1205.34,
+            "text": "I'm not certain. It was one of the major organizations that certify clinical psychology training programs in Canada. So, and they put forth the proposition that any clinical training program that didn't have a social justice orientation was to be scrubbed from the certification rolls. So, that's a complete bloody catastrophe. So, then you have woke psychologists. Then what's worse, I don't know if it's as bad in Canada and U .S., but I suspect so, because there's not much difference between what",
+            "language": "en"
+          },
+          {
+            "segment_id": 14689149,
+            "content_id": 134852,
+            "youtube_id": "_YKTbJmBJVw",
+            "title": "Roma Army Destroying Toxic Women For 28min Straight",
+            "channel_name": "Roma Army",
+            "start_time": 1005.6,
+            "end_time": 1064.22,
+            "text": "You're not a girl's girl blaming your mom for not showing affection to your dad without knowing what she might have gone through with him. Wow. Wow. He cheated in the past 100%. You have no idea what that man did to her. Y'all get mad at her but he could have done something to make her like that. You don't know their personal business. Your mom never left your dad doesn't mean he didn't do something that caused her to not want to be loving towards him. What crazy is these modern pseudo feminists",
+            "language": "en"
+          },
+          {
+            "segment_id": 15096539,
+            "content_id": 156327,
+            "youtube_id": "x-mE4VN_eso",
+            "title": "Protect this Mother at all COSTS \ud83c\udfaf",
+            "channel_name": "James Klug",
+            "start_time": 0,
+            "end_time": 55.76,
+            "text": "F*** you guys. Why F us? Don't videotape me. I did not consent to be videotaped. You're walking around with hate speech. You're actively promoting anti-trans agenda by walking around with that. Like, you know what you're doing. Children cannot consent to puberty blockers. Children under the age of 18, you disagree with this sign? I 100 % disagree with this sign. It is really critical to trust people at any age that they know what's going on. Yeah. So here's why I agree with this. I'm a mother of",
+            "language": "en"
+          }
+        ],
+        "fr": [
+          {
+            "segment_id": 15093017,
+            "content_id": 155103,
+            "youtube_id": "3ij4uk",
+            "title": "MICHAEL: LA CL\u00c9",
+            "channel_name": "RadioQuebec",
+            "start_time": 3500.74,
+            "end_time": 3577.06,
+            "text": "Tu sais, avec l'argent digital, ils peuvent te dire, bien l\u00e0, tu as 70 % de ton argent, c'est pour de l'alimentation, mais pas de viande. Tu as juste le droit de d\u00e9penser 5 % de ton argent pour de la viande. Le reste, c'est pour \u00eatre capable de micro-g\u00e9rer ce que tu ach\u00e8tes. Et le reste, Tu as juste le droit une paire de mitaines Et donc, les gens comprennent un peu l'arnaque du d\u00e9veloppement durable et r\u00e9sistent. Bravo les Anglais, il faut les applaudir. Donc, les paiements en esp\u00e8ces augmenten",
+            "language": "fr"
+          },
+          {
+            "segment_id": 17316608,
+            "content_id": 31250,
+            "youtube_id": "guCT4-fawOQ",
+            "title": "Le DEBRIEF | Les crit\u00e8res WOKES des OSCARS \ud83c\udfac\ud83c\udf7f",
+            "channel_name": "Ian et Frank",
+            "start_time": 526.88,
+            "end_time": 592.1,
+            "text": "ce que tu viens de faire l\u00e0. Puis \u00e7a, cette d\u00e9finition-l\u00e0, quand m\u00eame, \u00c7a date de quand m\u00eame, je pense, des ann\u00e9es 90 d\u00e9j\u00e0. Indus sont pour donner l'illusion de la diversit\u00e9 sans soutenir v\u00e9ritablement l'inclusion. mettre des enjeux derri\u00e8re cette repr\u00e9sentation-l\u00e0, \u00e7a des secondaires, n'y aucun enjeu. C'est m\u00eame des personnages accessoires, puis m\u00eame leurs personnages sont pas si int\u00e9ressants que \u00e7a. Donc, \u00e7a d\u00e9value un peu ce r\u00f4le-l\u00e0. Le r\u00f4le de cette repr\u00e9sentativit\u00e9-l\u00e0. Fait que donc, \u00e7a, \u00e7a",
+            "language": "fr"
+          },
+          {
+            "segment_id": 17276311,
+            "content_id": 678751,
+            "youtube_id": "5f30c6e6-a9b2-4c90-a40b-08cd7312ba41",
+            "title": "Les droits parentaux : une question politique d'EXTR\u00caME-DROITE selon Trudeau ! (13 juin 2023)",
+            "channel_name": "Ian et Frank",
+            "start_time": 717.06,
+            "end_time": 762.7,
+            "text": "puis que c'est un enfant de 13 ans, Je veux dire, je fais <unk> What the fuck, comment \u00e7a, je n'ai pas \u00e9t\u00e9 averti de \u00e7a? <unk> C'est pas grave. Ben l\u00e0, je sais ne pas, l\u00e0, au me semble, c'est... C'est pas normal que j'ai pas \u00e9t\u00e9 averti de \u00e7a. Ben oui, pis quand tu vas aller la rencontre des parents. Il y a \u00e7a dans les \u00e9coles, la remise des bulletins, la rencontre des parents. En tout cas, quand j'\u00e9tais jeune, \u00e7a se faisait, m\u00eame si suis je au secondaire, \u00e7a se faisait. L\u00e0, tu vas aller rencontre",
+            "language": "fr"
+          }
+        ]
+      },
+      "subthemes": [
+        {
+          "subtheme_id": "Q5",
+          "subtheme_name": {
+            "en": "Masculinist counter-response",
+            "fr": ""
+          },
+          "subtheme_description": {
+            "en": "Documents that contain the idea that feminism or wokeness requires a masculinist, virilist, traditionalist, or patriarchal response",
+            "fr": "Documents qui contiennent l'id\u00e9e que le f\u00e9minisme ou le wokisme n\u00e9cessite une r\u00e9ponse masculiniste, viriliste, traditionaliste ou patriarcale"
+          }
+        },
+        {
+          "subtheme_id": "Q6",
+          "subtheme_name": {
+            "en": "Protective & moral masculinity",
+            "fr": ""
+          },
+          "subtheme_description": {
+            "en": "Documents that contain references to hegemonic, providential, or protective masculinity, or to men as guardians of moral order",
+            "fr": "Documents qui contiennent des r\u00e9f\u00e9rences \u00e0 la masculinit\u00e9 h\u00e9g\u00e9monique, providentielle ou protectrice, ou aux hommes comme gardiens de l'ordre moral"
+          }
+        },
+        {
+          "subtheme_id": "Q7",
+          "subtheme_name": {
+            "en": "Man as provider & protector",
+            "fr": ""
+          },
+          "subtheme_description": {
+            "en": "Documents that contain descriptions of the man as a traditional provider, head of household, natural protector, or pillar of the family",
+            "fr": "Documents qui contiennent des descriptions de l'homme comme pourvoyeur traditionnel, chef de famille, protecteur naturel ou pilier de la famille"
+          }
+        },
+        {
+          "subtheme_id": "Q8",
+          "subtheme_name": {
+            "en": "Protecting children from diversity",
+            "fr": ""
+          },
+          "subtheme_description": {
+            "en": "Documents that contain anti-feminist, anti-wokeness, or anti-diversity arguments framed as protection of children or the family",
+            "fr": "Documents qui contiennent des arguments antif\u00e9ministes, anti-wokeness ou anti-diversit\u00e9 pr\u00e9sent\u00e9s comme protection des enfants ou de la famille"
+          }
+        }
+      ]
+    },
+    {
+      "theme_id": "3",
+      "theme_name": "Naturalism & Gender Hierarchy",
+      "description": {
+        "en": "Documents promoting biological essentialism, natural gender hierarchy, or binary gender ideologies",
+        "fr": "Documents promouvant l'essentialisme biologique, la hi\u00e9rarchie de genre naturelle ou les id\u00e9ologies de genre binaire"
+      },
+      "examples": {
+        "en": [
+          {
+            "segment_id": 14740600,
+            "content_id": 34168,
+            "youtube_id": "7e81d56c-77d2-465e-927d-7a0736d67bf2",
+            "title": "521. Reform, R*pe Gangs and the Rot of the UK | Matthew Goodwin",
+            "channel_name": "The Jordan B. Peterson Podcast",
+            "start_time": 2991.49,
+            "end_time": 3063.04,
+            "text": "And so they were very much likely to dominate those academic sub-disciplines that attracted the least cognitively able people. OK, so it was a big predictor that the correlation between IQ and politically correct authoritarianism was higher than the correlation between cognitive ability, IQ and grades. It was a whopping predictor. Doesn't surprise me. Here's now here's the so that's bad enough. Here's the kicker, though. There were two other major predictors, three, actually. The first was being",
+            "language": "en"
+          },
+          {
+            "segment_id": 15029186,
+            "content_id": 34043,
+            "youtube_id": "8bc6d4f5-ed6a-42d3-8a43-4a3f40384248",
+            "title": "403. Attraction, Beauty, Growth, and Sex | Dr. Sarah Hill",
+            "channel_name": "The Jordan B. Peterson Podcast",
+            "start_time": 1265.9,
+            "end_time": 1332.72,
+            "text": "Well, they are so tightly linked. But I mean, honestly, if evolution by selection doesn't see it, it doesn't matter. Like, in a lot of ways, the gears and sprockets that create us, those pieces, like if you're trying to make predictions about behavior and sort of like the, you know, what types of things have been reinforced by this process of inheriting traits that work, meaning that they promote survival and reproduction and those that don't, it's only what selection sees that matters. And it n",
+            "language": "en"
+          },
+          {
+            "segment_id": 15268319,
+            "content_id": 34688,
+            "youtube_id": "NQnCTp7-NwY",
+            "title": "'Detransitioned' Navy SEAL Opens Up About Gender Dysphoria | Chris Beck EP 175",
+            "channel_name": "Mikhaila Peterson",
+            "start_time": 784.12,
+            "end_time": 840.86,
+            "text": "Nobody does. Like depression. real. That's That's what I'm trying to say is nobody does. Yeah, okay. Otherwise, we wouldn't be doing surgery on these kids. You know? If we knew what gender identity disorder was, we really knew what it was, we wouldn't be doing surgery on kids. We'd be digging in there and looking at the underlying causes. We'd be looking at anxiety, at depression, at a myriad of other things that could add up to gender identity disorder. We've got to look at childhood trauma. We",
+            "language": "en"
+          }
+        ],
+        "fr": [
+          {
+            "segment_id": 15183814,
+            "content_id": 152202,
+            "youtube_id": "yIQm1EZy5vA",
+            "title": "La Canonique roshdyenne - Sp\u00e9cial Troll Acad\u00e9mie et R\u00e9volution Viriliste - 13/5/23",
+            "channel_name": "La R\u00e9volution Culturelle avec Yann Roshdy",
+            "start_time": 3806.18,
+            "end_time": 3881.92,
+            "text": "2021, pr\u00e8s pass\u00e9 Ce sont des grossesses g\u00e9riatriques, selon les termes des professionnels de la sant\u00e9, surtout si une premi\u00e8re grossesse. Donc, on le sait qu'avant 30 ans, si vous avez un enfant, vous gagnez un super pouvoir, mesdames. Donc, vous allez \u00eatre plus prot\u00e9g\u00e9s. Si vous attendez, vous allez \u00eatre fragiles tout le restant de vos jours. Donc, c'est un pensez-y bien. 2023, m\u00eame aux parents... Ce qui important, est je sais Comprenez bien que c'est scientifique. En g\u00e9n\u00e9ral, la gauche valoris",
+            "language": "fr"
+          },
+          {
+            "segment_id": 14989656,
+            "content_id": 1154,
+            "youtube_id": "cuCW51PpyIA",
+            "title": "EP-80 - Max Gold - Tucker Carlson et Putin - La d\u00e9sinformation et la soumission intellectuelle",
+            "channel_name": "En toute franchise",
+            "start_time": 4351.84,
+            "end_time": 4400.5,
+            "text": "Moi, je pense que j'ai tort 40, selon toi. Bon, Non, non, je veux C'est quoi ton pourcentage? Moi, je suis un petit peu meilleure que toi. Moi, c'est 65, 35. OK, c'est ce que je pensais aussi. 35 que j'ai tort. OK, c'est bon. 65 raisons, \u00e9videmment. Puis, tu veux savoir le bien? Moi, j'ai 0 % raison. J'aime \u00e7a. Parce que je n'ai pas de... Je l'ai dit tant\u00f4t. C'est impossible qu'on sache quelque chose. Quand tu sais pas, c'est \u00e7a mon point. On sait pas. Oui, mais il y des a choses que je sais. Ou",
+            "language": "fr"
+          },
+          {
+            "segment_id": 15197892,
+            "content_id": 1229,
+            "youtube_id": "RmGOVngXErs",
+            "title": "EP-38 - La d\u00e9mocratie et la commission d'enqu\u00eate nationale avec notre invit\u00e9 Philippe Meloni",
+            "channel_name": "En toute franchise",
+            "start_time": 9754.78,
+            "end_time": 9800.38,
+            "text": "Ce n'\u00e9tait pas le contraire, mais c'\u00e9tait diff\u00e9rent. Je veux dire, clairement... mais il Oui, transforme les phrases qu'on dit. Par contre, \u00e7a, ici, on ne parle pas d'une \u00e9tude scientifique. Tu ne peux pas faire une \u00e9tude scientifique So la politique. qui est subjective. C'est vrai que ce n'est pas de la science. C'est subjectif, la politique. qui a eu la chienne d'\u00eatre... Oui, mais toutes les sciences humaines sont, par d\u00e9finition, toutes les sciences humaines... Il y a les sciences dures et pu",
+            "language": "fr"
+          }
+        ]
+      },
+      "subthemes": [
+        {
+          "subtheme_id": "Q10",
+          "subtheme_name": {
+            "en": "Traditional roles & family",
+            "fr": ""
+          },
+          "subtheme_description": {
+            "en": "Documents that contain references to traditional gender roles, the 'natural' family, a return to tradition, or moral purism",
+            "fr": "Documents qui contiennent des r\u00e9f\u00e9rences aux r\u00f4les genr\u00e9s traditionnels, \u00e0 la famille \u00ab naturelle \u00bb, au retour \u00e0 la tradition ou au purisme moral"
+          }
+        },
+        {
+          "subtheme_id": "Q11",
+          "subtheme_name": {
+            "en": "Binary sex vs non-binary identities",
+            "fr": ""
+          },
+          "subtheme_description": {
+            "en": "Documents that contain contrasts between 'natural, binary biological sex' and non-binary gender identities portrayed as unnatural or ridiculous",
+            "fr": "Documents qui contiennent des oppositions entre le \u00ab sexe biologique naturel et binaire \u00bb et les identit\u00e9s de genre non binaires pr\u00e9sent\u00e9es comme contre-nature ou ridicules"
+          }
+        },
+        {
+          "subtheme_id": "Q12",
+          "subtheme_name": {
+            "en": "Pseudo-scientific gender arguments",
+            "fr": ""
+          },
+          "subtheme_description": {
+            "en": "Documents that contain biology-based, neuroscience-based, or pseudo-scientific arguments used to justify fixed gender roles or gender hierarchy",
+            "fr": "Documents qui contiennent des arguments biologiques, neuroscientifiques ou pseudo-scientifiques utilis\u00e9s pour justifier des r\u00f4les de genre fixes ou une hi\u00e9rarchie de genre"
+          }
+        },
+        {
+          "subtheme_id": "Q9",
+          "subtheme_name": {
+            "en": "Natural male authority",
+            "fr": ""
+          },
+          "subtheme_description": {
+            "en": "Documents that contain claims of natural male authority, innate male leadership, biological superiority, or a hierarchy between the sexes",
+            "fr": "Documents qui contiennent des affirmations d'autorit\u00e9 masculine naturelle, de leadership masculin inn\u00e9, de sup\u00e9riorit\u00e9 biologique ou d'hi\u00e9rarchie entre les sexes"
+          }
+        }
+      ]
+    },
+    {
+      "theme_id": "4",
+      "theme_name": "Violence Against Women & Gender Diversity",
+      "description": {
+        "en": "Documents containing discrimination, dehumanization, or delegitimization targeting women or LGBTQ+ people",
+        "fr": "Documents contenant de la discrimination, de la d\u00e9shumanisation ou de la d\u00e9l\u00e9gitimation visant les femmes ou les personnes LGBTQ+"
+      },
+      "examples": {
+        "en": [
+          {
+            "segment_id": 14628004,
+            "content_id": 638962,
+            "youtube_id": "b_BrnLBkfo8",
+            "title": "I literally silenced this man hating feminist",
+            "channel_name": "Roma Army",
+            "start_time": 0,
+            "end_time": 64.92,
+            "text": "For somebody that's not terrified of men, you sure take money from them all the time. I never said I was terrified of men. Don't you escort? Did you say that you escort? So you put yourself in situations where you're actually more likely to come in contact with a man who is sexually violent, who is aggressive. I said I was a sugar baby for two years. Okay, you are a hoe of any sort, so you thereby have put yourself in a position where you are far more likely to come across a man who is sexually ",
+            "language": "en"
+          },
+          {
+            "segment_id": 14737742,
+            "content_id": 7358,
+            "youtube_id": "iDydooxa82I",
+            "title": "Rebel Roundup | Crash landing in Toronto, Poilievre's Canada First rally, Ezra grills Marc Miller",
+            "channel_name": "Rebel News",
+            "start_time": 1700.42,
+            "end_time": 1763.4,
+            "text": "I agree with that. I agree with that. That is like a, an act of resistance going the other direction. I think it's passive aggressive. I always, I always say people mistake Canadians for nice and Canadians like, yeah, we're so much nicer. No, we're not nice. We're passive aggressive. And sometimes when you want to believe we're nice, you don't pick up on it, but that is passive aggressive as hell. Absolutely. Absolutely. 100%. You're telling me that you couldn't have found another singer. One th",
+            "language": "en"
+          },
+          {
+            "segment_id": 14756260,
+            "content_id": 155638,
+            "youtube_id": "6cquos",
+            "title": "Is the Far Right having more fun in 2025? Discussion with Lilly Gaddis",
+            "channel_name": "postyX",
+            "start_time": 6260.78,
+            "end_time": 6325.28,
+            "text": "And I'm not trying to be a tough guy here, but it's legit. Look at how many pot-bellied motherfuckers, dudes wearing anime shirts, fucking purple hair, all this goofy shit. If you boys want that base woman, be the base dude. And they'll come to you. You won't have to fucking look. Just be yourself. And that's the coaching I give to a lot of young men that ask me, well, how do I do it? Dude, stop fucking looking. Just be yourself. And that right person will come right the fuck into your life. The",
+            "language": "en"
+          }
+        ],
+        "fr": [
+          {
+            "segment_id": 15319759,
+            "content_id": 27917,
+            "youtube_id": "A5Ght2-B4PY",
+            "title": "H\u00e9l\u00e8ne Boudreau en AMOUR avec le P*RNSTAR #1 Jessy Jones qui a BAIS\u00c9 devant L\u00c9O DICAPRIO ! - PuB #28",
+            "channel_name": "Prends Un Break",
+            "start_time": 2502.78,
+            "end_time": 2563.16,
+            "text": "Que je ne veux pas que tu prennes ma place. On est des requins. On est des sharks. Moi, McBlue, Manuel Ferrara, Kieran Lee. Puis, tu sais, On ne te laissera pas. prendre notre place. Oui, je comprends. Fait que genre, I say the bat the girl. qui ont gagn\u00e9 des awards Pion fucking 3000 trains qui ont p\u00e9nis un leur nom. c'est vraiment dur. Fait que genre, il faut que moi... c'est \u00e7a qui est dur. C'est vraiment dur. Ouais. On Non, non, c'est correct. J'aimerais \u00e7a qu'on revienne parce que l\u00e0, le plu",
+            "language": "fr"
+          },
+          {
+            "segment_id": 17278763,
+            "content_id": 678692,
+            "youtube_id": "6ee3daba-dd19-451f-81a8-48376b888314",
+            "title": "La th\u00e8se du labo de Wuhan revient dans les m\u00e9dias & Bernier chez Bureau ! (27 f\u00e9vrier 2023)",
+            "channel_name": "Ian et Frank",
+            "start_time": 393.42,
+            "end_time": 437.2,
+            "text": "Mais le gars, il existe pas, l\u00e0. C'est un troll anonyme. Petit mot comme \u00e7a. Oui, c'est \u00e7a. C'est un. C'est \u00e7a. Tu n'as pas de photo, tu t'appelles Dark Vadar 666, j'ai le droit de t'insulter et tu te disais tout ce que je veux. Pareil comme les autres groupes qui font de la diffamation avec un truc anonyme. Si j'ai envie de vous traiter de voleur pis de p\u00e9daux, je vais le faire. Sinon, bien, mettez votre visage, mettez votre nom, pis vous m'accuserait de vous diffamer. Pour l'instant, je ne peu",
+            "language": "fr"
+          },
+          {
+            "segment_id": 15128999,
+            "content_id": 29117,
+            "youtube_id": "YsRaAWbmlHY",
+            "title": "SAM PREND UN CAF\u00c9 AVEC VOUS - SAMEDI 29 JUILLET",
+            "channel_name": "Samuel Grenier",
+            "start_time": 5505.04,
+            "end_time": 5568.1,
+            "text": "Puis \u00e7a me fait toujours plaisir dans ce temps-l\u00e0. Ne vous en faites pas. Avec \u00e7a, je n'ai pas de regrets de bloquer du monde. C'est moi qui d\u00e9cide. Qu'est-ce que je fais? S\u00e9bastien Degg, c'est quoi \u00e7a? Bonne f\u00eate? S\u00e9bastien Degg, c'est quoi \u00e7a? Non, non, non, Non, S\u00e9bastien Degg, malheureusement, c'\u00e9tait une joke. Elle ne passe pas. Non, non, non, H\u00e9, h\u00e9. Ben oui, d'or, les poubelles, puis les dames de roc, puis toutes ces affaires-l\u00e0, des hosties de d\u00e9chets. Moi, je ne rien veux savoir de \u00e7a. ",
+            "language": "fr"
+          }
+        ]
+      },
+      "subthemes": [
+        {
+          "subtheme_id": "Q13",
+          "subtheme_name": {
+            "en": "Trans as mental illness",
+            "fr": ""
+          },
+          "subtheme_description": {
+            "en": "Documents that contain portrayals of trans identity, gender diversity, or gender identities as mental illness, deviance, delusion, or something evil",
+            "fr": "Documents qui contiennent des descriptions de l'identit\u00e9 trans, de la diversit\u00e9 de genre ou des identit\u00e9s de genre comme maladie mentale, d\u00e9viance, d\u00e9lire ou quelque chose de mal\u00e9fique"
+          }
+        },
+        {
+          "subtheme_id": "Q14",
+          "subtheme_name": {
+            "en": "Abortion as irresponsible",
+            "fr": ""
+          },
+          "subtheme_description": {
+            "en": "Documents that contain portrayals of abortion as irresponsible, selfish, barbaric, or responsible for demographic decline",
+            "fr": "Documents qui contiennent des descriptions de l'avortement comme irresponsable, \u00e9go\u00efste, barbare ou responsable du d\u00e9clin d\u00e9mographique"
+          }
+        },
+        {
+          "subtheme_id": "Q15",
+          "subtheme_name": {
+            "en": "Drag queens & child danger",
+            "fr": ""
+          },
+          "subtheme_description": {
+            "en": "Documents that contain associations between drag queens and pedophilia or threats to children",
+            "fr": "Documents qui contiennent des associations entre les drag queens et la p\u00e9dophilie ou les menaces envers les enfants"
+          }
+        },
+        {
+          "subtheme_id": "Q16",
+          "subtheme_name": {
+            "en": "Discrimination & violence against women/LGBTQ+",
+            "fr": ""
+          },
+          "subtheme_description": {
+            "en": "Documents that contain discrimination, intimidation, insults, call for violence or stereotypes targeting women or trans/LGBTQ+ people, including objectification or essentialization of women or trans/LGBTQ+",
+            "fr": "Documents qui contiennent de la discrimination, de l'intimidation, des insultes, des appels \u00e0 la violence ou des st\u00e9r\u00e9otypes visant les femmes ou les personnes trans/LGBTQ+, incluant l'objectivation ou l'essentialisation"
+          }
+        }
+      ]
+    },
+    {
+      "theme_id": "5",
+      "theme_name": "Masculinist Victimization & Decline Narratives",
+      "description": {
+        "en": "Documents portraying men as victims and framing social change as civilizational decline",
+        "fr": "Documents pr\u00e9sentant les hommes comme victimes et cadrant le changement social comme d\u00e9clin civilisationnel"
+      },
+      "examples": {
+        "en": [
+          {
+            "segment_id": 14592209,
+            "content_id": 151431,
+            "youtube_id": "Rodyc3NNmqg",
+            "title": "Elon Musk ROASTS Trudeau's resignation",
+            "channel_name": "The Pleb \ud83c\udde8\ud83c\udde6 Reporter",
+            "start_time": 82.28,
+            "end_time": 174.26,
+            "text": "Elon Musk posted this on X, making fun of Trudeau's resignation, which is going massively viral here with 30 million views, and the footage, well, it's absolutely priceless. Watch this. Last night over dinner, I told my kids about the decision that I'm sharing with you today. I intend to resign as party leader, as prime minister, after the party selects its next leader through a robust, nationwide, competitive process. Last night over dinner... But Elon Musk wasn't done trolling Trudeau just the",
+            "language": "en"
+          },
+          {
+            "segment_id": 14825664,
+            "content_id": 8215,
+            "youtube_id": "78m5a71mMJQ",
+            "title": "San Francisco is a WARNING for the world",
+            "channel_name": "Rebel News",
+            "start_time": 757.36,
+            "end_time": 828.28,
+            "text": "Exactly. It's a warning. There are people coming here as a safe haven not only to do drugs, but to deal drugs, to distribute them. Can you get me off your f***ing camera, ladies? What does it mean when it says it's a transgender district? So, different districts across the city have different organizations that support different cultures. So, with everything going on in this crazy city, at least we could see they got their priorities right by painting the crosswalk in the colors of the transgend",
+            "language": "en"
+          },
+          {
+            "segment_id": 15139137,
+            "content_id": 155371,
+            "youtube_id": "30n6p2",
+            "title": "RageCast 356: CUCKISTAN",
+            "channel_name": "JeremyMacKenzie",
+            "start_time": 8850.84,
+            "end_time": 8911.52,
+            "text": "But to me, I'm like, that is, I would buy that. And I would hang that on my wall somewhere in my house because that is one of the most interesting things I've ever seen. And there is a, basically a giant spider with its legs and kind of, you know, and spiders weave webs and so on. Right. And it's at the back and it's at like, and in front of it is like this army of people. And, but some of them are like, they're all the subversive groups that we've got, you know, Trantifa is there and there's li",
+            "language": "en"
+          }
+        ],
+        "fr": [
+          {
+            "segment_id": 18768623,
+            "content_id": 802568,
+            "youtube_id": "eblgEQDFICk",
+            "title": "RADIO PIRATE LIVE (29 OCTOBRE 2025)",
+            "channel_name": "RadioPirate",
+            "start_time": 3326.14,
+            "end_time": 3385.0,
+            "text": "fait que \u00c7a c'est des... Ils sont leurs propres bosses, puis ils contractent. En th\u00e9orie, c'est un syndicat qui se regroupe, mais en r\u00e9alit\u00e9, Jeff, c'est exactement \u00e7a. L'affaire, il y donc a 20 000 m\u00e9decins au Qu\u00e9bec pour 9 millions de personnes. On a toujours dit... \u00c7a, c'est mon voisin. J'am\u00e8ne des points en particulier. Mon voisin, qui est m\u00e9decin depuis longtemps, qui est rendu pas loin de 80 ans, il disait... Il y a une chose qui est scandaleuse dans la probl\u00e9matique du Qu\u00e9bec, la m\u00e9decine",
+            "language": "fr"
+          },
+          {
+            "segment_id": 18768589,
+            "content_id": 802568,
+            "youtube_id": "eblgEQDFICk",
+            "title": "RADIO PIRATE LIVE (29 OCTOBRE 2025)",
+            "channel_name": "RadioPirate",
+            "start_time": 1125.68,
+            "end_time": 1193.48,
+            "text": "On a cette Tu as mis un vid\u00e9o sur ce que j'ai dit sur les m\u00e9decins. J'ai eu beaucoup de commentaires de gens qui m'\u00e9crivent. Et c'est toujours la m\u00eame crise de commentaires. C'est quoi? Oui, mais pendant la COVID. Des gens qui ne mettent pas leur propre nom sur leur compte X. Mettez votre propre nom avec votre face. Oui, mais les m\u00e9decins ne nous ont pas appuy\u00e9s pendant la COVID. Les m\u00e9decins ne t'ont pas appuy\u00e9 pendant la COVID parce que le coll\u00e8ge des m\u00e9decins pouvait les radier. Et s'ils le f",
+            "language": "fr"
+          },
+          {
+            "segment_id": 16460774,
+            "content_id": 1813,
+            "youtube_id": "n1iBgqioZJ0",
+            "title": "D\u00c9VOILEMENT DE PH\u00c9NOM\u00c8NES \"UAP\" - LE CONGR\u00c8S NE VEUT PAS DIRE LE MOT \"EXTRATERRESTRE\"",
+            "channel_name": "Lux M\u00e9dia",
+            "start_time": 1289.16,
+            "end_time": 1345.84,
+            "text": "Quand l'ennemi \u00e9tait connu? Bien oui. C'est comme des ann\u00e9es... augmenter va \u00c7a la peur dans la population. Des ann\u00e9es 80-90. ne serais Moi, pas je le gars dans l'h\u00e9licopt\u00e8re qui flashe le vaisseau d'ind\u00e9pendance D. Tu sais, au d\u00e9but, l\u00e0, il rencontre, puis l\u00e0, il flashe le truc, puis l\u00e0, le truc, il s'ouvre, puis il y a trois missiles qui d\u00e9truisent les h\u00e9licopt\u00e8res. Lui, il serait vous de la cul? Moi, je serais la gang qui part avec leur RV pour dispara\u00eetre. va qu'ils falloir Il tirent au cent",
+            "language": "fr"
+          }
+        ]
+      },
+      "subthemes": [
+        {
+          "subtheme_id": "Q17",
+          "subtheme_name": {
+            "en": "Men as oppressed victims",
+            "fr": ""
+          },
+          "subtheme_description": {
+            "en": "Documents that contain portrayals of men as oppressed, silenced, marginalized, or victims of feminism, gender equality, or LGBTQ+ rights",
+            "fr": "Documents qui contiennent des descriptions des hommes comme opprim\u00e9s, r\u00e9duits au silence, marginalis\u00e9s ou victimes du f\u00e9minisme, de l'\u00e9galit\u00e9 des genres ou des droits LGBTQ+"
+          }
+        },
+        {
+          "subtheme_id": "Q18",
+          "subtheme_name": {
+            "en": "Crisis of masculinity",
+            "fr": ""
+          },
+          "subtheme_description": {
+            "en": "Documents that contain descriptions of a crisis of masculinity, loss of male status, or disintegration of traditional male roles",
+            "fr": "Documents qui contiennent des descriptions d'une crise de la masculinit\u00e9, de perte du statut masculin ou de d\u00e9sint\u00e9gration des r\u00f4les masculins traditionnels"
+          }
+        },
+        {
+          "subtheme_id": "Q19",
+          "subtheme_name": {
+            "en": "Civilizational decline narratives",
+            "fr": ""
+          },
+          "subtheme_description": {
+            "en": "Documents that contain narratives of societal collapse, demographic crisis, civilizational decline, or moral decay attributed to feminism or gender diversity",
+            "fr": "Documents qui contiennent des r\u00e9cits d'effondrement soci\u00e9tal, de crise d\u00e9mographique, de d\u00e9clin civilisationnel ou de d\u00e9cadence morale attribu\u00e9s au f\u00e9minisme ou \u00e0 la diversit\u00e9 de genre"
+          }
+        },
+        {
+          "subtheme_id": "Q20",
+          "subtheme_name": {
+            "en": "Calls for resistance & restoration",
+            "fr": ""
+          },
+          "subtheme_description": {
+            "en": "Documents that contain calls for resistance, restoration, self-defense, or taking back control against perceived feminist or trans/LGBTQ+ influence",
+            "fr": "Documents qui contiennent des appels \u00e0 la r\u00e9sistance, \u00e0 la restauration, \u00e0 l'autod\u00e9fense ou \u00e0 la reprise de contr\u00f4le contre l'influence f\u00e9ministe ou trans/LGBTQ+ per\u00e7ue"
+          }
+        }
+      ]
+    }
+  ],
+  "channels_summary": [
+    {
+      "channel_name": "Rebel News",
+      "main_language": "en",
+      "episode_count": 14707,
+      "total_hours": 3989.6,
+      "flagged_segment_count": 8975
+    },
+    {
+      "channel_name": "Ian et Frank",
+      "main_language": "fr",
+      "episode_count": 3509,
+      "total_hours": 2036.7,
+      "flagged_segment_count": 2867
+    },
+    {
+      "channel_name": "Viva Frei",
+      "main_language": "en",
+      "episode_count": 3392,
+      "total_hours": 2572.4,
+      "flagged_segment_count": 2605
+    },
+    {
+      "channel_name": "Jordan B Peterson Clips",
+      "main_language": "en",
+      "episode_count": 1938,
+      "total_hours": 195.5,
+      "flagged_segment_count": 454
+    },
+    {
+      "channel_name": "mistersunshinebaby",
+      "main_language": "en",
+      "episode_count": 1436,
+      "total_hours": 509.0,
+      "flagged_segment_count": 338
+    },
+    {
+      "channel_name": "RadioPirate",
+      "main_language": "fr",
+      "episode_count": 1359,
+      "total_hours": 1522.8,
+      "flagged_segment_count": 2138
+    },
+    {
+      "channel_name": "Jordan B Peterson",
+      "main_language": "en",
+      "episode_count": 1147,
+      "total_hours": 779.6,
+      "flagged_segment_count": 1876
+    },
+    {
+      "channel_name": "Roma Army",
+      "main_language": "en",
+      "episode_count": 1124,
+      "total_hours": 130.2,
+      "flagged_segment_count": 896
+    },
+    {
+      "channel_name": "Lux M\u00e9dia",
+      "main_language": "fr",
+      "episode_count": 1046,
+      "total_hours": 973.0,
+      "flagged_segment_count": 1063
+    },
+    {
+      "channel_name": "James Klug",
+      "main_language": "en",
+      "episode_count": 849,
+      "total_hours": 123.9,
+      "flagged_segment_count": 700
+    },
+    {
+      "channel_name": "Samuel Grenier",
+      "main_language": "fr",
+      "episode_count": 730,
+      "total_hours": 968.3,
+      "flagged_segment_count": 1428
+    },
+    {
+      "channel_name": "Mikhaila Peterson",
+      "main_language": "en",
+      "episode_count": 723,
+      "total_hours": 166.4,
+      "flagged_segment_count": 369
+    },
+    {
+      "channel_name": "Prends Un Break",
+      "main_language": "fr",
+      "episode_count": 665,
+      "total_hours": 613.6,
+      "flagged_segment_count": 419
+    },
+    {
+      "channel_name": "Theovox tv",
+      "main_language": "fr",
+      "episode_count": 601,
+      "total_hours": 402.4,
+      "flagged_segment_count": 969
+    },
+    {
+      "channel_name": "Tammy Peterson",
+      "main_language": "en",
+      "episode_count": 587,
+      "total_hours": 236.0,
+      "flagged_segment_count": 912
+    },
+    {
+      "channel_name": "La R\u00e9volution Culturelle avec Yann Roshdy",
+      "main_language": "fr",
+      "episode_count": 498,
+      "total_hours": 620.0,
+      "flagged_segment_count": 1615
+    },
+    {
+      "channel_name": "The Jordan B. Peterson Podcast",
+      "main_language": "en",
+      "episode_count": 481,
+      "total_hours": 805.0,
+      "flagged_segment_count": 1872
+    },
+    {
+      "channel_name": "JeremyMacKenzie",
+      "main_language": "en",
+      "episode_count": 458,
+      "total_hours": 1632.7,
+      "flagged_segment_count": 3418
+    },
+    {
+      "channel_name": "The Pleb \ud83c\udde8\ud83c\udde6 Reporter",
+      "main_language": "en",
+      "episode_count": 456,
+      "total_hours": 181.4,
+      "flagged_segment_count": 364
+    },
+    {
+      "channel_name": "We Unify",
+      "main_language": "en",
+      "episode_count": 411,
+      "total_hours": 151.9,
+      "flagged_segment_count": 198
+    },
+    {
+      "channel_name": "Maxime Ouimet",
+      "main_language": "fr",
+      "episode_count": 359,
+      "total_hours": 66.5,
+      "flagged_segment_count": 58
+    },
+    {
+      "channel_name": "Amelie Paul",
+      "main_language": "fr",
+      "episode_count": 323,
+      "total_hours": 183.6,
+      "flagged_segment_count": 257
+    },
+    {
+      "channel_name": "Libre M\u00e9dia",
+      "main_language": "fr",
+      "episode_count": 301,
+      "total_hours": 211.9,
+      "flagged_segment_count": 456
+    },
+    {
+      "channel_name": "Pour de Vrai",
+      "main_language": "fr",
+      "episode_count": 272,
+      "total_hours": 89.9,
+      "flagged_segment_count": 87
+    },
+    {
+      "channel_name": "Elo Veut Savoir",
+      "main_language": "fr",
+      "episode_count": 241,
+      "total_hours": 204.4,
+      "flagged_segment_count": 712
+    },
+    {
+      "channel_name": "Grille Neurones",
+      "main_language": "fr",
+      "episode_count": 224,
+      "total_hours": 78.4,
+      "flagged_segment_count": 212
+    },
+    {
+      "channel_name": "En toute franchise",
+      "main_language": "fr",
+      "episode_count": 223,
+      "total_hours": 494.6,
+      "flagged_segment_count": 1413
+    },
+    {
+      "channel_name": "RadioQuebec",
+      "main_language": "fr",
+      "episode_count": 194,
+      "total_hours": 249.0,
+      "flagged_segment_count": 1083
+    },
+    {
+      "channel_name": "JFG Tonight",
+      "main_language": "en",
+      "episode_count": 186,
+      "total_hours": 232.9,
+      "flagged_segment_count": 632
+    },
+    {
+      "channel_name": "The Tammy Peterson Podcast",
+      "main_language": "en",
+      "episode_count": 169,
+      "total_hours": 217.1,
+      "flagged_segment_count": 759
+    },
+    {
+      "channel_name": "CampaignLifeTV",
+      "main_language": "en",
+      "episode_count": 137,
+      "total_hours": 22.9,
+      "flagged_segment_count": 134
+    },
+    {
+      "channel_name": "Julien Bournival",
+      "main_language": "fr",
+      "episode_count": 110,
+      "total_hours": 48.9,
+      "flagged_segment_count": 13
+    },
+    {
+      "channel_name": "Endeavour",
+      "main_language": "en",
+      "episode_count": 97,
+      "total_hours": 96.5,
+      "flagged_segment_count": 292
+    },
+    {
+      "channel_name": "TomMcCue",
+      "main_language": "en",
+      "episode_count": 96,
+      "total_hours": 241.4,
+      "flagged_segment_count": 437
+    },
+    {
+      "channel_name": "Action Vitale",
+      "main_language": "fr",
+      "episode_count": 92,
+      "total_hours": 21.7,
+      "flagged_segment_count": 22
+    },
+    {
+      "channel_name": "m!lf & cougar podcast",
+      "main_language": "en",
+      "episode_count": 74,
+      "total_hours": 15.2,
+      "flagged_segment_count": 85
+    },
+    {
+      "channel_name": "postyX",
+      "main_language": "en",
+      "episode_count": 72,
+      "total_hours": 97.2,
+      "flagged_segment_count": 271
+    },
+    {
+      "channel_name": "Lorenna \ud83c\udf80",
+      "main_language": "en",
+      "episode_count": 69,
+      "total_hours": 15.0,
+      "flagged_segment_count": 0
+    },
+    {
+      "channel_name": "Campagne Qu\u00e9bec-Vie",
+      "main_language": "fr",
+      "episode_count": 65,
+      "total_hours": 30.1,
+      "flagged_segment_count": 167
+    },
+    {
+      "channel_name": "LorennaMorena \ud83c\udf80",
+      "main_language": "en",
+      "episode_count": 58,
+      "total_hours": 40.8,
+      "flagged_segment_count": 0
+    },
+    {
+      "channel_name": "TheMarieOakes",
+      "main_language": "en",
+      "episode_count": 58,
+      "total_hours": 7.1,
+      "flagged_segment_count": 44
+    },
+    {
+      "channel_name": "Lauren Southern",
+      "main_language": "en",
+      "episode_count": 56,
+      "total_hours": 28.5,
+      "flagged_segment_count": 54
+    },
+    {
+      "channel_name": "Le Libre-Podcast",
+      "main_language": "fr",
+      "episode_count": 42,
+      "total_hours": 49.2,
+      "flagged_segment_count": 79
+    },
+    {
+      "channel_name": "Billboard Chris",
+      "main_language": "en",
+      "episode_count": 42,
+      "total_hours": 4.5,
+      "flagged_segment_count": 107
+    },
+    {
+      "channel_name": "Le Lucide Podcast",
+      "main_language": "fr",
+      "episode_count": 40,
+      "total_hours": 46.2,
+      "flagged_segment_count": 43
+    },
+    {
+      "channel_name": "Ferryman47",
+      "main_language": "en",
+      "episode_count": 37,
+      "total_hours": 105.0,
+      "flagged_segment_count": 165
+    },
+    {
+      "channel_name": "Amalega Francois",
+      "main_language": "fr",
+      "episode_count": 36,
+      "total_hours": 10.8,
+      "flagged_segment_count": 13
+    },
+    {
+      "channel_name": "Roxanne Labanane",
+      "main_language": "fr",
+      "episode_count": 27,
+      "total_hours": 3.3,
+      "flagged_segment_count": 13
+    },
+    {
+      "channel_name": "Kamel El-Cheikh Channel (Kamelmedia)",
+      "main_language": "fr",
+      "episode_count": 12,
+      "total_hours": 0.4,
+      "flagged_segment_count": 1
+    },
+    {
+      "channel_name": "Mikhaila",
+      "main_language": "en",
+      "episode_count": 10,
+      "total_hours": 0.1,
+      "flagged_segment_count": 0
+    },
+    {
+      "channel_name": "Elo Veut Savoir",
+      "main_language": "en",
+      "episode_count": 5,
+      "total_hours": 5.9,
+      "flagged_segment_count": 712
+    },
+    {
+      "channel_name": "Campagne Qu\u00e9bec-Vie (EN)",
+      "main_language": "en",
+      "episode_count": 3,
+      "total_hours": 1.3,
+      "flagged_segment_count": 0
+    },
+    {
+      "channel_name": "",
+      "main_language": "fr",
+      "episode_count": 1,
+      "total_hours": 1.3,
+      "flagged_segment_count": 0
+    }
+  ],
+  "circle_pack_by_volume": [
+    {
+      "channel_name": "Rebel News",
+      "main_language": "en",
+      "episode_count": 14707,
+      "total_hours": 3989.6,
+      "circle_x": 0.5742405929604995,
+      "circle_y": -0.2594828249637743,
+      "circle_r": 0.36985430648555
+    },
+    {
+      "channel_name": "Viva Frei",
+      "main_language": "en",
+      "episode_count": 3392,
+      "total_hours": 2572.4,
+      "circle_x": -0.09260329910414507,
+      "circle_y": -0.2594828249637743,
+      "circle_r": 0.2969895855790946
+    },
+    {
+      "channel_name": "Ian et Frank",
+      "main_language": "fr",
+      "episode_count": 3509,
+      "total_hours": 2036.7,
+      "circle_x": 0.17551131333254807,
+      "circle_y": 0.23358271171007786,
+      "circle_r": 0.2642581929087595
+    },
+    {
+      "channel_name": "JeremyMacKenzie",
+      "main_language": "en",
+      "episode_count": 458,
+      "total_hours": 1632.7,
+      "circle_x": 0.1785327226421951,
+      "circle_y": -0.7190591512866187,
+      "circle_r": 0.23660683682723382
+    },
+    {
+      "channel_name": "RadioPirate",
+      "main_language": "fr",
+      "episode_count": 1359,
+      "total_hours": 1522.8,
+      "circle_x": 0.6581467192350243,
+      "circle_y": 0.3329618445399525,
+      "circle_r": 0.22850254728131025
+    },
+    {
+      "channel_name": "Lux M\u00e9dia",
+      "main_language": "fr",
+      "episode_count": 1046,
+      "total_hours": 973.0,
+      "circle_x": -0.2689230415569695,
+      "circle_y": 0.18657794907320097,
+      "circle_r": 0.18265493457421167
+    },
+    {
+      "channel_name": "Samuel Grenier",
+      "main_language": "fr",
+      "episode_count": 730,
+      "total_hours": 968.3,
+      "circle_x": 0.3767481735572964,
+      "circle_y": 0.6321281636359318,
+      "circle_r": 0.1822110122598587
+    },
+    {
+      "channel_name": "The Jordan B. Peterson Podcast",
+      "main_language": "en",
+      "episode_count": 481,
+      "total_hours": 805.0,
+      "circle_x": -0.150449069032059,
+      "circle_y": 0.5146287104788829,
+      "circle_r": 0.16613351739156182
+    },
+    {
+      "channel_name": "Jordan B Peterson",
+      "main_language": "en",
+      "episode_count": 1147,
+      "total_hours": 779.6,
+      "circle_x": -0.5089710991603337,
+      "circle_y": -0.06280945920068937,
+      "circle_r": 0.16349120416593924
+    },
+    {
+      "channel_name": "La R\u00e9volution Culturelle avec Yann Roshdy",
+      "main_language": "fr",
+      "episode_count": 498,
+      "total_hours": 620.0,
+      "circle_x": 0.06653696686831972,
+      "circle_y": 0.7387370454465131,
+      "circle_r": 0.14580796041753577
+    },
+    {
+      "channel_name": "Prends Un Break",
+      "main_language": "fr",
+      "episode_count": 665,
+      "total_hours": 613.6,
+      "circle_x": -0.45598951050088554,
+      "circle_y": 0.45564255390506436,
+      "circle_r": 0.14504862869062635
+    },
+    {
+      "channel_name": "mistersunshinebaby",
+      "main_language": "en",
+      "episode_count": 1436,
+      "total_hours": 509.0,
+      "circle_x": -0.5995480987369859,
+      "circle_y": 0.21856695079872168,
+      "circle_r": 0.13210459579824388
+    },
+    {
+      "channel_name": "En toute franchise",
+      "main_language": "fr",
+      "episode_count": 223,
+      "total_hours": 494.6,
+      "circle_x": -0.5086508805966502,
+      "circle_y": -0.3565263467591409,
+      "circle_r": 0.13022585794818511
+    },
+    {
+      "channel_name": "Theovox tv",
+      "main_language": "fr",
+      "episode_count": 601,
+      "total_hours": 402.4,
+      "circle_x": -0.363819058706034,
+      "circle_y": 0.7014327007604904,
+      "circle_r": 0.11745506361727018
+    },
+    {
+      "channel_name": "RadioQuebec",
+      "main_language": "fr",
+      "episode_count": 194,
+      "total_hours": 249.0,
+      "circle_x": -0.16841975359359398,
+      "circle_y": 0.7779825362662175,
+      "circle_r": 0.09240385507425987
+    },
+    {
+      "channel_name": "TomMcCue",
+      "main_language": "en",
+      "episode_count": 96,
+      "total_hours": 241.4,
+      "circle_x": -0.6896956411665006,
+      "circle_y": 0.42262439361059073,
+      "circle_r": 0.09097839183864488
+    },
+    {
+      "channel_name": "Tammy Peterson",
+      "main_language": "en",
+      "episode_count": 587,
+      "total_hours": 236.0,
+      "circle_x": -0.7382770913128573,
+      "circle_y": 0.045163786932661126,
+      "circle_r": 0.0899638409951824
+    },
+    {
+      "channel_name": "JFG Tonight",
+      "main_language": "en",
+      "episode_count": 186,
+      "total_hours": 232.9,
+      "circle_x": -0.5668822016231286,
+      "circle_y": 0.662171706879318,
+      "circle_r": 0.08936869143012711
+    },
+    {
+      "channel_name": "The Tammy Peterson Podcast",
+      "main_language": "en",
+      "episode_count": 169,
+      "total_hours": 217.1,
+      "circle_x": -0.6886900863471659,
+      "circle_y": -0.2362687826905645,
+      "circle_r": 0.08628279620444723
+    },
+    {
+      "channel_name": "Libre M\u00e9dia",
+      "main_language": "fr",
+      "episode_count": 301,
+      "total_hours": 211.9,
+      "circle_x": -0.37052302120143976,
+      "circle_y": -0.5218799744844059,
+      "circle_r": 0.08522977029811651
+    },
+    {
+      "channel_name": "Elo Veut Savoir",
+      "main_language": "fr",
+      "episode_count": 241,
+      "total_hours": 204.4,
+      "circle_x": -0.8146682280054729,
+      "circle_y": 0.20114583035230102,
+      "circle_r": 0.08371978988163982
+    },
+    {
+      "channel_name": "Jordan B Peterson Clips",
+      "main_language": "en",
+      "episode_count": 1938,
+      "total_hours": 195.5,
+      "circle_x": -0.8038169525107162,
+      "circle_y": -0.11369238704950739,
+      "circle_r": 0.08188131435720898
+    },
+    {
+      "channel_name": "Amelie Paul",
+      "main_language": "fr",
+      "episode_count": 323,
+      "total_hours": 183.6,
+      "circle_x": -0.23113933206491183,
+      "circle_y": -0.6093988698578545,
+      "circle_r": 0.0793526401979534
+    },
+    {
+      "channel_name": "The Pleb \ud83c\udde8\ud83c\udde6 Reporter",
+      "main_language": "en",
+      "episode_count": 456,
+      "total_hours": 181.4,
+      "circle_x": -0.847717717145996,
+      "circle_y": 0.3603449230134563,
+      "circle_r": 0.07887362891686069
+    },
+    {
+      "channel_name": "Mikhaila Peterson",
+      "main_language": "en",
+      "episode_count": 723,
+      "total_hours": 166.4,
+      "circle_x": -0.7138618712802046,
+      "circle_y": 0.5873840026747148,
+      "circle_r": 0.07554408549361027
+    },
+    {
+      "channel_name": "We Unify",
+      "main_language": "en",
+      "episode_count": 411,
+      "total_hours": 151.9,
+      "circle_x": -0.898525444771084,
+      "circle_y": 0.06974518354807781,
+      "circle_r": 0.07215888981588271
+    },
+    {
+      "channel_name": "Roma Army",
+      "main_language": "en",
+      "episode_count": 1124,
+      "total_hours": 130.2,
+      "circle_x": -0.7030469820970413,
+      "circle_y": -0.3886900030141096,
+      "circle_r": 0.06681308506115517
+    },
+    {
+      "channel_name": "James Klug",
+      "main_language": "en",
+      "episode_count": 849,
+      "total_hours": 123.9,
+      "circle_x": -0.5179391604574918,
+      "circle_y": -0.5517043890192255,
+      "circle_r": 0.06517306815749388
+    },
+    {
+      "channel_name": "Ferryman47",
+      "main_language": "en",
+      "episode_count": 37,
+      "total_hours": 105.0,
+      "circle_x": -0.8340823795668595,
+      "circle_y": -0.252298316600495,
+      "circle_r": 0.05999045796408136
+    },
+    {
+      "channel_name": "postyX",
+      "main_language": "en",
+      "episode_count": 72,
+      "total_hours": 97.2,
+      "circle_x": -0.6367171187044445,
+      "circle_y": -0.4941037226287649,
+      "circle_r": 0.0577329026730054
+    },
+    {
+      "channel_name": "Endeavour",
+      "main_language": "en",
+      "episode_count": 97,
+      "total_hours": 96.5,
+      "circle_x": -0.9306514683539755,
+      "circle_y": -0.055878962441420696,
+      "circle_r": 0.05750801979038234
+    },
+    {
+      "channel_name": "Pour de Vrai",
+      "main_language": "fr",
+      "episode_count": 272,
+      "total_hours": 89.9,
+      "circle_x": 0.0702045620937677,
+      "circle_y": 0.5355090937348533,
+      "circle_r": 0.0555058638878682
+    },
+    {
+      "channel_name": "Grille Neurones",
+      "main_language": "fr",
+      "episode_count": 224,
+      "total_hours": 78.4,
+      "circle_x": -0.09993498455598894,
+      "circle_y": -0.608252076197885,
+      "circle_r": 0.05185671899924973
+    },
+    {
+      "channel_name": "Maxime Ouimet",
+      "main_language": "fr",
+      "episode_count": 359,
+      "total_hours": 66.5,
+      "circle_x": -0.8147761100162458,
+      "circle_y": 0.4825927010222837,
+      "circle_r": 0.0477346990413993
+    },
+    {
+      "channel_name": "Le Libre-Podcast",
+      "main_language": "fr",
+      "episode_count": 42,
+      "total_hours": 49.2,
+      "circle_x": 0.18838304581936177,
+      "circle_y": -0.07148958698252073,
+      "circle_r": 0.04108552968399023
+    },
+    {
+      "channel_name": "Julien Bournival",
+      "main_language": "fr",
+      "episode_count": 110,
+      "total_hours": 48.9,
+      "circle_x": 0.16661823532805867,
+      "circle_y": 0.5386709609055207,
+      "circle_r": 0.04095964181512173
+    },
+    {
+      "channel_name": "Le Lucide Podcast",
+      "main_language": "fr",
+      "episode_count": 40,
+      "total_hours": 46.2,
+      "circle_x": 0.20003875320532447,
+      "circle_y": -0.42615504221821693,
+      "circle_r": 0.039787787153116164
+    },
+    {
+      "channel_name": "LorennaMorena \ud83c\udf80",
+      "main_language": "en",
+      "episode_count": 58,
+      "total_hours": 40.8,
+      "circle_x": -0.7444466473092787,
+      "circle_y": 0.3065124877546595,
+      "circle_r": 0.03739468694013616
+    },
+    {
+      "channel_name": "Campagne Qu\u00e9bec-Vie",
+      "main_language": "fr",
+      "episode_count": 65,
+      "total_hours": 30.1,
+      "circle_x": -0.08875430942453792,
+      "circle_y": 0.06962738133032872,
+      "circle_r": 0.03214312718051655
+    },
+    {
+      "channel_name": "Lauren Southern",
+      "main_language": "en",
+      "episode_count": 56,
+      "total_hours": 28.5,
+      "circle_x": -0.3186566726691377,
+      "circle_y": -0.02147524226859853,
+      "circle_r": 0.03125991879298364
+    },
+    {
+      "channel_name": "CampaignLifeTV",
+      "main_language": "en",
+      "episode_count": 137,
+      "total_hours": 22.9,
+      "circle_x": -0.1043019263316867,
+      "circle_y": 0.3180608566200999,
+      "circle_r": 0.028029347124737543
+    },
+    {
+      "channel_name": "Action Vitale",
+      "main_language": "fr",
+      "episode_count": 92,
+      "total_hours": 21.7,
+      "circle_x": -0.4692429903794784,
+      "circle_y": 0.1237775034296764,
+      "circle_r": 0.02727833546481252
+    },
+    {
+      "channel_name": "m!lf & cougar podcast",
+      "main_language": "en",
+      "episode_count": 74,
+      "total_hours": 15.2,
+      "circle_x": -0.4548779288411668,
+      "circle_y": 0.2739632044781736,
+      "circle_r": 0.02280893808244499
+    },
+    {
+      "channel_name": "Lorenna \ud83c\udf80",
+      "main_language": "en",
+      "episode_count": 69,
+      "total_hours": 15.0,
+      "circle_x": -0.29275774010276573,
+      "circle_y": 0.39052963992114736,
+      "circle_r": 0.022684747549106373
+    },
+    {
+      "channel_name": "Amalega Francois",
+      "main_language": "fr",
+      "episode_count": 36,
+      "total_hours": 10.8,
+      "circle_x": -0.4054595076239896,
+      "circle_y": -0.2133982774364541,
+      "circle_r": 0.019242596101091566
+    },
+    {
+      "channel_name": "TheMarieOakes",
+      "main_language": "en",
+      "episode_count": 58,
+      "total_hours": 7.1,
+      "circle_x": -0.08324472945980665,
+      "circle_y": 0.11706155592521383,
+      "circle_r": 0.015609950111798528
+    },
+    {
+      "channel_name": "Elo Veut Savoir",
+      "main_language": "en",
+      "episode_count": 5,
+      "total_hours": 5.9,
+      "circle_x": -0.04744269309387153,
+      "circle_y": 0.04847980191297777,
+      "circle_r": 0.014266675222266243
+    },
+    {
+      "channel_name": "Billboard Chris",
+      "main_language": "en",
+      "episode_count": 42,
+      "total_hours": 4.5,
+      "circle_x": -0.27348991532096206,
+      "circle_y": -0.008449239042135579,
+      "circle_r": 0.012425716542579393
+    },
+    {
+      "channel_name": "Roxanne Labanane",
+      "main_language": "fr",
+      "episode_count": 27,
+      "total_hours": 3.3,
+      "circle_x": -0.13762602930504364,
+      "circle_y": 0.04478510110114141,
+      "circle_r": 0.010591325835427195
+    },
+    {
+      "channel_name": "Campagne Qu\u00e9bec-Vie (EN)",
+      "main_language": "en",
+      "episode_count": 3,
+      "total_hours": 1.3,
+      "circle_x": -0.253977522370935,
+      "circle_y": -0.0022003586633989923,
+      "circle_r": 0.006714065041973023
+    }
+  ],
+  "circle_pack_by_rate": [
+    {
+      "channel_name": "Roma Army",
+      "main_language": "en",
+      "total_hours": 130.2,
+      "flagged_segment_count": 896,
+      "segments_per_hour": 6.88,
+      "circle_x": 0.6673353561797742,
+      "circle_y": 0.3291509341744502,
+      "circle_r": 0.21415722281453456
+    },
+    {
+      "channel_name": "CampaignLifeTV",
+      "main_language": "en",
+      "total_hours": 22.9,
+      "flagged_segment_count": 134,
+      "segments_per_hour": 5.85,
+      "circle_x": 0.25570117007479476,
+      "circle_y": 0.3291509341744502,
+      "circle_r": 0.19747696329044487
+    },
+    {
+      "channel_name": "James Klug",
+      "main_language": "en",
+      "total_hours": 123.9,
+      "flagged_segment_count": 700,
+      "segments_per_hour": 5.65,
+      "circle_x": 0.44531394153037523,
+      "circle_y": 0.6717257944963604,
+      "circle_r": 0.19407193279233328
+    },
+    {
+      "channel_name": "m!lf & cougar podcast",
+      "main_language": "en",
+      "total_hours": 15.2,
+      "flagged_segment_count": 85,
+      "segments_per_hour": 5.6,
+      "circle_x": 0.4453488161671143,
+      "circle_y": -0.012420564535533606,
+      "circle_r": 0.19321129913797996
+    },
+    {
+      "channel_name": "Campagne Qu\u00e9bec-Vie",
+      "main_language": "fr",
+      "total_hours": 30.1,
+      "flagged_segment_count": 167,
+      "segments_per_hour": 5.54,
+      "circle_x": 0.05911750768890491,
+      "circle_y": 0.665576719709016,
+      "circle_r": 0.1921734511705164
+    },
+    {
+      "channel_name": "RadioQuebec",
+      "main_language": "fr",
+      "total_hours": 249.0,
+      "flagged_segment_count": 1083,
+      "segments_per_hour": 4.35,
+      "circle_x": 0.08226052765708605,
+      "circle_y": 0.0048530008171218525,
+      "circle_r": 0.1702876435195382
+    },
+    {
+      "channel_name": "Tammy Peterson",
+      "main_language": "en",
+      "total_hours": 236.0,
+      "flagged_segment_count": 912,
+      "segments_per_hour": 3.86,
+      "circle_x": -0.10147564479836584,
+      "circle_y": 0.35168961082312994,
+      "circle_r": 0.1604102661939411
+    },
+    {
+      "channel_name": "The Tammy Peterson Podcast",
+      "main_language": "en",
+      "total_hours": 217.1,
+      "flagged_segment_count": 759,
+      "segments_per_hour": 3.5,
+      "circle_x": -0.23450363873655777,
+      "circle_y": 0.06819183135777464,
+      "circle_r": 0.15274694373903602
+    },
+    {
+      "channel_name": "Elo Veut Savoir",
+      "main_language": "fr",
+      "total_hours": 204.4,
+      "flagged_segment_count": 712,
+      "segments_per_hour": 3.48,
+      "circle_x": -0.28053249427375365,
+      "circle_y": 0.6080732026522625,
+      "circle_r": 0.15230989865517558
+    },
+    {
+      "channel_name": "Endeavour",
+      "main_language": "en",
+      "total_hours": 96.5,
+      "flagged_segment_count": 292,
+      "segments_per_hour": 3.03,
+      "circle_x": -0.40130554142378033,
+      "circle_y": 0.311347197078294,
+      "circle_r": 0.14212151272716014
+    },
+    {
+      "channel_name": "En toute franchise",
+      "main_language": "fr",
+      "total_hours": 494.6,
+      "flagged_segment_count": 1413,
+      "segments_per_hour": 2.86,
+      "circle_x": -0.1414755771831594,
+      "circle_y": -0.20735195739797588,
+      "circle_r": 0.13807705760586053
+    },
+    {
+      "channel_name": "postyX",
+      "main_language": "en",
+      "total_hours": 97.2,
+      "flagged_segment_count": 271,
+      "segments_per_hour": 2.79,
+      "circle_x": 0.23138236992293892,
+      "circle_y": -0.26311300234524093,
+      "circle_r": 0.1363768354987745
+    },
+    {
+      "channel_name": "JFG Tonight",
+      "main_language": "en",
+      "total_hours": 232.9,
+      "flagged_segment_count": 632,
+      "segments_per_hour": 2.71,
+      "circle_x": -0.5215986183458634,
+      "circle_y": 0.06235360175286535,
+      "circle_r": 0.1344073914916672
+    },
+    {
+      "channel_name": "Grille Neurones",
+      "main_language": "fr",
+      "total_hours": 78.4,
+      "flagged_segment_count": 212,
+      "segments_per_hour": 2.7,
+      "circle_x": -0.41263061256910444,
+      "circle_y": -0.1831132515375553,
+      "circle_r": 0.1341591781838317
+    },
+    {
+      "channel_name": "La R\u00e9volution Culturelle avec Yann Roshdy",
+      "main_language": "fr",
+      "total_hours": 620.0,
+      "flagged_segment_count": 1615,
+      "segments_per_hour": 2.6,
+      "circle_x": 0.01779422513165953,
+      "circle_y": -0.42503641193504255,
+      "circle_r": 0.13165130886029658
+    },
+    {
+      "channel_name": "Jordan B Peterson",
+      "main_language": "en",
+      "total_hours": 779.6,
+      "flagged_segment_count": 1876,
+      "segments_per_hour": 2.41,
+      "circle_x": -0.3008414367223658,
+      "circle_y": -0.4188602267840988,
+      "circle_r": 0.1267497257929918
+    },
+    {
+      "channel_name": "Theovox tv",
+      "main_language": "fr",
+      "total_hours": 402.4,
+      "flagged_segment_count": 969,
+      "segments_per_hour": 2.41,
+      "circle_x": 0.4859183073139593,
+      "circle_y": -0.32979916158165484,
+      "circle_r": 0.1267497257929918
+    },
+    {
+      "channel_name": "The Jordan B. Peterson Podcast",
+      "main_language": "en",
+      "total_hours": 805.0,
+      "flagged_segment_count": 1872,
+      "segments_per_hour": 2.33,
+      "circle_x": 0.2545759409251778,
+      "circle_y": -0.5230855173521354,
+      "circle_r": 0.12462824164503443
+    },
+    {
+      "channel_name": "Jordan B Peterson Clips",
+      "main_language": "en",
+      "total_hours": 195.5,
+      "flagged_segment_count": 454,
+      "segments_per_hour": 2.32,
+      "circle_x": 0.7624812276202036,
+      "circle_y": 0.004279390962647232,
+      "circle_r": 0.12436051149339931
+    },
+    {
+      "channel_name": "Rebel News",
+      "main_language": "en",
+      "total_hours": 3989.6,
+      "flagged_segment_count": 8975,
+      "segments_per_hour": 2.25,
+      "circle_x": 0.7178022232212892,
+      "circle_y": -0.23847376495205172,
+      "circle_r": 0.12247001364606595
+    },
+    {
+      "channel_name": "Mikhaila Peterson",
+      "main_language": "en",
+      "total_hours": 166.4,
+      "flagged_segment_count": 369,
+      "segments_per_hour": 2.22,
+      "circle_x": -0.14913514114949425,
+      "circle_y": -0.6155529429517342,
+      "circle_r": 0.121650807036238
+    },
+    {
+      "channel_name": "Libre M\u00e9dia",
+      "main_language": "fr",
+      "total_hours": 211.9,
+      "flagged_segment_count": 456,
+      "segments_per_hour": 2.15,
+      "circle_x": 0.4930874254129713,
+      "circle_y": -0.5761621264436425,
+      "circle_r": 0.11971752702146703
+    },
+    {
+      "channel_name": "JeremyMacKenzie",
+      "main_language": "en",
+      "total_hours": 1632.7,
+      "flagged_segment_count": 3418,
+      "segments_per_hour": 2.09,
+      "circle_x": 0.07862944000867823,
+      "circle_y": -0.6902034075824811,
+      "circle_r": 0.11803522989487737
+    },
+    {
+      "channel_name": "The Pleb \ud83c\udde8\ud83c\udde6 Reporter",
+      "main_language": "en",
+      "total_hours": 181.4,
+      "flagged_segment_count": 364,
+      "segments_per_hour": 2.01,
+      "circle_x": 0.7063931309466762,
+      "circle_y": -0.47642455901985065,
+      "circle_r": 0.11575414084718973
+    },
+    {
+      "channel_name": "Lauren Southern",
+      "main_language": "en",
+      "total_hours": 28.5,
+      "flagged_segment_count": 54,
+      "segments_per_hour": 1.89,
+      "circle_x": 0.334981298659315,
+      "circle_y": -0.7458953140989556,
+      "circle_r": 0.11224562157907438
+    },
+    {
+      "channel_name": "TomMcCue",
+      "main_language": "en",
+      "total_hours": 241.4,
+      "flagged_segment_count": 437,
+      "segments_per_hour": 1.81,
+      "circle_x": -0.5360814019373555,
+      "circle_y": -0.39358328069912657,
+      "circle_r": 0.10984436804227724
+    },
+    {
+      "channel_name": "Le Libre-Podcast",
+      "main_language": "fr",
+      "total_hours": 49.2,
+      "flagged_segment_count": 79,
+      "segments_per_hour": 1.6,
+      "circle_x": -0.3730107569264198,
+      "circle_y": -0.6372711334604484,
+      "circle_r": 0.10327578351825892
+    },
+    {
+      "channel_name": "Ferryman47",
+      "main_language": "en",
+      "total_hours": 105.0,
+      "flagged_segment_count": 165,
+      "segments_per_hour": 1.57,
+      "circle_x": -0.6450568357106836,
+      "circle_y": -0.1396114298362095,
+      "circle_r": 0.10230299150763242
+    },
+    {
+      "channel_name": "Samuel Grenier",
+      "main_language": "fr",
+      "total_hours": 968.3,
+      "flagged_segment_count": 1428,
+      "segments_per_hour": 1.47,
+      "circle_x": -0.08913663371304378,
+      "circle_y": -0.8278808339106448,
+      "circle_r": 0.09899133348469866
+    },
+    {
+      "channel_name": "Ian et Frank",
+      "main_language": "fr",
+      "total_hours": 2036.7,
+      "flagged_segment_count": 2867,
+      "segments_per_hour": 1.41,
+      "circle_x": 0.17600536479797174,
+      "circle_y": -0.8818713557357428,
+      "circle_r": 0.0969500558291726
+    },
+    {
+      "channel_name": "RadioPirate",
+      "main_language": "fr",
+      "total_hours": 1522.8,
+      "flagged_segment_count": 2138,
+      "segments_per_hour": 1.4,
+      "circle_x": -0.5688775792251831,
+      "circle_y": -0.597411690218011,
+      "circle_r": 0.09660564956898998
+    },
+    {
+      "channel_name": "Amelie Paul",
+      "main_language": "fr",
+      "total_hours": 183.6,
+      "flagged_segment_count": 257,
+      "segments_per_hour": 1.4,
+      "circle_x": -0.2843985660649258,
+      "circle_y": -0.8164371651844853,
+      "circle_r": 0.09660564956898998
+    },
+    {
+      "channel_name": "We Unify",
+      "main_language": "en",
+      "total_hours": 151.9,
+      "flagged_segment_count": 198,
+      "segments_per_hour": 1.3,
+      "circle_x": -0.6312193320042693,
+      "circle_y": 0.26170018410220686,
+      "circle_r": 0.09309153324720032
+    },
+    {
+      "channel_name": "Amalega Francois",
+      "main_language": "fr",
+      "total_hours": 10.8,
+      "flagged_segment_count": 13,
+      "segments_per_hour": 1.2,
+      "circle_x": -0.7197334604316954,
+      "circle_y": -0.31621427921739204,
+      "circle_r": 0.08943945212255444
+    },
+    {
+      "channel_name": "Lux M\u00e9dia",
+      "main_language": "fr",
+      "total_hours": 973.0,
+      "flagged_segment_count": 1063,
+      "segments_per_hour": 1.09,
+      "circle_x": -0.7377685862448036,
+      "circle_y": 0.023414694251027043,
+      "circle_r": 0.08524163204102575
+    },
+    {
+      "channel_name": "Viva Frei",
+      "main_language": "en",
+      "total_hours": 2572.4,
+      "flagged_segment_count": 2605,
+      "segments_per_hour": 1.01,
+      "circle_x": -0.5072092850123562,
+      "circle_y": -0.7650907105669766,
+      "circle_r": 0.08205389363066272
+    },
+    {
+      "channel_name": "Action Vitale",
+      "main_language": "fr",
+      "total_hours": 21.7,
+      "flagged_segment_count": 22,
+      "segments_per_hour": 1.01,
+      "circle_x": -0.7096581516536443,
+      "circle_y": -0.48741140475009326,
+      "circle_r": 0.08205389363066272
+    },
+    {
+      "channel_name": "Pour de Vrai",
+      "main_language": "fr",
+      "total_hours": 89.9,
+      "flagged_segment_count": 87,
+      "segments_per_hour": 0.97,
+      "circle_x": -0.8229483417358885,
+      "circle_y": -0.1813201545904665,
+      "circle_r": 0.08041264995894214
+    },
+    {
+      "channel_name": "Le Lucide Podcast",
+      "main_language": "fr",
+      "total_hours": 46.2,
+      "flagged_segment_count": 43,
+      "segments_per_hour": 0.93,
+      "circle_x": -0.5887248527866311,
+      "circle_y": 0.42819142630003787,
+      "circle_r": 0.07873720268644677
+    },
+    {
+      "channel_name": "Maxime Ouimet",
+      "main_language": "fr",
+      "total_hours": 66.5,
+      "flagged_segment_count": 58,
+      "segments_per_hour": 0.87,
+      "circle_x": -0.7791211813141113,
+      "circle_y": 0.17942373039480114,
+      "circle_r": 0.07615494932758779
+    },
+    {
+      "channel_name": "Prends Un Break",
+      "main_language": "fr",
+      "total_hours": 613.6,
+      "flagged_segment_count": 419,
+      "segments_per_hour": 0.68,
+      "circle_x": -0.48691508907386905,
+      "circle_y": 0.5329277184506523,
+      "circle_r": 0.06732757363114215
+    },
+    {
+      "channel_name": "mistersunshinebaby",
+      "main_language": "en",
+      "total_hours": 509.0,
+      "flagged_segment_count": 338,
+      "segments_per_hour": 0.66,
+      "circle_x": -0.8737037710538579,
+      "circle_y": -0.04363459571806283,
+      "circle_r": 0.06633007295179533
+    },
+    {
+      "channel_name": "Julien Bournival",
+      "main_language": "fr",
+      "total_hours": 48.9,
+      "flagged_segment_count": 13,
+      "segments_per_hour": 0.27,
+      "circle_x": 0.038983299671265716,
+      "circle_y": -0.20341050895717966,
+      "circle_r": 0.042424857207728
+    }
+  ],
+  "flagged_segment_count": 41086
+}

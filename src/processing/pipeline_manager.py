@@ -996,6 +996,14 @@ class PipelineManager:
         existing_task = existing_task_query.first()
 
         if existing_task and existing_task.status == TASK_STATUS_FAILED:
+            # Check if this was a permanent failure - don't reset those
+            task_result = existing_task.result or {}
+            if task_result.get('permanent', False):
+                error_code = task_result.get('error_code', 'unknown')
+                logger.info(f"Not resetting permanently failed task {existing_task.id} ({task_type}) for {content_id} "
+                           f"(error_code: {error_code})")
+                return None, f"Task permanently failed with {error_code}"
+
             # Reset failed task to pending for retry
             existing_task.status = TASK_STATUS_PENDING
             existing_task.error = None

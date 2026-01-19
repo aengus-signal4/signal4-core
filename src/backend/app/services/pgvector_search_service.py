@@ -2,46 +2,65 @@
 PostgreSQL pgvector Search Service
 ===================================
 
-PostgreSQL pgvector-based semantic search using cache tables.
-Uses HNSW indexes for fast similarity search on cached embeddings.
+PostgreSQL pgvector-based semantic search using per-project HNSW indexes.
 
-Cache tables (each has both embedding columns):
+Architecture:
+- Each project has its own partial HNSW index for fast (~8ms) queries
+- Queries with multiple projects run against each project's index separately
+- Results are combined, deduplicated, and returned sorted by similarity
+
+Cache tables:
 - embedding_cache_7d: Hot cache (hourly refresh) for recent content (≤7 days)
-- embedding_cache_30d: Main cache (6-hour refresh, incremental updates) for all queries (8+ days)
+- embedding_cache_30d: Main cache (6-hour refresh) for all queries (8+ days)
 
-Embedding columns:
-- embedding: vector(1024) - 0.6B model embeddings
-- embedding_alt: vector(2000) - 4B model embeddings (higher quality, truncated from 2560)
+Embedding model:
+- embedding: vector(1024) - Qwen 0.6B model (only model used)
+
+Per-project HNSW indexes (on both 7d and 30d tables):
+- embedding_cache_Xd_hnsw_canadian
+- embedding_cache_Xd_hnsw_big_channels
+- embedding_cache_Xd_hnsw_health
+- embedding_cache_Xd_hnsw_finance
+- embedding_cache_Xd_hnsw_europe
+- embedding_cache_Xd_hnsw_cprmv
+- embedding_cache_Xd_hnsw_anglosphere
 
 HNSW Index Settings:
 - m=16, ef_construction=64 (build-time parameters)
 - hnsw.ef_search=100 (query-time parameter, set per-connection)
 
-Refresh Strategy (incremental, not truncate+rebuild):
-- DELETE aged rows (publish_date outside window)
-- INSERT new rows from content.last_updated >= 12 hours
-- ON CONFLICT (id) DO NOTHING
-- Typical refresh: ~50ms (no changes) to ~3-4min (with new content)
+Query Strategy:
+1. For each project in allowed_projects, query its partial index
+2. Each query uses pure HNSW nearest-neighbor (~8ms) - no filter overhead
+3. Combine results, deduplicate by segment_id (keep best similarity)
+4. Apply threshold filter in Python
+5. Return sorted results
 """
 
 import logging
 import time
 import psycopg2
-from psycopg2.extras import execute_values, RealDictCursor
-from typing import List, Dict, Any, Optional
+from psycopg2.extras import RealDictCursor
+from typing import List, Dict, Any, Optional, Set
 from datetime import datetime, timedelta
 
 # Setup logger
 import sys
 from pathlib import Path
-from src.utils.paths import get_project_root, get_config_path
+from src.utils.paths import get_project_root
 sys.path.insert(0, str(get_project_root()))
 from src.utils.logger import setup_worker_logger
 logger = setup_worker_logger("backend.pgvector_search")
 
+# Projects that have per-project HNSW indexes
+INDEXED_PROJECTS = {
+    'Canadian', 'Big_Channels', 'Health', 'Finance',
+    'Europe', 'CPRMV', 'Anglosphere'
+}
+
 
 class PgVectorSearchService:
-    """PostgreSQL pgvector-based semantic search service"""
+    """PostgreSQL pgvector-based semantic search service using per-project indexes"""
 
     def __init__(self, dashboard_id: str, config):
         """
@@ -49,26 +68,52 @@ class PgVectorSearchService:
 
         Args:
             dashboard_id: Dashboard identifier
-            config: DashboardConfig object
+            config: DashboardConfig object with allowed_projects
         """
         self.dashboard_id = dashboard_id
         self.config = config
 
         # PostgreSQL connection parameters
-        self.db_config = {
-            'host': '10.0.0.4',
-            'database': 'av_content',
-            'user': 'signal4',
-            'password': 'signal4'
-        }
+        from src.backend.app.config.database import get_db_config
+        self.db_config = get_db_config()
 
-        logger.info(f"PgVectorSearchService initialized for {dashboard_id} (project: {config.project})")
+        # Determine which projects to query
+        self.query_projects = self._get_query_projects()
+
+        logger.info(
+            f"PgVectorSearchService initialized for {dashboard_id} "
+            f"(projects: {self.query_projects})"
+        )
+
+    def _get_query_projects(self) -> List[str]:
+        """
+        Get list of projects to query based on config.
+
+        Returns:
+            List of project names that have HNSW indexes
+        """
+        if not self.config.allowed_projects:
+            # No filter = query all indexed projects
+            return list(INDEXED_PROJECTS)
+
+        # Filter to only projects that have indexes
+        projects = [p for p in self.config.allowed_projects if p in INDEXED_PROJECTS]
+
+        if not projects:
+            logger.warning(
+                f"No indexed projects found in allowed_projects: {self.config.allowed_projects}. "
+                f"Available: {INDEXED_PROJECTS}"
+            )
+            # Fallback to querying all
+            return list(INDEXED_PROJECTS)
+
+        return projects
 
     def _get_connection(self):
         """Get PostgreSQL connection"""
         return psycopg2.connect(**self.db_config)
 
-    def _select_view(self, time_window_days: int) -> str:
+    def _select_table(self, time_window_days: int) -> str:
         """
         Select appropriate cache table based on time window
 
@@ -77,57 +122,188 @@ class PgVectorSearchService:
 
         Returns:
             Table name to query
-
-        Selection strategy:
-        - ≤7 days: Use 7d cache (hourly refresh, freshest data)
-        - 8+ days: Use 30d cache (6-hour refresh, incremental updates)
-
-        Note: 180d cache was removed - 30d cache now covers all longer windows.
-        For queries beyond 30 days, the date filter in the WHERE clause handles it.
         """
         if time_window_days <= 7:
             return 'embedding_cache_7d'
         else:
             return 'embedding_cache_30d'
 
-    def _get_embedding_column(self, use_alt_model: bool = False) -> str:
+    def _get_index_name(self, table: str, project: str) -> str:
         """
-        Get the embedding column name based on model type
+        Get the HNSW index name for a project
 
         Args:
-            use_alt_model: Whether to use alt embeddings (4B model)
+            table: Cache table name (embedding_cache_7d or embedding_cache_30d)
+            project: Project name
 
         Returns:
-            Column name: 'embedding' (1024-dim, 0.6B) or 'embedding_alt' (2000-dim, 4B)
+            Index name like 'embedding_cache_30d_hnsw_canadian'
         """
-        return 'embedding_alt' if use_alt_model else 'embedding'
+        return f"{table}_hnsw_{project.lower()}"
 
-    def _build_where_clause(self, filters: Dict[str, Any], time_window_days: int = None) -> tuple:
+    def search(
+        self,
+        query_embedding,
+        time_window_days: int = 7,
+        k: int = 200,
+        threshold: float = 0.43,
+        must_contain: List[str] = None,
+        must_contain_any: List[str] = None,
+        **filters
+    ) -> List[Dict]:
         """
-        Build WHERE clause and parameters from filters
+        Semantic search using per-project HNSW indexes.
+
+        Queries each project's index separately for fast (~8ms each) results,
+        then combines and deduplicates.
 
         Args:
-            filters: Dictionary of filter conditions
-            time_window_days: Time window in days (adds date filter automatically)
+            query_embedding: Query embedding vector (numpy array, 1024-dim)
+            time_window_days: Time window in days (7 or 30)
+            k: Number of results per project (final results may be more after combining)
+            threshold: Similarity threshold (0.0-1.0)
+            must_contain: List of keywords that ALL must appear in text (AND logic)
+            must_contain_any: List of keywords where AT LEAST ONE must appear (OR logic)
+            **filters: Additional filters (filter_speakers, filter_content_ids, etc.)
 
         Returns:
-            (where_clause_string, parameters_list)
+            List of result dictionaries with segment info and similarity scores,
+            sorted by similarity descending
+        """
+        start_time = time.time()
+
+        table = self._select_table(time_window_days)
+        projects = self.query_projects
+
+        # Convert embedding to PostgreSQL format
+        embedding_list = query_embedding.flatten().tolist()
+        embedding_str = '[' + ','.join(map(str, embedding_list)) + ']'
+
+        # Build additional WHERE conditions (excluding project filter)
+        extra_conditions, extra_params = self._build_extra_conditions(
+            filters, time_window_days, must_contain, must_contain_any
+        )
+
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute("SET hnsw.ef_search = 100;")
+
+            # Query each project's index and collect results
+            all_results: Dict[int, Dict] = {}  # segment_id -> best result
+            query_times = []
+
+            for project in projects:
+                index_name = self._get_index_name(table, project)
+
+                # Build query with index hint
+                # The WHERE clause with project filter makes PostgreSQL use the partial index
+                query = f"""
+                SELECT
+                    id as segment_id,
+                    1 - (embedding <=> %s::vector) as similarity,
+                    content_id,
+                    content_id_string,
+                    channel_url,
+                    channel_name,
+                    title,
+                    publish_date,
+                    text,
+                    start_time,
+                    end_time,
+                    source_speaker_hashes as speaker_hashes,
+                    segment_index,
+                    stitch_version
+                FROM {table}
+                WHERE projects && ARRAY[%s]::varchar[]
+                  {extra_conditions}
+                ORDER BY embedding <=> %s::vector
+                LIMIT %s;
+                """
+
+                query_start = time.time()
+                params = [embedding_str, project] + extra_params + [embedding_str, k]
+                cursor.execute(query, params)
+                results = cursor.fetchall()
+                query_time = (time.time() - query_start) * 1000
+                query_times.append((project, query_time, len(results)))
+
+                # Merge results, keeping best similarity per segment
+                for row in results:
+                    seg_id = row['segment_id']
+                    similarity = float(row['similarity'])
+
+                    if seg_id not in all_results or similarity > all_results[seg_id]['similarity']:
+                        # Format the result
+                        publish_date = row['publish_date']
+                        if publish_date and hasattr(publish_date, 'isoformat'):
+                            publish_date = publish_date.isoformat()
+
+                        all_results[seg_id] = {
+                            'segment_id': seg_id,
+                            'similarity': similarity,
+                            'content_id': row['content_id'],
+                            'content_id_string': row['content_id_string'],
+                            'channel_url': row['channel_url'],
+                            'channel_name': row['channel_name'],
+                            'title': row['title'],
+                            'publish_date': publish_date,
+                            'text': row['text'],
+                            'start_time': float(row['start_time']),
+                            'end_time': float(row['end_time']),
+                            'speaker_hashes': row['speaker_hashes'] or [],
+                            'segment_index': row['segment_index'],
+                            'stitch_version': row['stitch_version']
+                        }
+
+            cursor.close()
+
+            # Apply threshold filter and sort by similarity
+            formatted = [
+                r for r in all_results.values()
+                if r['similarity'] >= threshold
+            ]
+            formatted.sort(key=lambda x: x['similarity'], reverse=True)
+
+            total_time = (time.time() - start_time) * 1000
+            total_query_time = sum(qt[1] for qt in query_times)
+
+            logger.info(
+                f"[{self.dashboard_id}] pgvector search: {len(formatted)} results "
+                f"(threshold={threshold}) in {total_time:.0f}ms "
+                f"(queries={total_query_time:.0f}ms across {len(projects)} projects, "
+                f"table={table})"
+            )
+            for proj, qt, count in query_times:
+                logger.debug(f"  {proj}: {qt:.0f}ms, {count} results")
+
+            return formatted
+
+        finally:
+            conn.close()
+
+    def _build_extra_conditions(
+        self,
+        filters: Dict[str, Any],
+        time_window_days: int,
+        must_contain: List[str] = None,
+        must_contain_any: List[str] = None
+    ) -> tuple:
+        """
+        Build additional WHERE conditions (excluding project filter).
+
+        Returns:
+            (conditions_string, params_list) - conditions string starts with AND if non-empty
         """
         conditions = []
         params = []
 
-        # Project filter (required)
-        if self.config.allowed_projects:
-            # Projects is an array column (varchar[]), use && (array overlap) operator
-            conditions.append("projects && %s::varchar[]")
-            params.append(self.config.allowed_projects)
-
-        # Automatic date filter based on time window (if not using 7-day hot cache)
-        if time_window_days and time_window_days > 7 and 'date_from' not in filters:
+        # Date filter for 30d table
+        if time_window_days > 7 and 'date_from' not in filters:
             conditions.append("publish_date >= NOW() - INTERVAL '%s days'")
             params.append(time_window_days)
 
-        # Date range filter (for custom time windows)
+        # Custom date range
         if 'date_from' in filters:
             conditions.append("publish_date >= %s")
             params.append(filters['date_from'])
@@ -137,466 +313,147 @@ class PgVectorSearchService:
             params.append(filters['date_to'])
 
         # Content ID filter
-        if 'filter_content_ids' in filters and filters['filter_content_ids']:
-            conditions.append(f"content_id = ANY(%s::int[])")
+        if filters.get('filter_content_ids'):
+            conditions.append("content_id = ANY(%s::int[])")
             params.append(filters['filter_content_ids'])
 
-        # Speaker filter (check array overlap)
-        if 'filter_speakers' in filters and filters['filter_speakers']:
-            conditions.append(f"source_speaker_hashes && %s::text[]")
+        # Speaker filter
+        if filters.get('filter_speakers'):
+            conditions.append("source_speaker_hashes && %s::text[]")
             params.append(filters['filter_speakers'])
 
         # Stitch version filter
-        if 'filter_stitch_versions' in filters and filters['filter_stitch_versions']:
-            conditions.append(f"stitch_version = ANY(%s::text[])")
+        if filters.get('filter_stitch_versions'):
+            conditions.append("stitch_version = ANY(%s::text[])")
             params.append(filters['filter_stitch_versions'])
 
-        where_clause = " AND ".join(conditions) if conditions else "1=1"
-        return where_clause, params
+        # Keyword filters
+        if must_contain:
+            for kw in must_contain:
+                conditions.append("text ILIKE %s")
+                params.append(f'%{kw}%')
 
-    def search(self, query_embedding, time_window_days: int = 7,
-               k: int = 200, threshold: float = 0.43,
-               use_alt_model: bool = False,
-               **filters) -> List[Dict]:
+        if must_contain_any:
+            or_conditions = " OR ".join(["text ILIKE %s"] * len(must_contain_any))
+            conditions.append(f"({or_conditions})")
+            params.extend([f'%{kw}%' for kw in must_contain_any])
+
+        if conditions:
+            return "AND " + " AND ".join(conditions), params
+        return "", []
+
+    def batch_search(
+        self,
+        query_embeddings: List,
+        time_window_days: int = 7,
+        k: int = 200,
+        threshold: float = 0.43,
+        **filters
+    ) -> List[List[Dict]]:
         """
-        Semantic search using pgvector
+        Batch semantic search (multiple queries).
 
-        Args:
-            query_embedding: Query embedding vector (numpy array)
-            time_window_days: Time window in days (7, 30, 180)
-            k: Number of results
-            threshold: Similarity threshold (0.0-1.0)
-            use_alt_model: Use alt embedding model
-            **filters: Additional filters (filter_speakers, filter_content_ids, etc.)
-
-        Returns:
-            List of result dictionaries with segment info and similarity scores
-        """
-        start_time = time.time()
-
-        # Select table and embedding column
-        view_name = self._select_view(time_window_days)
-        use_alt = use_alt_model or self.config.use_alt_embeddings
-        emb_col = self._get_embedding_column(use_alt)
-
-        # Build WHERE clause with automatic date filtering
-        where_clause, params = self._build_where_clause(filters, time_window_days)
-
-        # Convert embedding to PostgreSQL format
-        embedding_list = query_embedding.flatten().tolist()
-        embedding_str = '[' + ','.join(map(str, embedding_list)) + ']'
-
-        # Calculate max distance from similarity threshold
-        # pgvector cosine distance: 0 = identical, 2 = opposite
-        # Our similarity: 1.0 = identical, 0.0 = orthogonal
-        # Conversion: distance = 1 - similarity, so max_distance = 1 - threshold
-        max_distance = 1.0 - threshold
-
-        # Build query - use dynamic embedding column
-        query = f"""
-        SELECT
-            id as segment_id,
-            1 - ({emb_col} <=> %s::vector) as similarity,
-            content_id,
-            content_id_string,
-            channel_name,
-            title,
-            publish_date,
-            text,
-            start_time,
-            end_time,
-            source_speaker_hashes as speaker_hashes,
-            segment_index,
-            stitch_version
-        FROM {view_name}
-        WHERE {where_clause}
-          AND ({emb_col} <=> %s::vector) < %s
-        ORDER BY {emb_col} <=> %s::vector
-        LIMIT %s;
-        """
-
-        # Execute query
-        conn = self._get_connection()
-        try:
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
-
-            # Set HNSW ef_search (affects speed/accuracy tradeoff)
-            # Higher values = better recall but slower queries
-            cursor.execute("SET hnsw.ef_search = 100;")
-
-            # Execute search
-            search_start = time.time()
-            query_params = [embedding_str] + params + [embedding_str, max_distance, embedding_str, k]
-            cursor.execute(query, query_params)
-            results = cursor.fetchall()
-            search_time = (time.time() - search_start) * 1000
-
-            # Format results
-            formatted = []
-            for row in results:
-                # Convert publish_date to ISO string if datetime
-                publish_date = row['publish_date']
-                if publish_date and hasattr(publish_date, 'isoformat'):
-                    publish_date = publish_date.isoformat()
-
-                formatted.append({
-                    'segment_id': row['segment_id'],
-                    'similarity': float(row['similarity']),
-                    'content_id': row['content_id'],
-                    'content_id_string': row['content_id_string'],
-                    'channel_url': None,  # Not available in materialized views
-                    'channel_name': row['channel_name'],
-                    'title': row['title'],
-                    'publish_date': publish_date,
-                    'text': row['text'],
-                    'start_time': float(row['start_time']),
-                    'end_time': float(row['end_time']),
-                    'speaker_hashes': row['speaker_hashes'] or [],
-                    'segment_index': row['segment_index'],
-                    'stitch_version': row['stitch_version']
-                })
-
-            cursor.close()
-
-            total_time = (time.time() - start_time) * 1000
-            logger.info(
-                f"[{self.dashboard_id}] pgvector search: {len(formatted)} results in {total_time:.0f}ms "
-                f"(query={search_time:.0f}ms, table={view_name}, col={emb_col}, threshold={threshold})"
-            )
-
-            return formatted
-
-        finally:
-            conn.close()
-
-    def batch_search(self, query_embeddings: List, time_window_days: int = 7,
-                     k: int = 200, threshold: float = 0.43,
-                     use_alt_model: bool = False,
-                     **filters) -> List[List[Dict]]:
-        """
-        Batch semantic search (multiple queries in parallel)
+        Each query is run using the per-project index strategy.
 
         Args:
             query_embeddings: List of query embedding vectors
             time_window_days: Time window in days
             k: Number of results per query
             threshold: Similarity threshold
-            use_alt_model: Use alt embedding model
             **filters: Additional filters
 
         Returns:
             List of result lists (one per query)
         """
-        start_time = time.time()
-
-        if not query_embeddings:
-            return []
-
-        # Select table and embedding column
-        view_name = self._select_view(time_window_days)
-        use_alt = use_alt_model or self.config.use_alt_embeddings
-        emb_col = self._get_embedding_column(use_alt)
-
-        # Build WHERE clause with automatic date filtering
-        where_clause, params = self._build_where_clause(filters, time_window_days)
-
-        # Convert threshold
-        max_distance = 1.0 - threshold
-
-        logger.info(f"[{self.dashboard_id}] batch_search: table={view_name}, col={emb_col}, where_clause='{where_clause}', params={params}, max_distance={max_distance}, k={k}, num_queries={len(query_embeddings)}")
-
-        # Build batch query
-        conn = self._get_connection()
-        try:
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
-
-            # Set HNSW ef_search for better recall
-            cursor.execute("SET hnsw.ef_search = 100;")
-
-            all_results = []
-
-            # Execute each query - use dynamic embedding column
-            query_template = f"""
-            SELECT
-                id as segment_id,
-                1 - ({emb_col} <=> %s::vector) as similarity,
-                content_id,
-                content_id_string,
-                channel_name,
-                title,
-                publish_date,
-                text,
-                start_time,
-                end_time,
-                source_speaker_hashes as speaker_hashes,
-                segment_index,
-                stitch_version,
-                {emb_col} as embedding
-            FROM {view_name}
-            WHERE {where_clause}
-              AND ({emb_col} <=> %s::vector) < %s
-            ORDER BY {emb_col} <=> %s::vector
-            LIMIT %s;
-            """
-
-            batch_start = time.time()
-            for i, emb in enumerate(query_embeddings):
-                embedding_list = emb.flatten().tolist()
-                embedding_str = '[' + ','.join(map(str, embedding_list)) + ']'
-
-                if i == 0:
-                    logger.info(f"[{self.dashboard_id}] First query embedding: dim={len(embedding_list)}, first_vals={embedding_list[:5]}")
-
-                query_params = [embedding_str] + params + [embedding_str, max_distance, embedding_str, k]
-                cursor.execute(query_template, query_params)
-                results = cursor.fetchall()
-
-                logger.debug(f"[{self.dashboard_id}]   Query {i+1} returned {len(results)} raw results")
-
-                # Format results for this query
-                formatted = []
-                for row in results:
-                    publish_date = row['publish_date']
-                    if publish_date and hasattr(publish_date, 'isoformat'):
-                        publish_date = publish_date.isoformat()
-
-                    # Parse embedding from pgvector string format to numpy array
-                    # Store as _embedding (transient, not for caching/frontend)
-                    embedding = None
-                    if row.get('embedding'):
-                        import numpy as np
-                        # pgvector returns embedding as string like "[0.1,0.2,...]"
-                        emb_str = row['embedding']
-                        if isinstance(emb_str, str):
-                            emb_str = emb_str.strip('[]')
-                            embedding = np.array([float(x) for x in emb_str.split(',')])
-                        else:
-                            embedding = np.array(emb_str)
-
-                    formatted.append({
-                        'segment_id': row['segment_id'],
-                        'similarity': float(row['similarity']),
-                        'content_id': row['content_id'],
-                        'content_id_string': row['content_id_string'],
-                        'channel_url': None,  # Not available in materialized views
-                        'channel_name': row['channel_name'],
-                        'title': row['title'],
-                        'publish_date': publish_date,
-                        'text': row['text'],
-                        'start_time': float(row['start_time']),
-                        'end_time': float(row['end_time']),
-                        'speaker_hashes': row['speaker_hashes'] or [],
-                        'segment_index': row['segment_index'],
-                        'stitch_version': row['stitch_version'],
-                        '_embedding': embedding  # Transient: NOT for caching/frontend, stripped before response
-                    })
-
-                all_results.append(formatted)
-
-            batch_time = (time.time() - batch_start) * 1000
-            cursor.close()
-
-            total_time = (time.time() - start_time) * 1000
-            total_results = sum(len(r) for r in all_results)
-            logger.info(
-                f"[{self.dashboard_id}] pgvector batch_search: {total_results} results from {len(query_embeddings)} queries "
-                f"in {total_time:.0f}ms (queries={batch_time:.0f}ms, table={view_name}, col={emb_col})"
+        return [
+            self.search(
+                query_embedding=emb,
+                time_window_days=time_window_days,
+                k=k,
+                threshold=threshold,
+                **filters
             )
+            for emb in query_embeddings
+        ]
 
-            return all_results
-
-        finally:
-            conn.close()
-
-    def batch_search_unified(self, query_embeddings: List, time_window_days: int = 7,
-                             k: int = None, threshold: float = 0.43,
-                             use_alt_model: bool = False,
-                             **filters) -> List[Dict]:
+    def batch_search_unified(
+        self,
+        query_embeddings: List,
+        time_window_days: int = 7,
+        k: int = None,
+        threshold: float = 0.43,
+        must_contain: List[str] = None,
+        must_contain_any: List[str] = None,
+        **filters
+    ) -> List[Dict]:
         """
-        Unified batch search - single query for multiple embeddings with deduplication.
+        Unified batch search - combines results from multiple query embeddings.
 
-        Returns ALL segments that match ANY of the query embeddings within threshold.
-        Each segment appears only once with its best (highest) similarity score.
-
-        This is more efficient than batch_search when you want a combined result set
-        because it:
-        1. Executes a single database query instead of N queries
-        2. Automatically deduplicates segments that match multiple queries
-        3. Reduces network round-trips
+        Returns segments that match ANY of the query embeddings above threshold,
+        deduplicated by segment_id (keeping best similarity).
 
         Args:
             query_embeddings: List of query embedding vectors
             time_window_days: Time window in days
-            k: Optional max results (safety cap, default None = no limit)
-            threshold: Similarity threshold (segment must match at least one query above this)
-            use_alt_model: Use alt embedding model
+            k: Optional max total results
+            threshold: Similarity threshold
+            must_contain: Keywords that ALL must appear (AND logic)
+            must_contain_any: Keywords where AT LEAST ONE must appear (OR logic)
             **filters: Additional filters
 
         Returns:
-            Single list of unique segments above threshold, sorted by best similarity
+            Single list of unique segments sorted by best similarity
         """
-        import numpy as np
         start_time = time.time()
 
         if not query_embeddings:
             return []
 
-        # Select table and embedding column
-        view_name = self._select_view(time_window_days)
-        use_alt = use_alt_model or self.config.use_alt_embeddings
-        emb_col = self._get_embedding_column(use_alt)
+        # Run each query and collect all results
+        all_results: Dict[int, Dict] = {}  # segment_id -> best result
 
-        # Build WHERE clause with automatic date filtering
-        where_clause, params = self._build_where_clause(filters, time_window_days)
-
-        # Convert threshold to max distance
-        max_distance = 1.0 - threshold
-
-        num_queries = len(query_embeddings)
-        logger.info(f"[{self.dashboard_id}] batch_search_unified: table={view_name}, col={emb_col}, "
-                   f"num_queries={num_queries}, threshold={threshold}, k={k or 'unlimited'}")
-
-        # Convert all embeddings to pgvector string format
-        embedding_strs = []
         for emb in query_embeddings:
-            embedding_list = emb.flatten().tolist()
-            embedding_str = '[' + ','.join(map(str, embedding_list)) + ']'
-            embedding_strs.append(embedding_str)
-
-        conn = self._get_connection()
-        try:
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
-            cursor.execute("SET hnsw.ef_search = 100;")
-
-            # Build UNION ALL query - one subquery per embedding, all within threshold
-            # Then deduplicate by segment_id keeping the best similarity
-            union_parts = []
-            all_params = []
-
-            for i, emb_str in enumerate(embedding_strs):
-                # Each subquery finds ALL matches within threshold for one embedding
-                # No LIMIT here - we want all segments above similarity threshold
-                union_parts.append(f"""(
-                    SELECT
-                        id as segment_id,
-                        1 - ({emb_col} <=> %s::vector) as similarity,
-                        content_id,
-                        content_id_string,
-                        channel_name,
-                        title,
-                        publish_date,
-                        text,
-                        start_time,
-                        end_time,
-                        source_speaker_hashes as speaker_hashes,
-                        segment_index,
-                        stitch_version,
-                        {emb_col} as embedding,
-                        {i} as query_idx
-                    FROM {view_name}
-                    WHERE {where_clause}
-                      AND ({emb_col} <=> %s::vector) < %s
-                )""")
-                # Parameters: embedding for similarity calc, where_clause params,
-                # embedding for distance filter, max_distance
-                all_params.extend([emb_str] + params + [emb_str, max_distance])
-
-            # Combine with UNION ALL, then deduplicate keeping best similarity
-            union_query = " UNION ALL ".join(union_parts)
-
-            full_query = f"""
-                SELECT DISTINCT ON (segment_id)
-                    segment_id,
-                    similarity,
-                    content_id,
-                    content_id_string,
-                    channel_name,
-                    title,
-                    publish_date,
-                    text,
-                    start_time,
-                    end_time,
-                    speaker_hashes,
-                    segment_index,
-                    stitch_version,
-                    embedding
-                FROM ({union_query}) combined
-                ORDER BY segment_id, similarity DESC
-            """
-
-            # Wrap to get final ordering by similarity, with optional limit
-            if k:
-                final_query = f"""
-                    SELECT * FROM ({full_query}) deduped
-                    ORDER BY similarity DESC
-                    LIMIT %s
-                """
-                all_params.append(k)
-            else:
-                final_query = f"""
-                    SELECT * FROM ({full_query}) deduped
-                    ORDER BY similarity DESC
-                """
-
-            query_start = time.time()
-            cursor.execute(final_query, all_params)
-            results = cursor.fetchall()
-            query_time = (time.time() - query_start) * 1000
-
-            cursor.close()
-
-            # Format results
-            formatted = []
-            for row in results:
-                publish_date = row['publish_date']
-                if publish_date and hasattr(publish_date, 'isoformat'):
-                    publish_date = publish_date.isoformat()
-
-                # Parse embedding
-                embedding = None
-                if row.get('embedding'):
-                    emb_str = row['embedding']
-                    if isinstance(emb_str, str):
-                        emb_str = emb_str.strip('[]')
-                        embedding = np.array([float(x) for x in emb_str.split(',')])
-                    else:
-                        embedding = np.array(emb_str)
-
-                formatted.append({
-                    'segment_id': row['segment_id'],
-                    'similarity': float(row['similarity']),
-                    'content_id': row['content_id'],
-                    'content_id_string': row['content_id_string'],
-                    'channel_url': None,
-                    'channel_name': row['channel_name'],
-                    'title': row['title'],
-                    'publish_date': publish_date,
-                    'text': row['text'],
-                    'start_time': float(row['start_time']),
-                    'end_time': float(row['end_time']),
-                    'speaker_hashes': row['speaker_hashes'] or [],
-                    'segment_index': row['segment_index'],
-                    'stitch_version': row['stitch_version'],
-                    '_embedding': embedding
-                })
-
-            total_time = (time.time() - start_time) * 1000
-            logger.info(
-                f"[{self.dashboard_id}] pgvector batch_search_unified: {len(formatted)} unique results "
-                f"from {num_queries} queries in {total_time:.0f}ms (query={query_time:.0f}ms, table={view_name})"
+            results = self.search(
+                query_embedding=emb,
+                time_window_days=time_window_days,
+                k=k or 500,  # Fetch more per query to ensure good coverage
+                threshold=threshold,
+                must_contain=must_contain,
+                must_contain_any=must_contain_any,
+                **filters
             )
 
-            return formatted
+            for r in results:
+                seg_id = r['segment_id']
+                if seg_id not in all_results or r['similarity'] > all_results[seg_id]['similarity']:
+                    all_results[seg_id] = r
 
-        finally:
-            conn.close()
+        # Sort by similarity and apply k limit
+        formatted = sorted(all_results.values(), key=lambda x: x['similarity'], reverse=True)
 
-    def keyword_search(self, keywords: List[str], time_window_days: int = 7,
-                       limit: int = 200, query_embedding=None,
-                       similarity_threshold: float = 0.40,
-                       use_alt_model: bool = False) -> List[Dict]:
+        if k:
+            formatted = formatted[:k]
+
+        total_time = (time.time() - start_time) * 1000
+        logger.info(
+            f"[{self.dashboard_id}] pgvector batch_search_unified: {len(formatted)} unique results "
+            f"from {len(query_embeddings)} queries in {total_time:.0f}ms"
+        )
+
+        return formatted
+
+    def keyword_search(
+        self,
+        keywords: List[str],
+        time_window_days: int = 7,
+        limit: int = 200,
+        query_embedding=None,
+        similarity_threshold: float = 0.40
+    ) -> List[Dict]:
         """
-        Keyword search using PostgreSQL text matching
+        Keyword search using PostgreSQL text matching.
+
+        Searches across all projects (uses the table directly, not per-project indexes).
 
         Args:
             keywords: List of keywords/phrases to search
@@ -604,27 +461,29 @@ class PgVectorSearchService:
             limit: Max results
             query_embedding: Optional embedding for re-ranking
             similarity_threshold: Min similarity if re-ranking
-            use_alt_model: Use alt embedding model
 
         Returns:
             List of matching segments
         """
-        # Select table and embedding column
-        view_name = self._select_view(time_window_days)
-        use_alt = use_alt_model or self.config.use_alt_embeddings
-        emb_col = self._get_embedding_column(use_alt)
+        import numpy as np
 
-        # Build project filter with date filtering
-        where_clause, params = self._build_where_clause({}, time_window_days)
+        table = self._select_table(time_window_days)
 
-        # Build keyword conditions (case-insensitive LIKE)
+        # Build project filter
+        if self.config.allowed_projects:
+            project_condition = "projects && %s::varchar[]"
+            project_params = [self.config.allowed_projects]
+        else:
+            project_condition = "1=1"
+            project_params = []
+
+        # Build keyword conditions
         keyword_conditions = " OR ".join(["text ILIKE %s"] * len(keywords))
         keyword_params = [f'%{kw}%' for kw in keywords]
 
         query = f"""
         SELECT
             id as segment_id,
-            NULL as similarity,
             content_id,
             content_id_string,
             channel_name,
@@ -636,9 +495,9 @@ class PgVectorSearchService:
             source_speaker_hashes as speaker_hashes,
             segment_index,
             stitch_version,
-            {emb_col} as embedding
-        FROM {view_name}
-        WHERE {where_clause}
+            embedding
+        FROM {table}
+        WHERE {project_condition}
           AND ({keyword_conditions})
         LIMIT %s;
         """
@@ -646,8 +505,8 @@ class PgVectorSearchService:
         conn = self._get_connection()
         try:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
-            query_params = params + keyword_params + [limit]
-            cursor.execute(query, query_params)
+            params = project_params + keyword_params + [limit]
+            cursor.execute(query, params)
             results = cursor.fetchall()
             cursor.close()
 
@@ -655,18 +514,21 @@ class PgVectorSearchService:
 
             # If query_embedding provided, re-rank by similarity
             if query_embedding is not None and len(results) > 0:
-                import numpy as np
-
-                # Calculate similarities
                 segment_embeddings = []
                 valid_results = []
+
                 for row in results:
-                    if row[14] is not None:  # embedding field
-                        segment_embeddings.append(np.array(row[14]))
+                    if row.get('embedding'):
+                        emb_str = row['embedding']
+                        if isinstance(emb_str, str):
+                            emb_str = emb_str.strip('[]')
+                            embedding = np.array([float(x) for x in emb_str.split(',')])
+                        else:
+                            embedding = np.array(emb_str)
+                        segment_embeddings.append(embedding)
                         valid_results.append(row)
 
                 if not segment_embeddings:
-                    logger.warning("No embeddings found for keyword matches")
                     return self._format_keyword_results(results)
 
                 # Compute similarities
@@ -691,7 +553,7 @@ class PgVectorSearchService:
             conn.close()
 
     def _format_result_row(self, row, similarity=None):
-        """Format a result row (RealDictRow) into dictionary"""
+        """Format a result row into dictionary"""
         publish_date = row['publish_date']
         if publish_date and hasattr(publish_date, 'isoformat'):
             publish_date = publish_date.isoformat()
@@ -701,7 +563,7 @@ class PgVectorSearchService:
             'similarity': similarity,
             'content_id': row['content_id'],
             'content_id_string': row['content_id_string'],
-            'channel_url': None,  # Not available in materialized views
+            'channel_url': row.get('channel_url'),
             'channel_name': row['channel_name'],
             'title': row['title'],
             'publish_date': publish_date,
@@ -715,7 +577,4 @@ class PgVectorSearchService:
 
     def _format_keyword_results(self, results):
         """Format keyword results without similarity"""
-        formatted = []
-        for row in results:
-            formatted.append(self._format_result_row(row))
-        return formatted
+        return [self._format_result_row(row) for row in results]

@@ -1,7 +1,36 @@
 #!/usr/bin/env python3
 """
-Evaluate whether keywords add value at threshold 0.40
-Compare primary queries vs keywords on actual segment quality
+Evaluate Keyword Search Value
+=============================
+
+Compares primary query retrieval vs keyword-based retrieval to determine
+if keywords add value at a given similarity threshold.
+
+Usage:
+    cd ~/signal4/core/src/backend
+    python utilities/evaluate_keyword_value.py
+
+Output:
+    /tmp/keyword_evaluation_30days.txt
+
+What it does:
+    1. Takes a test query (default: "climate change")
+    2. Generates primary queries + keyword queries via LLM
+    3. Searches embedding segments using both approaches
+    4. Compares overlap and unique segments found by each
+    5. Writes detailed analysis to output file
+
+Configuration (hardcoded - edit main() to change):
+    query: str            - Test query (default: "climate change")
+    strategy: str         - Query strategy (default: "conversational")
+    time_window_days: int - Time window for search (default: 30)
+    threshold: float      - Similarity threshold (default: 0.40)
+    dashboard_id: str     - Dashboard config to use (default: "cprmv-practitioner")
+
+Evaluation criteria in output:
+    - Are 'keywords only' segments relevant?
+    - Do they add meaningful coverage?
+    - Is quality comparable to primary queries?
 """
 import sys
 import os

@@ -1,12 +1,41 @@
 #!/usr/bin/env python3
 """
-Compare 1024-dim vs 2048-dim Embedding Models
-==============================================
+Compare 1024-dim vs 2000-dim Embedding Models
+=============================================
 
-Tests the same queries with both embedding models to compare:
-- Number of results found
-- Similarity scores
-- Quality of matches
+Tests the same queries with both embedding models to compare retrieval
+performance: result counts, similarity scores, and quality of matches.
+
+Usage:
+    cd ~/signal4/core/src/backend
+    python utilities/compare_embedding_models.py [OPTIONS]
+
+Examples:
+    python utilities/compare_embedding_models.py              # Default 7 days
+    python utilities/compare_embedding_models.py --days 30    # Last 30 days
+
+Options:
+    --days INT    Number of days to look back (default: 7)
+
+Models compared:
+    - 1024-dim: Qwen3-Embedding-0.6B (faster, smaller)
+    - 2000-dim: Qwen3-Embedding-4B truncated (more nuanced, larger)
+
+What it does:
+    1. Loads both embedding models on MPS/CPU
+    2. Runs test queries through LLM query2doc_stances
+    3. Generates embeddings with both models
+    4. Searches at threshold 0.35
+    5. Compares results, similarity scores, and overlap
+
+Test queries (hardcoded):
+    - immigration policy
+    - climate change
+    - economic policy
+    - healthcare reform
+
+Output:
+    Console comparison showing per-query and overall statistics
 """
 
 import sys

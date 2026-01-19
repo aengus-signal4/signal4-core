@@ -1,5 +1,34 @@
+#!/usr/bin/env python3
+"""
+Update Blocked Videos from Log Files
+=====================================
+
+Parses yt-dlp error logs to find videos that failed due to format unavailability,
+then marks them as blocked in the database with the appropriate reason.
+
+Usage:
+    python -m src.ingestion.update_blocked_videos [LOG_FILE]
+
+Examples:
+    # Use default log file
+    python -m src.ingestion.update_blocked_videos
+
+    # Specify custom log file
+    python -m src.ingestion.update_blocked_videos /path/to/worker.log
+
+Default log file:
+    /Users/signal4/logs/content_processing/worker_logs/10.0.0.209_download_youtube.log
+
+What it does:
+    1. Scans log file for "Requested format is not available" errors
+    2. Extracts YouTube video IDs from error messages
+    3. Updates content.blocked_download = True in database
+    4. Sets meta_data.block_reason with the error message
+"""
+
 import re
 import asyncio
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 import logging
@@ -71,12 +100,14 @@ async def update_blocked_videos(video_ids: list):
             session.rollback()
 
 async def main():
-    log_file = "/Users/signal4/logs/content_processing/worker_logs/10.0.0.209_download_youtube.log"
-    
+    default_log = "/Users/signal4/logs/content_processing/worker_logs/10.0.0.209_download_youtube.log"
+    log_file = sys.argv[1] if len(sys.argv) > 1 else default_log
+
     if not Path(log_file).exists():
         logger.error(f"Log file not found: {log_file}")
         return
-    
+
+    logger.info(f"Processing log file: {log_file}")
     blocked_videos = extract_blocked_videos(log_file)
     await update_blocked_videos(blocked_videos)
 

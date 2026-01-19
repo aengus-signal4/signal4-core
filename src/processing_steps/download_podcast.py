@@ -514,8 +514,26 @@ class PodcastDownloader:
                     logger.error(f"HTTP 410 Gone detected - content permanently deleted")
                     return create_error_result(ErrorCode.CONTENT_GONE, f"HTTP 410 Gone: content permanently deleted", permanent=True)
 
-                error_msg = self._extract_ytdlp_error(stderr_text)
-                return create_error_result(ErrorCode.PROCESS_FAILED, f"yt-dlp command failed: {error_msg}")
+                # Before failing, check if a file was actually downloaded despite the non-zero return code
+                # This handles cases like ffprobe warnings that cause yt-dlp to exit non-zero
+                # but the download itself succeeded
+                possible_extensions = ['.mp3', '.m4a', '.aac', '.ogg', '.opus', '.wav']
+                base_name = output_path.stem
+                for ext in possible_extensions:
+                    potential_file = output_path.with_name(base_name + ext)
+                    if potential_file.exists() and potential_file.stat().st_size > 0:
+                        logger.warning(f"yt-dlp exited with non-zero code but file exists: {potential_file} ({potential_file.stat().st_size} bytes)")
+                        logger.info(f"Proceeding with download despite yt-dlp warning: {stderr_text[:200]}")
+                        # File exists, fall through to normal success path by breaking out of this block
+                        break
+                else:
+                    # Also check the original output path
+                    if output_path.exists() and output_path.stat().st_size > 0:
+                        logger.warning(f"yt-dlp exited with non-zero code but file exists at original path: {output_path}")
+                    else:
+                        # No file found, this is a real failure
+                        error_msg = self._extract_ytdlp_error(stderr_text)
+                        return create_error_result(ErrorCode.PROCESS_FAILED, f"yt-dlp command failed: {error_msg}")
 
             # Check for downloaded file
             downloaded_file = None

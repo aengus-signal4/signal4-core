@@ -17,6 +17,7 @@ import os
 os.environ['OMP_NUM_THREADS'] = '1'
 os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
 os.environ['PYTORCH_MPS_HIGH_WATERMARK_RATIO'] = '0.0'
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'  # Suppress fork warning from HuggingFace tokenizers
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware

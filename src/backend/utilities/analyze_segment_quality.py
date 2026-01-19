@@ -1,6 +1,38 @@
 #!/usr/bin/env python3
 """
-Analyze segment quality and similarity scores
+Analyze Segment Quality and Similarity Scores
+==============================================
+
+Tests embedding search quality by running a query at various similarity
+thresholds and analyzing the relevance of returned segments.
+
+Usage:
+    cd ~/signal4/core/src/backend
+    python utilities/analyze_segment_quality.py
+
+What it does:
+    1. Takes a test query (hardcoded immigration policy question)
+    2. Generates query embedding
+    3. Searches at multiple thresholds (0.10 to 0.50)
+    4. Shows segment counts at each threshold
+    5. Displays top 15 segments with relevance assessment
+
+Configuration (hardcoded - edit main() to change):
+    query: str            - Test query to analyze
+    dashboard_id: str     - Dashboard config (default: "cprmv-practitioner")
+    time_window_days: int - Search time window (default: 7)
+
+Output:
+    Console output showing:
+    - Embedding shape and norm
+    - Segment counts per threshold
+    - Top 15 segments with similarity scores
+    - Automatic relevance assessment (HIGH/MEDIUM/LOW)
+
+Use this to:
+    - Tune similarity thresholds for RAG retrieval
+    - Verify embedding quality for specific query types
+    - Debug why certain queries return poor results
 """
 import sys
 import os

@@ -71,13 +71,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Database connection
-DB_CONFIG = {
-    'host': '10.0.0.4',
-    'database': 'av_content',
-    'user': 'signal4',
-    'password': os.getenv('POSTGRES_PASSWORD', 'signal4')
-}
+# Database connection - use centralized config
+def _get_db_config():
+    """Get database config from environment variables."""
+    from dotenv import load_dotenv
+    from pathlib import Path
+    env_path = Path(__file__).parents[3] / '.env'
+    if env_path.exists():
+        load_dotenv(env_path)
+
+    password = os.getenv('POSTGRES_PASSWORD')
+    if not password:
+        raise ValueError("POSTGRES_PASSWORD environment variable is required")
+
+    return {
+        'host': os.getenv('POSTGRES_HOST', '10.0.0.4'),
+        'database': os.getenv('POSTGRES_DB', 'av_content'),
+        'user': os.getenv('POSTGRES_USER', 'signal4'),
+        'password': password,
+    }
+
+DB_CONFIG = _get_db_config()
 
 
 class PrecomputedEmbeddings(BaseEmbedder):

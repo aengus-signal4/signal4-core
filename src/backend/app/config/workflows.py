@@ -1,6 +1,6 @@
 """
-Predefined Workflows
-====================
+Predefined Workflows & Caching System
+=====================================
 
 Convenience workflow definitions for common analysis patterns.
 
@@ -8,6 +8,132 @@ These can be referenced by name in AnalysisRequest:
     {"query": "...", "workflow": "simple_rag"}
 
 Workflows are just predefined sequences of pipeline steps.
+
+
+## Caching Architecture
+=======================
+
+The system uses a multi-level caching strategy to minimize latency:
+
+### Cache Levels
+
+1. **Query Variation Library** (Permanent)
+   - Tables: `query_variations`, `query_expansions`
+   - Stores: Unique query texts with their embeddings
+   - Key insight: Same text = same embedding (never embed twice)
+   - Variations can be reused across different original queries
+   - Service: `QueryVariationService`
+
+2. **Expand Query Cache** (via Query Variation Library)
+   - Maps original query → expanded variations with embeddings
+   - Time-agnostic (same expansion regardless of time window)
+   - Service: `ExpandQueryCache`
+
+3. **Workflow Result Cache** (Dynamic TTL)
+   - Table: `llm_cache` (cache_type='workflow_result')
+   - Stores: selected_segments, summaries, segment_ids
+   - Cache key: query + time_window + projects + languages
+   - TTL: 6h (7d queries), 12h (30d), 24h (longer)
+   - Service: `WorkflowResultCache`
+
+4. **Landing Page Cache** (24h TTL)
+   - Table: `llm_cache` (cache_type='landing_page')
+   - Stores: themes, corpus_stats, summaries
+   - Cache key: time_window + projects + languages (no query)
+   - Service: `LandingPageCache`
+
+
+### Cache Flow for Query Workflows
+
+```
+Request arrives
+    │
+    ├─► Check WorkflowResultCache (exact match on query+filters)
+    │   └─► HIT: Return cached result (instant for quick_summary)
+    │
+    ├─► Check ExpandQueryCache (query variations + embeddings)
+    │   └─► HIT: Skip expand_query step, use cached embeddings
+    │
+    └─► MISS: Run full pipeline
+            │
+            ├─► expand_query: LLM generates variations (~2s)
+            ├─► retrieve_segments: Embed queries + pgvector search (~6s)
+            ├─► select_segments: Choose representative segments (~1s)
+            └─► generate_summary: LLM summarization (~5s)
+            │
+            └─► Cache results for next time
+```
+
+
+### Performance Benchmarks
+
+Tested with `quick_summary` workflow on live server (pre-warmed models):
+
+| Scenario | Time | Notes |
+|----------|------|-------|
+| Cold (no cache) | ~14s | Full pipeline execution |
+| Partial (expand cached) | ~10s | Skip LLM expansion, still embed+retrieve |
+| Full cache hit | ~740ms | Instant return of cached result |
+
+With ASGI transport (model loading overhead):
+| Scenario | Time | Notes |
+|----------|------|-------|
+| Cold | ~49s | Includes model loading from disk |
+| Warm | ~740ms | Same as live server |
+
+
+### Workflow-Specific Cache Behavior
+
+- **quick_summary**: Returns instantly on full cache hit (no fresh retrieval)
+- **simple_rag**: Re-runs retrieval on cache hit for fresh quantitative stats
+- **landing_page_overview**: 24h cache, returns instantly on hit
+
+
+### Query Variation Library Design
+
+The query variation library enables embedding reuse:
+
+```sql
+-- query_variations: Unique texts with embeddings
+CREATE TABLE query_variations (
+    id SERIAL PRIMARY KEY,
+    text_hash VARCHAR(32) UNIQUE,  -- MD5 of normalized text
+    text TEXT NOT NULL,
+    embedding VECTOR(1024),         -- 0.6B model dimension
+    usage_count INTEGER DEFAULT 1,
+    created_at TIMESTAMP,
+    last_used_at TIMESTAMP
+);
+
+-- query_expansions: Maps original queries to variations
+CREATE TABLE query_expansions (
+    id SERIAL PRIMARY KEY,
+    original_query_hash VARCHAR(32),
+    original_query TEXT,
+    variation_id INTEGER REFERENCES query_variations(id),
+    position INTEGER,
+    UNIQUE(original_query_hash, variation_id)
+);
+```
+
+Benefits:
+- If "Mark Carney policy" appears in multiple query expansions, it's only embedded once
+- Growing library of pre-embedded variations over time
+- Deduplication via MD5 hash lookup (instant)
+
+
+### Testing Cache Effectiveness
+
+Use the test script to verify caching:
+```bash
+# Against live server (recommended)
+BACKEND_URL=http://localhost:7999 uv run python src/backend/tests/test_quick_summary_workflow.py
+
+# Against ASGI (includes model loading, slower)
+uv run python src/backend/tests/test_quick_summary_workflow.py
+```
+
+The test runs the workflow twice to measure cache effectiveness.
 """
 
 from typing import Dict, List, Any
@@ -455,6 +581,48 @@ WORKFLOWS: Dict[str, List[Dict[str, Any]]] = {
         }
     ],
 
+    # ========================================================================
+    # Quick Summary Workflow (Fast)
+    # ========================================================================
+    # Optimized for speed: expand query, but no clustering, fewer segments.
+    # Target: 3-5 seconds for a complete summary.
+
+    "quick_summary": [
+        # Step 1: Expand query (still use multi_query for better recall)
+        {
+            "step": "expand_query",
+            "config": {
+                "strategy": "multi_query"
+            }
+        },
+        # Step 2: Retrieve fewer segments for speed
+        {
+            "step": "retrieve_segments",
+            "config": {
+                "k": 50  # Fewer segments for speed
+            }
+        },
+        # Step 3: Select top segments (no clustering, just balanced selection)
+        {
+            "step": "select_segments",
+            "config": {
+                "strategy": "balanced",
+                "n": 15  # Fewer for faster LLM
+            }
+        },
+        # Step 4: Generate summary with fast model
+        {
+            "step": "generate_summary",
+            "config": {
+                "template": "rag_answer",
+                "level": "theme",
+                "model": "grok-4-fast-non-reasoning-latest",
+                "temperature": 0.3,
+                "max_tokens": 600
+            }
+        }
+    ],
+
     # Lighter version for quick health topic exploration
     "health_topic_explorer": [
         {
@@ -543,6 +711,7 @@ def list_workflows() -> Dict[str, str]:
         Dict mapping workflow name to description
     """
     return {
+        "quick_summary": "Quick summary (2-3s): single embedding → retrieve → select top → fast summary (no clustering, no query expansion)",
         "simple_rag": "Simple RAG with adaptive clustering: expand query → retrieve → detect sub-themes (if meaningful) → analyze → sample per cluster → unified summary",
         "search_only": "Search only: expand query → retrieve (no summarization)",
         "hierarchical_summary": "Hierarchical: retrieve → cluster themes → summarize themes → meta-summary",

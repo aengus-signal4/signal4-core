@@ -27,12 +27,8 @@ class QueryService:
 
     def __init__(self):
         """Initialize query service"""
-        self.db_config = {
-            'host': '10.0.0.4',
-            'database': 'av_content',
-            'user': 'signal4',
-            'password': 'signal4'
-        }
+        from src.backend.app.config.database import get_db_config
+        self.db_config = get_db_config()
 
     def _get_connection(self):
         """Get PostgreSQL connection"""

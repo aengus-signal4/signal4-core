@@ -1172,7 +1172,7 @@ class TaskCreator:
 
 def load_config() -> Dict:
     """Load configuration from yaml file"""
-    config_path = Path(__file__).parent.parent / "config" / "config.yaml"
+    config_path = Path(__file__).parent.parent.parent / "config" / "config.yaml"
     with open(config_path) as f:
         return yaml.safe_load(f)
 

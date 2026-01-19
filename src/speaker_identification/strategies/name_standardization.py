@@ -92,6 +92,7 @@ class NameStandardizationConfig:
     llm_batch_size: int = 10  # Name pairs per LLM call
     llm_min_hours: float = 0.5  # Only LLM-verify pairs with sufficient data
     llm_tier: str = "tier_1"  # LLM tier to use
+    llm_priority: int = 1  # Top priority - Phase 3 blocks pipeline
 
     # Auto-approve thresholds (skip LLM for obvious cases)
     auto_approve_sim: float = 0.995  # Very high similarity
@@ -430,10 +431,13 @@ class NameStandardizationStrategy:
             return []
 
         decisions = []
+        total_batches = (len(pairs) + self.config.llm_batch_size - 1) // self.config.llm_batch_size
 
         # Process in batches
         for batch_start in range(0, len(pairs), self.config.llm_batch_size):
             batch = pairs[batch_start:batch_start + self.config.llm_batch_size]
+            batch_num = batch_start // self.config.llm_batch_size + 1
+            logger.info(f"    LLM batch {batch_num}/{total_batches} ({len(batch)} pairs)...")
 
             # Build batch data for prompt
             batch_data = []
@@ -468,7 +472,7 @@ class NameStandardizationStrategy:
 
             try:
                 self.stats['llm_calls'] += 1
-                response = await self.llm_client._call_llm(prompt, priority=3)
+                response = await self.llm_client._call_llm(prompt, priority=self.config.llm_priority)
 
                 # Parse JSON response
                 json_match = re.search(r'\[[\s\S]*\]', response)

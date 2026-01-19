@@ -98,22 +98,13 @@ class EmbeddingService:
             # Wait for pre-loaded models (with timeout)
             await self._wait_for_preloaded_models(timeout=30.0)
 
-            # Determine which pre-loaded model to use
-            if 'Qwen3-Embedding-4B' in model_name or '4B' in model_name:
-                if '4B' in _embedding_models:
-                    self._embedding_model = _embedding_models['4B']
-                    logger.info(f"[{self.dashboard_id}] Using pre-loaded 4B model (2000-dim)")
-                else:
-                    logger.warning(f"[{self.dashboard_id}] 4B model not in cache, lazy loading...")
-                    await self._lazy_load_model(model_name, truncate_dim=2000)
+            # Always use 0.6B model for responsive backend performance
+            if '0.6B' in _embedding_models:
+                self._embedding_model = _embedding_models['0.6B']
+                logger.info(f"[{self.dashboard_id}] Using pre-loaded 0.6B model (1024-dim)")
             else:
-                # Default to 0.6B for other configs
-                if '0.6B' in _embedding_models:
-                    self._embedding_model = _embedding_models['0.6B']
-                    logger.info(f"[{self.dashboard_id}] Using pre-loaded 0.6B model (1024-dim)")
-                else:
-                    logger.warning(f"[{self.dashboard_id}] 0.6B model not in cache, lazy loading...")
-                    await self._lazy_load_model(model_name)
+                logger.warning(f"[{self.dashboard_id}] 0.6B model not in cache, lazy loading...")
+                await self._lazy_load_model('Qwen/Qwen3-Embedding-0.6B')
 
             # Verify model works
             if self._embedding_model is None:
@@ -234,17 +225,11 @@ class EmbeddingService:
                     "should be pre-loaded!"
                 )
 
-            # Format all queries with instruction prefix (matches hydrate_embeddings.py pattern)
-            if 'Qwen' in self.config.embedding_model:
-                query_texts = [f"Instruct: Retrieve relevant passages.\nQuery: {q}" for q in queries]
-            else:
-                query_texts = [f"query: {q}" for q in queries]
+            # Format all queries with instruction prefix (Qwen format)
+            query_texts = [f"Instruct: Retrieve relevant passages.\nQuery: {q}" for q in queries]
 
-            # Use batch_size appropriate for model (matches hydrate_embeddings.py: 4B=16, 0.6B=32)
-            if '4B' in self.config.embedding_model:
-                batch_size = 16  # 4B model: smaller batches
-            else:
-                batch_size = 32  # 0.6B/1.5B models: larger batches
+            # Use batch_size appropriate for 0.6B model
+            batch_size = 32
 
             device = self._embedding_model.device
 

@@ -362,31 +362,92 @@ def aggregate_data(segments, themes_json):
     }
 
 
-def get_sample_segments(segments, themes_json, samples_per_theme=3):
-    """Get sample segments for each theme (for audio playback)."""
+def get_sample_segments(segments, themes_json, subthemes_json, samples_per_theme=3, samples_per_subtheme=2):
+    """Get sample segments for each theme and subtheme (for audio playback)."""
     theme_samples = defaultdict(lambda: {'en': [], 'fr': []})
+    subtheme_samples = defaultdict(lambda: {'en': [], 'fr': []})
+    subtheme_counts = defaultdict(int)
+    total_flagged = len(segments)
 
+    # Helper to create sample entry
+    def make_sample(seg, lang):
+        return {
+            'segment_id': seg['segment_id'],
+            'content_id': seg['content_id'],
+            'youtube_id': seg['youtube_id'],
+            'title': seg['episode_title'],
+            'channel_name': seg['channel_name'],
+            'publish_date': seg['publish_date'].strftime('%Y-%m-%d') if seg.get('publish_date') else None,
+            'start_time': float(seg['start_time']) if seg['start_time'] else 0,
+            'end_time': float(seg['end_time']) if seg['end_time'] else 0,
+            'text': seg['segment_text'][:500] if seg['segment_text'] else '',
+            'language': lang
+        }
+
+    # Track which segments are used for theme samples (so subthemes use different ones)
+    theme_sample_ids = set()
+
+    # First pass: collect theme samples
     for seg in segments:
         for theme_id in seg['theme_ids']:
             lang = seg['main_language']
             if lang in ['en', 'fr'] and len(theme_samples[theme_id][lang]) < samples_per_theme:
-                theme_samples[theme_id][lang].append({
-                    'segment_id': seg['segment_id'],
-                    'content_id': seg['content_id'],
-                    'youtube_id': seg['youtube_id'],
-                    'title': seg['episode_title'],
-                    'channel_name': seg['channel_name'],
-                    'start_time': float(seg['start_time']) if seg['start_time'] else 0,
-                    'end_time': float(seg['end_time']) if seg['end_time'] else 0,
-                    'text': seg['segment_text'][:500] if seg['segment_text'] else '',
-                    'language': lang
+                theme_samples[theme_id][lang].append(make_sample(seg, lang))
+                theme_sample_ids.add(seg['segment_id'])
+
+    # Second pass: count subthemes and collect subtheme samples
+    for seg in segments:
+        subtheme_ids = seg.get('subtheme_ids') or []
+        for subtheme_id in subtheme_ids:
+            subtheme_counts[subtheme_id] += 1
+
+            # Collect samples (preferring segments not used for theme samples)
+            lang = seg['main_language']
+            if lang in ['en', 'fr'] and len(subtheme_samples[subtheme_id][lang]) < samples_per_subtheme:
+                # Prefer segments not already used for theme-level samples
+                if seg['segment_id'] not in theme_sample_ids:
+                    subtheme_samples[subtheme_id][lang].append(make_sample(seg, lang))
+
+    # Third pass: fill remaining subtheme samples if needed (allow reuse if necessary)
+    for seg in segments:
+        subtheme_ids = seg.get('subtheme_ids') or []
+        for subtheme_id in subtheme_ids:
+            lang = seg['main_language']
+            if lang in ['en', 'fr'] and len(subtheme_samples[subtheme_id][lang]) < samples_per_subtheme:
+                # Check if this segment is already in this subtheme's samples
+                existing_ids = {s['segment_id'] for s in subtheme_samples[subtheme_id][lang]}
+                if seg['segment_id'] not in existing_ids:
+                    subtheme_samples[subtheme_id][lang].append(make_sample(seg, lang))
+
+    # Build subthemes lookup by theme_id with counts and samples
+    theme_subthemes = defaultdict(list)
+    if subthemes_json:
+        for subtheme_id, subtheme_data in subthemes_json.items():
+            parent_theme = subtheme_data.get('theme_id')
+            if parent_theme:
+                count = subtheme_counts.get(subtheme_id, 0)
+                theme_subthemes[parent_theme].append({
+                    'subtheme_id': subtheme_id,
+                    'subtheme_name': {
+                        'en': subtheme_data.get('name_en', subtheme_data.get('name', '')),
+                        'fr': subtheme_data.get('name_fr', '')
+                    },
+                    'subtheme_description': {
+                        'en': subtheme_data.get('description_en', ''),
+                        'fr': subtheme_data.get('description_fr', '')
+                    },
+                    'proportion': count / total_flagged if total_flagged > 0 else 0,
+                    'examples': {
+                        'en': subtheme_samples[subtheme_id]['en'],
+                        'fr': subtheme_samples[subtheme_id]['fr']
+                    }
                 })
 
     # Convert to list format
     result = []
     for theme_id, samples in theme_samples.items():
         theme_info = themes_json.get(theme_id, {})
-        result.append({
+        theme_entry = {
             'theme_id': theme_id,
             'theme_name': theme_info.get('name', f'Theme {theme_id}'),
             'description': {
@@ -397,7 +458,11 @@ def get_sample_segments(segments, themes_json, samples_per_theme=3):
                 'en': samples['en'],
                 'fr': samples['fr']
             }
-        })
+        }
+        # Add subthemes if available
+        if theme_id in theme_subthemes:
+            theme_entry['subthemes'] = sorted(theme_subthemes[theme_id], key=lambda x: x['subtheme_id'])
+        result.append(theme_entry)
 
     return sorted(result, key=lambda x: x['theme_id'])
 
@@ -451,7 +516,7 @@ def main():
 
         # Get sample segments
         logger.info(f"Selecting sample segments for each theme...")
-        theme_examples = get_sample_segments(segments, themes_json)
+        theme_examples = get_sample_segments(segments, themes_json, subthemes_json)
 
         # Compute circle packing layouts
         logger.info(f"Computing circle packing layouts...")

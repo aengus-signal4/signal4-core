@@ -18,22 +18,29 @@ Phase 2: Text Evidence Collection
     - Binary output: "certain" or "none"
     → Populates: speakers.identification_details['phase2']
 
-Phase 3: Speaker Clustering (two modes available via --phase3-mode)
-    Mode 'anchor' (default): Anchor-Canopy Clustering
+Phase 3: Speaker Clustering (three modes available via --phase3-mode)
+    Mode 'anchor': Anchor-Canopy Clustering
         - Text-verified speakers become anchors
         - Multi-gate validation for cluster expansion
         - More conservative, higher precision
-    Mode 'propagation': Label Propagation
+    Mode 'propagation': Label Propagation (legacy)
         - k-NN weighted voting from labeled neighbors
         - Confidence scores based on neighbor agreement
         - Faster, handles gradual transitions better
-    Both modes: Name collision detection, pure embedding-based (no LLM calls)
+    Mode 'propagation-conflicts' (default, RECOMMENDED):
+        - k-NN label propagation WITH conflict detection
+        - Only flags actual conflicts for Phase 4 LLM verification
+        - Much more efficient than LLM-verifying all name pairs
     → Populates: speaker_identities, speakers.speaker_identity_id
 
-Phase 4: Identity Merge Detection
-    - Find duplicate identities via centroid similarity
-    - LLM verification + merge
-    → Merges duplicate speaker_identities
+Phase 4: Conflict Resolution / Identity Merge Detection
+    If Phase 3 used 'propagation-conflicts':
+        - LLM-verifies only the actual conflicts detected in Phase 3
+        - Much faster than old approach (10-50 pairs vs 2,746)
+    Otherwise (legacy):
+        - Find duplicate identities via centroid similarity
+        - LLM verification + merge
+    → Updates name_aliases.yaml, reassigns conflicted speakers
 
 Phase 5: Speaker Hydration
     - Retrieve detailed biographical information about identified speakers
@@ -41,7 +48,7 @@ Phase 5: Speaker Hydration
     → Populates: speaker_identities.bio, occupation, organization, social_profiles, etc.
 
 Usage:
-    # Dry run on project
+    # Dry run on project (recommended: uses new conflict-based pipeline)
     python -m src.speaker_identification.orchestrator --project CPRMV
 
     # Apply all phases
@@ -49,6 +56,9 @@ Usage:
 
     # Run specific phases
     python -m src.speaker_identification.orchestrator --project CPRMV --phases 2,3,4 --apply
+
+    # Use legacy propagation mode (without conflict detection)
+    python -m src.speaker_identification.orchestrator --project CPRMV --phase3-mode propagation
 
     # Re-verify all legacy assignments
     python -m src.speaker_identification.orchestrator --project CPRMV --include-assigned --apply
@@ -73,6 +83,8 @@ from src.speaker_identification.strategies.identity_merge_detection import Ident
 from src.speaker_identification.strategies.text_evidence_collection import TextEvidenceCollectionStrategy
 from src.speaker_identification.strategies.anchor_verified_clustering import AnchorVerifiedClusteringStrategy
 from src.speaker_identification.strategies.label_propagation_clustering import LabelPropagationStrategy
+from src.speaker_identification.strategies.label_propagation_with_conflicts import LabelPropagationWithConflictsStrategy
+from src.speaker_identification.strategies.conflict_resolution import ConflictResolutionStrategy
 from src.speaker_identification.strategies.speaker_hydration import SpeakerHydrationStrategy
 from src.database.session import get_session
 from src.utils.logger import setup_worker_logger
@@ -108,7 +120,7 @@ class SpeakerIdentificationOrchestrator:
         max_concurrent: int = 15,
         batch_size: int = None,
         max_anchors: int = None,
-        phase3_mode: str = 'anchor'
+        phase3_mode: str = 'propagation-conflicts'
     ):
         """
         Initialize orchestrator.
@@ -127,7 +139,10 @@ class SpeakerIdentificationOrchestrator:
             max_concurrent: Max concurrent LLM requests for Phase 2 (default: 15)
             batch_size: Process N speakers per batch, then recheck priority (default: None = all at once)
             max_anchors: Max anchor name groups to process in Phase 3 (for testing)
-            phase3_mode: Phase 3 algorithm: 'anchor' (anchor-canopy) or 'propagation' (label propagation)
+            phase3_mode: Phase 3 algorithm:
+                'propagation-conflicts' (default): k-NN propagation with conflict detection (RECOMMENDED)
+                'anchor': anchor-canopy clustering
+                'propagation': legacy label propagation without conflict detection
         """
         self.dry_run = dry_run
         self.include_assigned = include_assigned
@@ -322,25 +337,40 @@ class SpeakerIdentificationOrchestrator:
         """
         Phase 3: Speaker Clustering and Assignment.
 
-        Two modes available (controlled by --phase3-mode):
+        Three modes available (controlled by --phase3-mode):
 
-        1. 'anchor' (default): Anchor-Canopy Clustering
+        1. 'propagation-conflicts' (default, RECOMMENDED): Label Propagation with Conflict Detection
+           - Uses k-NN weighted voting to propagate labels
+           - Detects actual conflicts (contested assignments, cluster splits)
+           - Only flags conflicts for Phase 4 LLM verification
+           - Much more efficient than verifying all name pairs
+
+        2. 'anchor': Anchor-Canopy Clustering
            - Uses text-verified speakers from Phase 2 as trusted anchors
            - Expands clusters using multi-gate validation
            - More conservative, higher precision
 
-        2. 'propagation': Single-Pass Label Propagation
+        3. 'propagation': Legacy Single-Pass Label Propagation
            - Uses k-NN weighted voting to propagate labels
-           - Assigns confidence scores based on neighbor agreement
-           - Faster, handles gradual transitions better
+           - No conflict detection (use with legacy Phase 4)
 
         Creates/updates speaker identities and assigns all cluster members.
         """
         logger.info("")
         logger.info("=" * 80)
 
-        if self.phase3_mode == 'propagation':
-            logger.info("PHASE 3: LABEL PROPAGATION (Single-Pass)")
+        if self.phase3_mode == 'propagation-conflicts':
+            logger.info("PHASE 3: LABEL PROPAGATION WITH CONFLICT DETECTION")
+            logger.info("=" * 80)
+
+            strategy = LabelPropagationWithConflictsStrategy(
+                dry_run=self.dry_run,
+                start_date=self.start_date,
+                end_date=self.end_date,
+                max_anchors=self.max_anchors
+            )
+        elif self.phase3_mode == 'propagation':
+            logger.info("PHASE 3: LABEL PROPAGATION (Legacy)")
             logger.info("=" * 80)
 
             strategy = LabelPropagationStrategy(
@@ -367,19 +397,37 @@ class SpeakerIdentificationOrchestrator:
 
     async def run_phase4(self, project: str = None, channel_id: int = None):
         """
-        Phase 4: Identity merge detection.
+        Phase 4: Conflict Resolution / Identity Merge Detection.
 
-        Detects and merges duplicate speaker identities that were created
-        separately due to name variations or transcription errors.
+        Behavior depends on Phase 3 mode:
+
+        1. If Phase 3 used 'propagation-conflicts' (default):
+           - Uses ConflictResolutionStrategy
+           - LLM-verifies only the actual conflicts detected in Phase 3
+           - Much faster than legacy approach (10-50 pairs vs 2,746)
+
+        2. If Phase 3 used 'anchor' or 'propagation' (legacy):
+           - Uses IdentityMergeDetectionStrategy
+           - Finds duplicate identities via centroid similarity
+           - LLM verifies all potential merges
         """
         logger.info("")
         logger.info("=" * 80)
-        logger.info("PHASE 4: IDENTITY MERGE DETECTION")
-        logger.info("=" * 80)
 
-        strategy = IdentityMergeDetectionStrategy(
-            dry_run=self.dry_run
-        )
+        if self.phase3_mode == 'propagation-conflicts':
+            logger.info("PHASE 4: CONFLICT RESOLUTION VIA LLM")
+            logger.info("=" * 80)
+
+            strategy = ConflictResolutionStrategy(
+                dry_run=self.dry_run
+            )
+        else:
+            logger.info("PHASE 4: IDENTITY MERGE DETECTION (Legacy)")
+            logger.info("=" * 80)
+
+            strategy = IdentityMergeDetectionStrategy(
+                dry_run=self.dry_run
+            )
 
         stats = await strategy.run(project=project)
 
@@ -525,8 +573,13 @@ async def main():
 PHASES:
   1 = Metadata extraction (channel hosts, episode speakers from descriptions)
   2 = Text Evidence Collection (find transcript evidence: self-intro, addressed, introduced)
-  3 = Speaker Clustering (--phase3-mode: 'anchor' or 'propagation')
-  4 = Identity Merge Detection (detect and merge duplicate identities)
+  3 = Speaker Clustering (--phase3-mode: 'propagation-conflicts', 'anchor', or 'propagation')
+      - propagation-conflicts (default): k-NN with conflict detection → efficient Phase 4
+      - anchor: anchor-canopy clustering
+      - propagation: legacy k-NN without conflict detection
+  4 = Conflict Resolution / Identity Merge (depends on Phase 3 mode)
+      - If propagation-conflicts: LLM verifies only actual conflicts (10-50 pairs)
+      - Otherwise: legacy identity merge detection
   5 = Speaker Hydration (enrich profiles with external data: LinkedIn, etc.)
 
 Examples:
@@ -571,9 +624,13 @@ Examples:
                             'Allows recent uploads to jump ahead of backlog between batches.')
     parser.add_argument('--max-anchors', type=int, default=None,
                        help='Max anchor name groups to process in Phase 3 (for testing)')
-    parser.add_argument('--phase3-mode', type=str, choices=['anchor', 'propagation'], default='anchor',
-                       help='Phase 3 algorithm: anchor (anchor-canopy clustering, default) or '
-                            'propagation (single-pass label propagation)')
+    parser.add_argument('--phase3-mode', type=str,
+                       choices=['propagation-conflicts', 'anchor', 'propagation'],
+                       default='propagation-conflicts',
+                       help='Phase 3 algorithm: propagation-conflicts (default, RECOMMENDED: '
+                            'k-NN with conflict detection for Phase 4 LLM resolution), '
+                            'anchor (anchor-canopy clustering), or '
+                            'propagation (legacy label propagation without conflict detection)')
 
     args = parser.parse_args()
 

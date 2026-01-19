@@ -49,12 +49,8 @@ class PgLLMCache:
         self.ttl_hours = ttl_hours
 
         # PostgreSQL connection parameters
-        self.db_config = {
-            'host': '10.0.0.4',
-            'database': 'av_content',
-            'user': 'signal4',
-            'password': 'signal4'
-        }
+        from src.backend.app.config.database import get_db_config
+        self.db_config = get_db_config()
 
         ttl_str = f"{ttl_hours}h" if ttl_hours is not None else "permanent"
         logger.info(f"PgLLMCache initialized: dashboard={dashboard_id}, threshold={similarity_threshold}, ttl={ttl_str}")

@@ -35,7 +35,7 @@ def _ensure_env_loaded():
         from .paths import get_project_root
         env_path = get_project_root() / '.env'
         if env_path.exists():
-            load_dotenv(env_path)
+            load_dotenv(env_path, override=True)
             logger.debug(f"Loaded environment from {env_path}")
         _env_loaded = True
 

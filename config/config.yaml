@@ -447,7 +447,7 @@ processing:
       eth: 10.0.0.34
       wifi: 10.0.0.28
       enabled: true
-      task_types: ["convert:2","download_podcast:1"]
+      task_types: ["download_podcast:1"]
       max_concurrent_tasks: 1
       type: "worker"
       download_mode: cookie
@@ -459,7 +459,7 @@ processing:
     worker1:
       eth: 10.0.0.9
       wifi: 10.0.0.54
-      enabled: true
+      enabled: false
       task_types: ["convert:1","transcribe:1","stitch:1"]
       max_concurrent_tasks: 1
       type: "worker"
@@ -495,7 +495,7 @@ processing:
       eth: 10.0.0.51
       wifi: 10.0.0.163
       enabled: true
-      task_types: ["convert:1","cleanup:1","transcribe:1"] #"cleanup",
+      task_types: ["convert:1","cleanup:1","transcribe:1","stitch:1"] #"cleanup",
       max_concurrent_tasks: 1
       type: "worker"
       services:
@@ -507,7 +507,7 @@ processing:
       eth: 10.0.0.209
       wifi: 10.0.0.99
       enabled: true
-      task_types: ["convert:1","transcribe:1","diarize:1"]
+      task_types: ["transcribe:1","diarize:1","convert:1"]
       max_concurrent_tasks: 1
       type: "worker"
       services:

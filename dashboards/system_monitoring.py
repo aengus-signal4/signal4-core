@@ -52,17 +52,110 @@ WORKER_PROCESSORS = {
     'worker6': {'host': '10.0.0.189', 'port': 8000},
 }
 
+# Log sources configuration for the Logs tab
+LOG_SOURCES = {
+    'Orchestrator': {
+        'orchestrator': {
+            'name': 'Orchestrator V2',
+            'command': 'tail -f /Users/signal4/logs/content_processing/worker6/worker6_orchestrator_v2.log',
+            'local': True,
+        },
+        'task_orchestrator': {
+            'name': 'Task Orchestrator',
+            'command': 'tail -f /Users/signal4/logs/content_processing/worker6/worker6_task_orchestrator.log',
+            'local': True,
+        },
+        'transcribe_orchestrator': {
+            'name': 'Transcribe Orchestrator',
+            'command': 'tail -f /Users/signal4/logs/content_processing/worker6/worker6_transcribe_orchestrator.log',
+            'local': True,
+        },
+    },
+    'Model Servers': {
+        'worker6_model_server': {
+            'name': 'Worker6 Model Server',
+            'command': 'tail -f /Users/signal4/logs/content_processing/worker6/worker6_model_server.log',
+            'local': True,
+        },
+        'worker0_model_server': {
+            'name': 'Worker0 Model Server',
+            'command': 'ssh signal4@10.0.0.34 "tail -f /Users/signal4/logs/content_processing/worker0/worker0_model_server.log"',
+            'local': False,
+            'host': '10.0.0.34',
+        },
+        'worker5_model_server': {
+            'name': 'Worker5 Model Server',
+            'command': 'ssh signal4@10.0.0.209 "tail -f /Users/signal4/logs/content_processing/worker5/worker5_model_server.log"',
+            'local': False,
+            'host': '10.0.0.209',
+        },
+    },
+    'Task Processors': {
+        'worker6_processor': {
+            'name': 'Worker6 Processor',
+            'command': 'tail -f /Users/signal4/logs/content_processing/worker6/worker6_task_processor.log',
+            'local': True,
+        },
+        'worker0_processor': {
+            'name': 'Worker0 Processor',
+            'command': 'ssh signal4@10.0.0.34 "tail -f /Users/signal4/logs/content_processing/worker0/worker0_task_processor.log"',
+            'local': False,
+            'host': '10.0.0.34',
+        },
+        'worker1_processor': {
+            'name': 'Worker1 Processor',
+            'command': 'ssh signal4@10.0.0.101 "tail -f /Users/signal4/logs/content_processing/worker1/worker1_task_processor.log"',
+            'local': False,
+            'host': '10.0.0.101',
+        },
+        'worker2_processor': {
+            'name': 'Worker2 Processor',
+            'command': 'ssh signal4@10.0.0.181 "tail -f /Users/signal4/logs/content_processing/worker2/worker2_task_processor.log"',
+            'local': False,
+            'host': '10.0.0.181',
+        },
+        'worker3_processor': {
+            'name': 'Worker3 Processor',
+            'command': 'ssh signal4@10.0.0.159 "tail -f /Users/signal4/logs/content_processing/worker3/worker3_task_processor.log"',
+            'local': False,
+            'host': '10.0.0.159',
+        },
+        'worker4_processor': {
+            'name': 'Worker4 Processor',
+            'command': 'ssh signal4@10.0.0.213 "tail -f /Users/signal4/logs/content_processing/worker4/worker4_task_processor.log"',
+            'local': False,
+            'host': '10.0.0.213',
+        },
+        'worker5_processor': {
+            'name': 'Worker5 Processor',
+            'command': 'ssh signal4@10.0.0.209 "tail -f /Users/signal4/logs/content_processing/worker5/worker5_task_processor.log"',
+            'local': False,
+            'host': '10.0.0.209',
+        },
+    },
+    'Other': {
+        'embedding_hydrator': {
+            'name': 'Embedding Hydrator',
+            'command': 'tail -f /Users/signal4/logs/content_processing/worker6/worker6_hydrate_embeddings.log',
+            'local': True,
+        },
+        'speaker_id_orchestrator': {
+            'name': 'Speaker ID Orchestrator',
+            'command': 'tail -f /Users/signal4/logs/content_processing/worker6/worker6_speaker_identification.orchestrator.log',
+            'local': True,
+        },
+    },
+}
+
 # Quick status grid configuration - organized by category
 QUICK_STATUS_GROUPS = {
     'Orchestrator': [
         {'name': 'Orchestrator', 'url': 'http://localhost:8001', 'endpoint': '/api/health',
-         'log_cmd': 'tail -f /Users/signal4/logs/content_processing/head/orchestrator.log'},
+         'log_cmd': 'tail -f /Users/signal4/logs/content_processing/worker6/worker6_orchestrator_v2.log'},
     ],
     'LLMs': [
-        {'name': 'Balancer', 'url': 'http://localhost:8002', 'endpoint': '/health',
-         'log_cmd': 'tail -f /Users/signal4/logs/content_processing/head/llm_balancer.log'},
-        {'name': 'Head', 'url': 'http://10.0.0.4:8004', 'endpoint': '/health',
-         'log_cmd': 'tail -f /Users/signal4/logs/content_processing/head/head_model_server.log'},
+        {'name': 'Worker6', 'url': 'http://10.0.0.189:8004', 'endpoint': '/health',
+         'log_cmd': 'tail -f /Users/signal4/logs/content_processing/worker6/worker6_model_server.log'},
         {'name': 'Worker0', 'url': 'http://10.0.0.34:8004', 'endpoint': '/health',
          'log_cmd': 'ssh signal4@10.0.0.34 "tail -f /Users/signal4/logs/content_processing/worker0/worker0_model_server.log"'},
         {'name': 'Worker5', 'url': 'http://10.0.0.209:8004', 'endpoint': '/health',
@@ -82,7 +175,7 @@ QUICK_STATUS_GROUPS = {
         {'name': 'W5', 'url': 'http://10.0.0.209:8000', 'endpoint': '/tasks',
          'log_cmd': 'ssh signal4@10.0.0.209 "tail -f /Users/signal4/logs/content_processing/worker5/worker5_task_processor.log"'},
         {'name': 'W6', 'url': 'http://10.0.0.189:8000', 'endpoint': '/tasks',
-         'log_cmd': 'ssh signal4@10.0.0.189 "tail -f /Users/signal4/logs/content_processing/worker6/worker6_task_processor.log"'},
+         'log_cmd': 'tail -f /Users/signal4/logs/content_processing/worker6/worker6_task_processor.log'},
     ],
     'Scheduled': [
         {'name': 'Podcast Index', 'task_id': 'podcast_index_download'},
@@ -247,6 +340,70 @@ def get_recent_throughput(minutes=60) -> dict:
             throughput[row.task_type] = float(row.content_hours) if row.content_hours else 0.0
 
         return throughput
+
+
+@st.cache_data(ttl=30)
+def get_task_queue_status() -> list[dict]:
+    """Get comprehensive task queue status with hourly rates - matches Worker Monitoring format."""
+    with get_session() as session:
+        result = session.execute(text("""
+            WITH task_stats AS (
+                SELECT
+                    tq.task_type,
+                    COUNT(*) as total_tasks,
+                    COALESCE(SUM(c.duration), 0) / 3600.0 as total_hours,
+                    COUNT(*) FILTER (WHERE tq.status = 'pending') as pending_count,
+                    COALESCE(SUM(c.duration) FILTER (WHERE tq.status = 'pending'), 0) / 3600.0 as pending_hours,
+                    COUNT(*) FILTER (WHERE tq.status = 'processing') as processing_count,
+                    COALESCE(SUM(c.duration) FILTER (WHERE tq.status = 'processing'), 0) / 3600.0 as processing_hours,
+                    COUNT(*) FILTER (WHERE tq.status = 'completed') as completed_count,
+                    COALESCE(SUM(c.duration) FILTER (WHERE tq.status = 'completed'), 0) / 3600.0 as completed_hours,
+                    COUNT(*) FILTER (WHERE tq.status = 'error') as failed_count,
+                    COALESCE(SUM(c.duration) FILTER (WHERE tq.status = 'error'), 0) / 3600.0 as failed_hours,
+                    COUNT(*) FILTER (WHERE tq.status = 'completed' AND tq.completed_at >= NOW() - INTERVAL '1 hour') as last_hour_count,
+                    COALESCE(SUM(c.duration) FILTER (WHERE tq.status = 'completed' AND tq.completed_at >= NOW() - INTERVAL '1 hour'), 0) / 3600.0 as last_hour_hours
+                FROM tasks.task_queue tq
+                LEFT JOIN content c ON tq.content_id = c.content_id
+                GROUP BY tq.task_type
+            )
+            SELECT * FROM task_stats
+            ORDER BY task_type
+        """)).fetchall()
+
+        stats = []
+        for row in result:
+            # For transcribe tasks, estimate hours based on 5 min average chunk
+            if row.task_type == 'transcribe':
+                total_hours = (row.total_tasks * 5) / 60.0
+                pending_hours = (row.pending_count * 5) / 60.0
+                processing_hours = (row.processing_count * 5) / 60.0
+                completed_hours = (row.completed_count * 5) / 60.0
+                failed_hours = (row.failed_count * 5) / 60.0
+                last_hour_hours = (row.last_hour_count * 5) / 60.0
+            else:
+                total_hours = float(row.total_hours) if row.total_hours else 0.0
+                pending_hours = float(row.pending_hours) if row.pending_hours else 0.0
+                processing_hours = float(row.processing_hours) if row.processing_hours else 0.0
+                completed_hours = float(row.completed_hours) if row.completed_hours else 0.0
+                failed_hours = float(row.failed_hours) if row.failed_hours else 0.0
+                last_hour_hours = float(row.last_hour_hours) if row.last_hour_hours else 0.0
+
+            stats.append({
+                'task_type': row.task_type,
+                'total_tasks': row.total_tasks,
+                'total_hours': total_hours,
+                'last_hour_rate': last_hour_hours,
+                'pending_count': row.pending_count,
+                'pending_hours': pending_hours,
+                'processing_count': row.processing_count,
+                'processing_hours': processing_hours,
+                'completed_count': row.completed_count,
+                'completed_hours': completed_hours,
+                'failed_count': row.failed_count,
+                'failed_hours': failed_hours,
+            })
+
+        return stats
 
 
 @st.cache_data(ttl=60)
@@ -470,6 +627,110 @@ def get_pipeline_progress_from_db() -> dict:
 
 
 @st.cache_data(ttl=60)
+def get_cache_table_status(time_window: str = '30d') -> dict:
+    """Get status of embedding cache tables (7d or 30d).
+
+    These cache tables contain segments ready for analysis with HNSW indexes.
+    Shows content/segment counts per project from the maintained cache.
+
+    Args:
+        time_window: '7d' or '30d' to select the cache table
+    """
+    cache_table = f"embedding_cache_{time_window}"
+
+    with get_session() as session:
+        try:
+            config = load_config()
+            active_projects = [project for project, settings in config.get('active_projects', {}).items()
+                             if settings.get('enabled', False)]
+
+            if not active_projects:
+                return {'error': 'No active projects'}
+
+            # Get cache table stats per project
+            project_stats = {}
+
+            for project in active_projects:
+                # Get segment and content counts from cache table
+                result = session.execute(text(f"""
+                    SELECT
+                        COUNT(*) as segment_count,
+                        COUNT(DISTINCT content_id) as content_count,
+                        COUNT(*) FILTER (WHERE embedding IS NOT NULL) as with_main_embedding,
+                        COUNT(*) FILTER (WHERE embedding_alt IS NOT NULL) as with_alt_embedding,
+                        MIN(publish_date) as earliest_date,
+                        MAX(publish_date) as latest_date
+                    FROM {cache_table}
+                    WHERE :project = ANY(projects)
+                """), {'project': project}).fetchone()
+
+                # Get daily segment counts (by publish_date)
+                daily_results = session.execute(text(f"""
+                    SELECT
+                        DATE(publish_date AT TIME ZONE 'UTC') as publish_day,
+                        COUNT(DISTINCT content_id) as content_count,
+                        COUNT(*) as segment_count
+                    FROM {cache_table}
+                    WHERE :project = ANY(projects)
+                    GROUP BY DATE(publish_date AT TIME ZONE 'UTC')
+                    ORDER BY publish_day
+                """), {'project': project}).fetchall()
+
+                daily_content = {row.publish_day: row.content_count for row in daily_results}
+                daily_segments = {row.publish_day: row.segment_count for row in daily_results}
+
+                project_stats[project] = {
+                    'segment_count': result.segment_count or 0,
+                    'content_count': result.content_count or 0,
+                    'with_main_embedding': result.with_main_embedding or 0,
+                    'with_alt_embedding': result.with_alt_embedding or 0,
+                    'earliest_date': result.earliest_date.date().isoformat() if result.earliest_date else None,
+                    'latest_date': result.latest_date.date().isoformat() if result.latest_date else None,
+                    'daily_content': daily_content,
+                    'daily_segments': daily_segments,
+                }
+
+            # Get overall cache stats
+            total_result = session.execute(text(f"""
+                SELECT
+                    COUNT(*) as total_segments,
+                    COUNT(DISTINCT content_id) as total_content,
+                    MIN(publish_date) as cache_start,
+                    MAX(publish_date) as cache_end
+                FROM {cache_table}
+            """)).fetchone()
+
+            # Generate date range for the cache window
+            days = 30 if time_window == '30d' else 7
+            end_date = datetime.now(timezone.utc).date()
+            start_date = end_date - timedelta(days=days - 1)
+            all_dates = []
+            current = start_date
+            while current <= end_date:
+                all_dates.append(current)
+                current += timedelta(days=1)
+
+            return {
+                'time_window': time_window,
+                'cache_table': cache_table,
+                'projects': project_stats,
+                'total_segments': total_result.total_segments or 0,
+                'total_content': total_result.total_content or 0,
+                'cache_start': total_result.cache_start.date().isoformat() if total_result.cache_start else None,
+                'cache_end': total_result.cache_end.date().isoformat() if total_result.cache_end else None,
+                'date_range': {
+                    'start': start_date.isoformat(),
+                    'end': end_date.isoformat(),
+                    'dates': [d.isoformat() for d in all_dates]
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting {time_window} cache status: {e}")
+            return {'error': str(e)}
+
+
+@st.cache_data(ttl=60)
 def get_global_content_status() -> dict:
     """Get content processing status breakdown by project for top-level summary."""
     with get_session() as session:
@@ -595,6 +856,100 @@ def get_global_content_status() -> dict:
 # =============================================================================
 # Visualization Functions
 # =============================================================================
+
+def create_cache_heatmap(cache_status: dict, show_segments: bool = False) -> go.Figure | None:
+    """Create a heatmap showing daily content/segments in the cache table per project.
+
+    Color intensity indicates content available for analysis that day.
+    Shows overall system health and data availability at a glance.
+
+    Args:
+        cache_status: Output from get_cache_table_status()
+        show_segments: If True, show segment counts; if False, show content counts
+    """
+    try:
+        if not cache_status or 'error' in cache_status:
+            return None
+
+        projects = cache_status.get('projects', {})
+        date_range = cache_status.get('date_range', {})
+        dates = date_range.get('dates', [])
+        time_window = cache_status.get('time_window', '30d')
+
+        if not projects or not dates:
+            return None
+
+        # Build heatmap data matrix
+        sorted_projects = sorted(projects.keys())
+        z_data = []
+        hover_text = []
+        metric_name = "Segments" if show_segments else "Content"
+        daily_key = 'daily_segments' if show_segments else 'daily_content'
+
+        for project in sorted_projects:
+            project_data = projects[project]
+            daily = project_data.get(daily_key, {})
+            row_data = []
+            row_hover = []
+
+            for date_str in dates:
+                date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+                count = daily.get(date_obj, 0)
+                row_data.append(count)
+                row_hover.append(f"{project}<br>{date_str}<br>{metric_name}: {count:,}")
+
+            z_data.append(row_data)
+            hover_text.append(row_hover)
+
+        # Create heatmap
+        fig = go.Figure(data=go.Heatmap(
+            z=z_data,
+            x=[datetime.strptime(d, "%Y-%m-%d").strftime("%m/%d") for d in dates],
+            y=sorted_projects,
+            colorscale=[
+                [0, '#f0f0f0'],      # No data - light gray
+                [0.01, '#c6e48b'],   # Low - light green
+                [0.25, '#7bc96f'],   # Medium-low
+                [0.5, '#239a3b'],    # Medium
+                [0.75, '#196127'],   # Medium-high
+                [1, '#0e4429']       # High - dark green
+            ],
+            showscale=True,
+            colorbar=dict(
+                title=metric_name,
+                titleside="right",
+                tickformat=","
+            ),
+            hovertemplate='%{text}<extra></extra>',
+            text=hover_text,
+        ))
+
+        # Adjust tick display based on window size
+        dtick = 1 if time_window == '7d' else 2
+
+        fig.update_layout(
+            xaxis=dict(
+                title='Publish Date',
+                tickangle=-45,
+                tickfont=dict(size=10),
+                dtick=dtick,
+            ),
+            yaxis=dict(
+                title='',
+                tickfont=dict(size=11),
+            ),
+            height=max(200, len(sorted_projects) * 35 + 80),
+            margin=dict(t=10, b=60, l=100, r=60),
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+        )
+
+        return fig
+
+    except Exception as e:
+        logger.error(f"Error creating cache heatmap: {e}")
+        return None
+
 
 def create_project_progress_bars(global_status: dict):
     """Create horizontal progress bars showing pipeline progress for each project."""
@@ -1448,227 +1803,9 @@ def render_services_tab():
 # =============================================================================
 
 def render_tasks_tab():
-    """Render the Tasks tab - scheduled tasks and task queue"""
+    """Render the Tasks tab - throughput and task queue status"""
 
-    # Scheduled Tasks Section
-    st.subheader("Scheduled Tasks")
-
-    scheduled_tasks_data = fetch_api("/api/scheduled_tasks")
-
-    if "error" in scheduled_tasks_data:
-        st.warning(f"Unable to fetch scheduled tasks: {scheduled_tasks_data.get('error')}")
-    else:
-        tasks = scheduled_tasks_data.get('tasks', {})
-
-        if tasks:
-            # Summary metrics
-            total_tasks = len(tasks)
-            enabled_tasks = sum(1 for t in tasks.values() if t and t.get('enabled', False))
-            running_tasks = sum(1 for t in tasks.values() if t and t.get('is_running', False))
-
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Total Tasks", total_tasks)
-            with col2:
-                st.metric("Enabled", enabled_tasks)
-            with col3:
-                st.metric("Running", running_tasks)
-            with col4:
-                failed_recently = sum(
-                    1 for t in tasks.values()
-                    if t and t.get('last_run', {}).get('result') in ['failed', 'error']
-                )
-                if failed_recently > 0:
-                    st.metric("Recent Failures", failed_recently, delta_color="inverse")
-                else:
-                    st.metric("Recent Failures", 0)
-
-            st.markdown("---")
-
-            # Task table with trigger buttons
-            for task_id, task_info in sorted(tasks.items(), key=lambda x: x[1].get('name', x[0]) if x[1] else x[0]):
-                if not task_info:
-                    continue
-
-                last_run = task_info.get('last_run', {})
-                schedule = task_info.get('schedule', {})
-                schedule_config = schedule.get('config', {})
-
-                # Determine status icon
-                if task_info.get('is_running'):
-                    status_icon = ":large_green_circle:"
-                    status_text = "Running"
-                elif not task_info.get('enabled'):
-                    status_icon = ":white_circle:"
-                    status_text = "Disabled"
-                elif last_run.get('result') == 'success':
-                    status_icon = ":white_check_mark:"
-                    status_text = "Success"
-                elif last_run.get('result') in ['failed', 'error']:
-                    status_icon = ":x:"
-                    status_text = "Failed"
-                else:
-                    status_icon = ":hourglass:"
-                    status_text = "Pending"
-
-                col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 2, 1])
-
-                with col1:
-                    st.markdown(f"{status_icon} **{task_info.get('name', task_id)}**")
-
-                with col2:
-                    st.caption(f"Schedule: {format_schedule_description(schedule_config)}")
-
-                with col3:
-                    last_run_time = last_run.get('time')
-                    st.caption(f"Last: {format_time_ago(last_run_time)}")
-
-                with col4:
-                    next_run = task_info.get('next_run_time')
-                    if next_run and task_info.get('enabled'):
-                        st.caption(f"Next: {format_time_until(next_run)}")
-                    else:
-                        st.caption("Next: N/A")
-
-                with col5:
-                    # Trigger button
-                    if task_info.get('enabled') and not task_info.get('is_running'):
-                        if st.button("Run", key=f"trigger_{task_id}", use_container_width=True):
-                            result = post_api(f"/api/scheduled_tasks/{task_id}/trigger")
-                            if "error" in result:
-                                st.error(f"Failed: {result.get('error')}")
-                            else:
-                                st.success("Triggered!")
-                                st.rerun()
-                    elif task_info.get('is_running'):
-                        st.caption("Running...")
-                    else:
-                        st.caption("Disabled")
-
-            # Expandable details
-            with st.expander("Task Details", expanded=False):
-                for task_id, task_info in sorted(tasks.items(), key=lambda x: x[1].get('name', x[0]) if x[1] else x[0]):
-                    if not task_info:
-                        continue
-
-                    last_run = task_info.get('last_run', {})
-                    schedule = task_info.get('schedule', {})
-                    executor = task_info.get('executor', {})
-
-                    col1, col2 = st.columns([1, 3])
-
-                    with col1:
-                        st.markdown(f"**{task_info.get('name', task_id)}**")
-                        if task_info.get('is_running'):
-                            st.success("RUNNING")
-                        elif not task_info.get('enabled'):
-                            st.warning("DISABLED")
-                        elif last_run.get('result') == 'success':
-                            st.info("IDLE")
-                        elif last_run.get('result') in ['failed', 'error']:
-                            st.error("FAILED")
-                        else:
-                            st.info("PENDING")
-
-                    with col2:
-                        st.caption(task_info.get('description', ''))
-
-                        detail_cols = st.columns(4)
-                        with detail_cols[0]:
-                            st.markdown("**Schedule**")
-                            st.text(format_schedule_description(schedule.get('config', {})))
-
-                        with detail_cols[1]:
-                            st.markdown("**Last Run**")
-                            last_time = last_run.get('time')
-                            if last_time:
-                                try:
-                                    last_dt = datetime.fromisoformat(last_time.replace('Z', '+00:00'))
-                                    st.text(last_dt.strftime('%Y-%m-%d %H:%M'))
-                                except Exception:
-                                    st.text(last_time[:16] if last_time else "Never")
-                            else:
-                                st.text("Never")
-
-                        with detail_cols[2]:
-                            st.markdown("**Duration**")
-                            st.text(format_duration(last_run.get('duration_seconds')))
-
-                        with detail_cols[3]:
-                            st.markdown("**Next Run**")
-                            next_run = task_info.get('next_run_time')
-                            if next_run and task_info.get('enabled'):
-                                st.text(format_time_until(next_run))
-                            else:
-                                st.text("N/A")
-
-                        executor_type = executor.get('type', 'cli')
-                        if executor_type == 'cli':
-                            cmd = executor.get('command', '')
-                            args = executor.get('args', [])
-                            st.caption(f"Executor: `{cmd} {' '.join(args)}`")
-                        elif executor_type == 'sql':
-                            func = executor.get('function', '')
-                            st.caption(f"Executor: SQL function `{func}()`")
-
-                    st.markdown("---")
-        else:
-            st.info("No scheduled tasks configured")
-
-    st.divider()
-
-    # Task Queue Section
-    st.subheader("Task Queue Overview")
-
-    task_stats = get_task_stats()
-    recent_throughput = get_recent_throughput(minutes=60)
-
-    total_pending = sum(stats.get('pending', {}).get('count', 0) for stats in task_stats.values())
-    total_processing = sum(stats.get('processing', {}).get('count', 0) for stats in task_stats.values())
-    total_completed = sum(stats.get('completed', {}).get('count', 0) for stats in task_stats.values())
-    total_failed = sum(stats.get('failed', {}).get('count', 0) for stats in task_stats.values())
-
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Pending", f"{total_pending:,}")
-    with col2:
-        st.metric("Processing", f"{total_processing:,}")
-    with col3:
-        st.metric("Completed", f"{total_completed:,}")
-    with col4:
-        st.metric("Failed", f"{total_failed:,}")
-
-    # Detailed breakdown
-    task_queue_data = []
-    default_stat = {'count': 0, 'hours': 0.0}
-
-    for task_type in sorted(task_stats.keys()):
-        stats = task_stats.get(task_type, {})
-        total_count = sum(s['count'] for s in stats.values())
-
-        if total_count > 0:
-            pending = stats.get('pending', default_stat)
-            processing = stats.get('processing', default_stat)
-            completed = stats.get('completed', default_stat)
-            failed = stats.get('failed', default_stat)
-            throughput_60min = recent_throughput.get(task_type, 0.0)
-
-            task_queue_data.append({
-                'Task Type': task_type,
-                'Pending': f"{pending['count']:,}",
-                'Processing': f"{processing['count']:,}",
-                'Completed': f"{completed['count']:,}",
-                'Failed': f"{failed['count']:,}",
-                'Last Hour': f"{round(throughput_60min, 1)}h"
-            })
-
-    if task_queue_data:
-        task_df = pd.DataFrame(task_queue_data)
-        st.dataframe(task_df, hide_index=True, use_container_width=True)
-
-    st.divider()
-
-    # Throughput Chart
+    # Throughput Chart (moved to top)
     st.subheader("Content Throughput (Last 24 Hours)")
 
     now = datetime.now(timezone.utc)
@@ -1686,6 +1823,201 @@ def render_tasks_tab():
     else:
         st.info("No throughput data available for the last 24 hours")
 
+    st.divider()
+
+    # Task Queue Section
+    st.subheader("Task Queue Status")
+
+    task_queue_stats = get_task_queue_status()
+
+    if task_queue_stats:
+        # Build the table data matching the Worker Monitoring format
+        task_queue_data = []
+
+        for stats in task_queue_stats:
+            # Format hours helper
+            def fmt_hours(h):
+                return f"{int(round(h)):,}h" if h >= 1 else f"{int(round(h * 60))}m" if h > 0 else "0h"
+
+            task_queue_data.append({
+                'Task Type': stats['task_type'],
+                'Last Hour Rate': f"{fmt_hours(stats['last_hour_rate'])}/h",
+                'Pending': f"{stats['pending_count']:,} ({fmt_hours(stats['pending_hours'])})",
+                'Processing': f"{stats['processing_count']:,} ({fmt_hours(stats['processing_hours'])})",
+                'Completed': f"{stats['completed_count']:,} ({fmt_hours(stats['completed_hours'])})",
+                'Failed': f"{stats['failed_count']:,} ({fmt_hours(stats['failed_hours'])})",
+            })
+
+        task_df = pd.DataFrame(task_queue_data)
+        st.dataframe(task_df, hide_index=True, use_container_width=True)
+    else:
+        st.info("No task queue data available")
+
+
+# =============================================================================
+# Logs Tab Render Functions
+# =============================================================================
+
+def get_log_file_path(log_config: dict) -> str:
+    """Extract the log file path from the command."""
+    command = log_config.get('command', '')
+    # Extract path from "tail -f /path/to/file" or ssh command
+    if 'tail -f ' in command:
+        # Find the path after 'tail -f '
+        parts = command.split('tail -f ')
+        if len(parts) > 1:
+            # Remove any trailing quotes
+            path = parts[-1].strip().rstrip('"')
+            return path
+    return ''
+
+
+def fetch_log_lines(log_config: dict, num_lines: int = 100) -> tuple[list[str], str | None]:
+    """Fetch the last N lines from a log file."""
+    import subprocess
+
+    log_path = get_log_file_path(log_config)
+    if not log_path:
+        return [], "Could not determine log file path"
+
+    try:
+        if log_config.get('local', True):
+            # Local file - use tail directly
+            result = subprocess.run(
+                ['tail', '-n', str(num_lines), log_path],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode != 0:
+                return [], f"Error reading log: {result.stderr}"
+            lines = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            return lines, None
+        else:
+            # Remote file - use ssh
+            host = log_config.get('host', '')
+            if not host:
+                return [], "No host configured for remote log"
+
+            result = subprocess.run(
+                ['ssh', f'signal4@{host}', f'tail -n {num_lines} {log_path}'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode != 0:
+                return [], f"Error reading remote log: {result.stderr}"
+            lines = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            return lines, None
+
+    except subprocess.TimeoutExpired:
+        return [], "Timeout fetching log"
+    except Exception as e:
+        return [], f"Error: {str(e)}"
+
+
+def render_logs_tab():
+    """Render the Logs tab - log viewer with selectable sources"""
+
+    # Build flat list of log sources for selection
+    log_options = {}
+    for category, sources in LOG_SOURCES.items():
+        for log_id, log_config in sources.items():
+            log_options[log_id] = {
+                'category': category,
+                'name': log_config['name'],
+                'config': log_config
+            }
+
+    # Two-column layout: sidebar for selection, main area for log display
+    col_select, col_logs = st.columns([1, 4])
+
+    with col_select:
+        st.subheader("Log Sources")
+
+        # Group logs by category
+        selected_log = st.session_state.get('selected_log', 'orchestrator')
+
+        for category, sources in LOG_SOURCES.items():
+            st.markdown(f"**{category}**")
+            for log_id, log_config in sources.items():
+                is_selected = selected_log == log_id
+                button_type = "primary" if is_selected else "secondary"
+                if st.button(
+                    log_config['name'],
+                    key=f"log_btn_{log_id}",
+                    use_container_width=True,
+                    type=button_type
+                ):
+                    st.session_state.selected_log = log_id
+                    st.rerun()
+            st.markdown("")  # Spacing between categories
+
+    with col_logs:
+        if selected_log and selected_log in log_options:
+            log_info = log_options[selected_log]
+            log_config = log_info['config']
+
+            # Header with log name and controls
+            header_col1, header_col2, header_col3 = st.columns([3, 1, 1])
+
+            with header_col1:
+                st.subheader(f"{log_info['name']}")
+                location = "Local" if log_config.get('local', True) else f"Remote ({log_config.get('host', 'unknown')})"
+                st.caption(f"{location} | {get_log_file_path(log_config)}")
+
+            with header_col2:
+                num_lines = st.selectbox(
+                    "Lines",
+                    options=[50, 100, 200, 500, 1000],
+                    index=1,
+                    key="log_num_lines",
+                    label_visibility="collapsed"
+                )
+
+            with header_col3:
+                load_clicked = st.button("Load Logs", key="load_logs", use_container_width=True)
+
+            # Copy command button
+            st.code(log_config['command'], language="bash")
+
+            # Track loaded logs in session state
+            log_state_key = f"loaded_log_{selected_log}"
+
+            # Load logs only when button is clicked
+            if load_clicked:
+                with st.spinner("Loading logs..."):
+                    lines, error = fetch_log_lines(log_config, num_lines)
+                    st.session_state[log_state_key] = {'lines': lines, 'error': error, 'num_lines': num_lines}
+
+            # Display logs if they've been loaded
+            if log_state_key in st.session_state:
+                cached = st.session_state[log_state_key]
+                lines = cached['lines']
+                error = cached['error']
+
+                if error:
+                    st.error(error)
+                elif not lines:
+                    st.info("No log entries found")
+                else:
+                    # Display logs in a scrollable container
+                    # Use text_area for easy copying and scrolling
+                    log_content = '\n'.join(lines)
+                    st.text_area(
+                        "Log Output",
+                        value=log_content,
+                        height=600,
+                        key="log_display",
+                        label_visibility="collapsed"
+                    )
+
+                    st.caption(f"Showing last {len(lines)} lines")
+            else:
+                st.info("Click 'Load Logs' to fetch log entries")
+        else:
+            st.info("Select a log source from the left panel")
+
 
 # =============================================================================
 # Projects Tab Render Functions
@@ -1694,7 +2026,77 @@ def render_tasks_tab():
 def render_projects_tab():
     """Render the Projects tab - pipeline progress and project status"""
 
-    # Project Progress Section
+    # Analysis Cache Status (primary view - shows what's ready for analysis)
+    st.subheader("Analysis Cache Status")
+    st.caption("Content available for semantic search and analysis (from embedding cache tables)")
+
+    # Time window selector
+    col_toggle, col_spacer = st.columns([1, 3])
+    with col_toggle:
+        time_window = st.radio(
+            "Time Window",
+            options=['30d', '7d'],
+            horizontal=True,
+            key='cache_time_window',
+            label_visibility='collapsed'
+        )
+
+    # Fetch cache status for selected window
+    cache_status = get_cache_table_status(time_window)
+
+    if cache_status and 'error' not in cache_status:
+        projects = cache_status.get('projects', {})
+
+        # Summary metrics row
+        col1, col2, col3, col4 = st.columns(4)
+
+        total_content = cache_status.get('total_content', 0)
+        total_segments = cache_status.get('total_segments', 0)
+        total_with_main = sum(p.get('with_main_embedding', 0) for p in projects.values())
+        total_with_alt = sum(p.get('with_alt_embedding', 0) for p in projects.values())
+
+        with col1:
+            st.metric("Content Items", f"{total_content:,}")
+        with col2:
+            st.metric("Segments", f"{total_segments:,}")
+        with col3:
+            st.metric("Main Embeddings", f"{total_with_main:,}")
+        with col4:
+            st.metric("Alt Embeddings", f"{total_with_alt:,}")
+
+        # Show cache date range
+        cache_start = cache_status.get('cache_start', 'N/A')
+        cache_end = cache_status.get('cache_end', 'N/A')
+        st.caption(f"Cache range: {cache_start} to {cache_end} | Table: `{cache_status.get('cache_table')}`")
+
+        # Heatmap visualization
+        show_segments = st.checkbox("Show segments (instead of content)", value=False, key='show_segments')
+        heatmap_fig = create_cache_heatmap(cache_status, show_segments=show_segments)
+        if heatmap_fig:
+            st.plotly_chart(heatmap_fig, use_container_width=True)
+        else:
+            st.info(f"No data available in {time_window} cache")
+
+        # Per-project summary table
+        with st.expander("Project Details", expanded=False):
+            project_rows = []
+            for project_name, pdata in sorted(projects.items()):
+                project_rows.append({
+                    'Project': project_name,
+                    'Content': f"{pdata.get('content_count', 0):,}",
+                    'Segments': f"{pdata.get('segment_count', 0):,}",
+                    'Main Emb.': f"{pdata.get('with_main_embedding', 0):,}",
+                    'Alt Emb.': f"{pdata.get('with_alt_embedding', 0):,}",
+                    'Date Range': f"{pdata.get('earliest_date', 'N/A')} - {pdata.get('latest_date', 'N/A')}"
+                })
+            if project_rows:
+                st.dataframe(pd.DataFrame(project_rows), hide_index=True, use_container_width=True)
+    else:
+        st.warning(f"Unable to load {time_window} cache status: {cache_status.get('error', 'Unknown error')}")
+
+    st.divider()
+
+    # Project Progress Section (existing pipeline view)
     st.subheader("Project Pipeline Progress")
 
     global_status = get_global_content_status()
@@ -1898,19 +2300,19 @@ def main():
     st.divider()
 
     # Create tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["Quick Status", "Services", "Tasks", "Projects"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Tasks", "Services", "Projects", "Logs"])
 
     with tab1:
-        render_quick_status_tab()
+        render_tasks_tab()
 
     with tab2:
         render_services_tab()
 
     with tab3:
-        render_tasks_tab()
+        render_projects_tab()
 
     with tab4:
-        render_projects_tab()
+        render_logs_tab()
 
 
 if __name__ == "__main__":
