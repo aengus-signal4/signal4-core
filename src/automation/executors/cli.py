@@ -24,9 +24,9 @@ class CLIExecutor(BaseExecutor):
     - env: Additional environment variables (optional)
     """
 
-    def __init__(self, default_cwd: Optional[str] = None, default_python: Optional[str] = None):
+    def __init__(self, default_cwd: Optional[str] = None, default_uv_path: Optional[str] = None):
         self.default_cwd = default_cwd or "/Users/signal4/signal4/core"
-        self.default_python = default_python or "/opt/homebrew/Caskroom/miniforge/base/envs/content-processing/bin/python"
+        self.default_uv_path = default_uv_path or "/Users/signal4/.local/bin/uv"
 
     async def execute(
         self,
@@ -42,12 +42,11 @@ class CLIExecutor(BaseExecutor):
         cwd = config.get('cwd', self.default_cwd)
         env_additions = config.get('env', {})
 
-        # Use default python path if command is just "python"
+        # Use uv run for python commands to ensure correct environment
         if command == 'python':
-            command = self.default_python
-
-        # Build full command
-        full_cmd = [command] + args
+            full_cmd = [self.default_uv_path, 'run', 'python'] + args
+        else:
+            full_cmd = [command] + args
 
         # Prepare environment
         env = os.environ.copy()
@@ -65,8 +64,8 @@ class CLIExecutor(BaseExecutor):
                 env=env
             )
 
-            # Capture output silently
-            async def stream_output(stream, lines_list):
+            # Capture output (stored for API access)
+            async def stream_output(stream, lines_list, is_stderr=False):
                 while True:
                     line = await stream.readline()
                     if not line:

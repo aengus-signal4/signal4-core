@@ -159,7 +159,7 @@ services:
 # Processing settings
 processing:
   hf_token: "${HF_TOKEN}"  # HuggingFace token for pyannote models (loaded from .env)
-  # uv path for running Python in the project's virtual environment
+  # uv path for running Python in the project's virtual environment (installed via curl -LsSf https://astral.sh/uv/install.sh | sh)
   uv_path: "/Users/signal4/.local/bin/uv"
   # Legacy python paths kept for compatibility with process verification
   head_python_path: "/opt/homebrew/Caskroom/miniforge/base/envs/content-processing/bin/python"  # Python path for the head node
@@ -791,7 +791,7 @@ error_handling:
 # Replaces individual managers (indexing, task_creation, embedding_hydration, speaker_clustering, podcast_collection)
 # and pg_cron jobs (cache refresh, clustering)
 scheduled_tasks:
-  enabled: false  # Disabled - routine tasks not running
+  enabled: true  # Enabled - orchestrator manages all routine tasks
   state_file: "/Users/signal4/logs/content_processing/scheduled_tasks_state.json"
 
   tasks:
@@ -908,68 +908,9 @@ scheduled_tasks:
         function: "refresh_embedding_cache_7d"
       timeout_seconds: 600
 
-    clustering_30d_main:
-      name: "30-Day Clustering (Main)"
-      description: "Generate 30-day clusters (main model)"
-      enabled: true
-      schedule:
-        type: time_of_day
-        hours: [3]
-      executor:
-        type: cli
-        command: "python"
-        args: ["src/backend/scripts/generate_embedding_clusters.py", "--time-window", "30d", "--model", "main"]
-      timeout_seconds: 3600
-
-    clustering_30d_alt:
-      name: "30-Day Clustering (Alt)"
-      description: "Generate 30-day clusters (alt model)"
-      enabled: true
-      schedule:
-        type: time_of_day
-        hours: [3]
-        minutes: [10]
-      executor:
-        type: cli
-        command: "python"
-        args: ["src/backend/scripts/generate_embedding_clusters.py", "--time-window", "30d", "--model", "alt"]
-      timeout_seconds: 3600
-
-    clustering_7d_main:
-      name: "7-Day Clustering (Main)"
-      description: "Generate 7-day clusters (main model)"
-      enabled: true
-      schedule:
-        type: interval
-        interval_seconds: 7200  # Every 2 hours
-      executor:
-        type: cli
-        command: "python"
-        args: ["src/backend/scripts/generate_embedding_clusters.py", "--time-window", "7d", "--model", "main"]
-      timeout_seconds: 1800
-
-    clustering_7d_alt:
-      name: "7-Day Clustering (Alt)"
-      description: "Generate 7-day clusters (alt model)"
-      enabled: true
-      schedule:
-        type: interval
-        interval_seconds: 7200
-        offset_seconds: 600  # 10 min after main
-      executor:
-        type: cli
-        command: "python"
-        args: ["src/backend/scripts/generate_embedding_clusters.py", "--time-window", "7d", "--model", "alt"]
-      timeout_seconds: 1800
-
-    cleanup_old_clusters:
-      name: "Cleanup Old Clusters"
-      description: "Clean up old cluster data"
-      enabled: true
-      schedule:
-        type: time_of_day
-        hours: [4]
-      executor:
-        type: sql
-        function: "cleanup_old_clusters"
-      timeout_seconds: 300
+    # Clustering tasks disabled - not using clustering for now
+    # clustering_30d_main:
+    # clustering_30d_alt:
+    # clustering_7d_main:
+    # clustering_7d_alt:
+    # cleanup_old_clusters:

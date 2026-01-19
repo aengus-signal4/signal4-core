@@ -92,15 +92,15 @@ class ScheduledTaskManager:
 
         # Get default paths from config
         processing_config = config.get('processing', {})
-        default_python = processing_config.get(
-            'head_python_path',
-            '/opt/homebrew/Caskroom/miniforge/base/envs/content-processing/bin/python'
+        default_uv_path = processing_config.get(
+            'uv_path',
+            '/Users/signal4/.local/bin/uv'
         )
         storage_config = config.get('storage', {}).get('local', {})
         default_cwd = storage_config.get('base_path', '/Users/signal4/signal4/core')
 
         # Initialize executors
-        self._init_executors(default_cwd, default_python)
+        self._init_executors(default_cwd, default_uv_path)
 
         # Load task definitions from config
         self._load_tasks()
@@ -110,11 +110,11 @@ class ScheduledTaskManager:
 
         logger.info(f"ScheduledTaskManager initialized with {len(self.tasks)} tasks")
 
-    def _init_executors(self, default_cwd: str, default_python: str):
+    def _init_executors(self, default_cwd: str, default_uv_path: str):
         """Initialize task executors"""
         self.executors['cli'] = CLIExecutor(
             default_cwd=default_cwd,
-            default_python=default_python
+            default_uv_path=default_uv_path
         )
         self.executors['sql'] = SQLExecutor()
 
