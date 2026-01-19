@@ -1,0 +1,52 @@
+# Health & Wellness Dashboard Configuration
+# ==========================================
+
+dashboard:
+  id: health
+  name: "Health & Wellness Portal"
+  project: Health
+  languages: [en]
+
+search:
+  embedding_model: "Qwen/Qwen3-Embedding-0.6B"
+  embedding_dim: 1024
+  use_alt_embeddings: false
+  time_windows: [7, 30, 90, 365]
+  default_window: 30
+  max_results: 500
+  similarity_threshold: 0.43
+  max_per_channel: 3
+  rebuild_indexes_daily: true
+  stale_while_revalidate: true
+
+llm:
+  enabled: true
+  model: "qwen3:4b-instruct"
+  temperature: 0.3
+  query_expansion: "theme_queries"
+  max_sample_segments: 20
+  sampling_strategy: "diverse"
+
+audio:
+  enabled: true
+  default_padding: 2.0
+  max_padding: 10.0
+  allow_download: true
+
+filters:
+  speakers: true
+  channels: true
+  date_range: true
+  language: false
+
+privacy:
+  allowed_projects: [Health, Big_Channels]
+  allow_downloads: true
+  show_speaker_names: true
+  audit_searches: false
+  audit_downloads: false
+
+ui:
+  theme_aware: true
+  results_per_page: 20
+  show_context_turns: 2

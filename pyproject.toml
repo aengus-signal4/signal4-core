@@ -76,6 +76,7 @@ dependencies = [
     "hdbscan>=0.8.41",
     "email-validator>=2.3.0",
     "bcrypt>=4.0.0",
+    "plotly>=5.24.1",
 ]
 
 [project.optional-dependencies]

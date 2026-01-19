@@ -467,90 +467,6 @@ STEP_REGISTRY: Dict[str, StepMetadata] = {
         method_name="analyze_themes_with_subthemes"
     ),
 
-    # ========================================================================
-    # Health Dashboard Steps
-    # ========================================================================
-
-    "generate_health_queries": StepMetadata(
-        name="generate_health_queries",
-        description="Generate diverse queries across health domains (nutrition, fitness, mental health, etc.)",
-        parameters={
-            "include_llm_expansion": {
-                "type": "boolean",
-                "default": True,
-                "description": "Expand queries with LLM variations"
-            },
-            "include_cross_domain": {
-                "type": "boolean",
-                "default": True,
-                "description": "Include cross-domain connection queries"
-            },
-            "include_perspectives": {
-                "type": "boolean",
-                "default": True,
-                "description": "Include perspective variation queries (mainstream, alternative, skeptical)"
-            },
-            "max_queries": {
-                "type": "integer",
-                "default": 100,
-                "description": "Maximum queries to generate"
-            },
-            "sampling_strategy": {
-                "type": "string",
-                "enum": ["weighted", "stratified", "random"],
-                "default": "stratified",
-                "description": "Query sampling strategy"
-            }
-        },
-        method_name="generate_health_queries"
-    ),
-
-    "batch_retrieve_segments": StepMetadata(
-        name="batch_retrieve_segments",
-        description="Retrieve segments for multiple queries in batch with deduplication",
-        parameters={
-            "k_per_query": {
-                "type": "integer",
-                "default": 50,
-                "description": "Maximum results per query"
-            },
-            "time_window_days": {
-                "type": "integer",
-                "default": 90,
-                "description": "Time window in days"
-            },
-            "deduplicate": {
-                "type": "boolean",
-                "default": True,
-                "description": "Deduplicate segments across queries"
-            },
-            "max_total_segments": {
-                "type": "integer",
-                "default": 2000,
-                "description": "Maximum total segments to return"
-            }
-        },
-        method_name="batch_retrieve_segments"
-    ),
-
-    "group_by_domain": StepMetadata(
-        name="group_by_domain",
-        description="Group segments by health domain using query metadata",
-        parameters={
-            "min_segments_per_domain": {
-                "type": "integer",
-                "default": 10,
-                "description": "Minimum segments required to include a domain"
-            },
-            "domains_from": {
-                "type": "string",
-                "enum": ["query_metadata", "embedding_clusters", "llm_classification"],
-                "default": "query_metadata",
-                "description": "How to determine segment domains"
-            }
-        },
-        method_name="group_by_domain"
-    )
 }
 
 
@@ -659,7 +575,7 @@ def build_pipeline_from_steps(
         # Merge global filters for retrieval and analysis steps
         # Global filters should override workflow defaults (so config goes first, then global_filters override)
         if step_name in ["retrieve_segments", "quantitative_analysis", "retrieve_segments_by_search",
-                         "batch_retrieve_segments", "retrieve_all_segments", "rerank_segments"]:
+                         "retrieve_all_segments", "rerank_segments"]:
             config = {**config, **global_filters}
 
         # Get method from pipeline

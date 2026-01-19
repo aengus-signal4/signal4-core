@@ -453,135 +453,6 @@ WORKFLOWS: Dict[str, List[Dict[str, Any]]] = {
     ],
 
     # ========================================================================
-    # Health & Wellness Dashboard Workflow
-    # ========================================================================
-    # Comprehensive health analysis: generates diverse queries across health domains,
-    # clusters responses sub-thematically, generates summaries, and rolls up.
-
-    "health_dashboard": [
-        # Step 1: Generate diverse health queries across all domains
-        {
-            "step": "generate_health_queries",
-            "config": {
-                "include_llm_expansion": True,
-                "include_cross_domain": True,
-                "include_perspectives": True,
-                "max_queries": 100,
-                "sampling_strategy": "stratified"
-            }
-        },
-        # Step 2: Retrieve segments for all queries (batched semantic search)
-        {
-            "step": "batch_retrieve_segments",
-            "config": {
-                "k_per_query": 50,
-                "time_window_days": 90,
-                "deduplicate": True,
-                "max_total_segments": 2000
-            }
-        },
-        # Step 3: Group segments by health domain
-        {
-            "step": "group_by_domain",
-            "config": {
-                "min_segments_per_domain": 10,
-                "domains_from": "query_metadata"
-            }
-        },
-        # Step 4: Extract themes within each domain
-        {
-            "step": "extract_themes",
-            "config": {
-                "method": "hdbscan",
-                "min_cluster_size": 8,
-                "max_themes": 6,
-                "per_domain": True,
-                "use_faiss": True
-            }
-        },
-        # Step 5: Extract sub-themes within each theme
-        {
-            "step": "extract_subthemes",
-            "config": {
-                "method": "hdbscan",
-                "n_subthemes": 4,
-                "min_cluster_size": 4,
-                "require_valid_clusters": True,
-                "min_silhouette_score": 0.12
-            }
-        },
-        # Step 6: Quantitative analysis per domain
-        {
-            "step": "quantitative_analysis",
-            "config": {
-                "include_baseline": False,
-                "per_domain": True,
-                "metrics": ["segment_count", "channel_distribution", "temporal_distribution"]
-            }
-        },
-        # Step 7: Select representative segments per sub-theme
-        {
-            "step": "select_segments",
-            "config": {
-                "strategy": "balanced",
-                "n_per_subtheme": 8,
-                "n_unclustered": 4,
-                "per_domain": True
-            }
-        },
-        # Step 8: Generate sub-theme summaries
-        {
-            "step": "generate_summary",
-            "config": {
-                "template": "health_subtheme_summary",
-                "level": "subtheme",
-                "model": "grok-4-fast-non-reasoning-latest",
-                "temperature": 0.3,
-                "max_tokens": 300,
-                "max_concurrent": 20
-            }
-        },
-        # Step 9: Generate theme summaries (rolling up sub-themes)
-        {
-            "step": "generate_summary",
-            "config": {
-                "template": "health_theme_summary",
-                "level": "theme",
-                "model": "grok-4-fast-non-reasoning-latest",
-                "temperature": 0.3,
-                "max_tokens": 500,
-                "max_concurrent": 10,
-                "include_subtheme_summaries": True
-            }
-        },
-        # Step 10: Generate domain summaries (rolling up themes)
-        {
-            "step": "generate_summary",
-            "config": {
-                "template": "health_domain_summary",
-                "level": "domain",
-                "model": "grok-4-fast-non-reasoning-latest",
-                "temperature": 0.3,
-                "max_tokens": 600,
-                "max_concurrent": 5,
-                "include_theme_summaries": True
-            }
-        },
-        # Step 11: Generate overall health dashboard synthesis
-        {
-            "step": "generate_summary",
-            "config": {
-                "template": "health_dashboard_synthesis",
-                "level": "corpus",
-                "model": "grok-4-fast-non-reasoning-latest",
-                "temperature": 0.3,
-                "max_tokens": 1000,
-                "include_all_domain_summaries": True
-            }
-        }
-    ],
-
-    # ========================================================================
     # Quick Summary Workflow (Fast)
     # ========================================================================
     # Optimized for speed: expand query, but no clustering, fewer segments.
@@ -623,59 +494,6 @@ WORKFLOWS: Dict[str, List[Dict[str, Any]]] = {
         }
     ],
 
-    # Lighter version for quick health topic exploration
-    "health_topic_explorer": [
-        {
-            "step": "expand_query",
-            "config": {
-                "strategy": "health_domain",
-                "include_perspectives": True
-            }
-        },
-        {
-            "step": "retrieve_segments",
-            "config": {
-                "k": 300,
-                "time_window_days": 90
-            }
-        },
-        {
-            "step": "quick_cluster_check",
-            "config": {
-                "method": "hdbscan",
-                "min_cluster_size": 8,
-                "min_silhouette_score": 0.12,
-                "skip_if_few_segments": 25,
-                "max_themes": 5,
-                "force_split": True
-            }
-        },
-        {
-            "step": "quantitative_analysis",
-            "config": {
-                "include_baseline": True,
-                "time_window_days": 90
-            }
-        },
-        {
-            "step": "select_segments",
-            "config": {
-                "strategy": "balanced",
-                "n": 20,
-                "n_unclustered": 8
-            }
-        },
-        {
-            "step": "generate_summary",
-            "config": {
-                "template": "health_rag_answer",
-                "level": "theme",
-                "model": "grok-4-fast-non-reasoning-latest",
-                "temperature": 0.3,
-                "max_tokens": 600
-            }
-        }
-    ]
 }
 
 
@@ -717,9 +535,7 @@ def list_workflows() -> Dict[str, str]:
         "hierarchical_summary": "Hierarchical: retrieve → cluster themes → summarize themes → meta-summary",
         "hierarchical_with_subthemes": "Hierarchical with sub-themes: retrieve → themes → sub-themes → summaries at all levels",
         "deep_analysis": "Deep analysis: stance variation → retrieve → themes → quantitative (with baseline) → summaries",
-        "landing_page_overview": "Landing page: retrieve all → discover major themes (FAISS + HDBSCAN) → corpus stats → parallel theme analysis with sub-themes → report-style summaries",
-        "health_dashboard": "Health dashboard: generate diverse health queries → batch retrieve → group by domain → extract themes/sub-themes per domain → hierarchical summaries → synthesis",
-        "health_topic_explorer": "Health topic explorer: quick health-focused RAG with perspective variations and sub-theme detection"
+        "landing_page_overview": "Landing page: retrieve all → discover major themes (FAISS + HDBSCAN) → corpus stats → parallel theme analysis with sub-themes → report-style summaries"
     }
 
 
