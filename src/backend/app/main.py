@@ -124,7 +124,16 @@ async def lifespan(app: FastAPI):
     _embedding_models.clear()
 
 # Debug mode from environment (controls docs and CORS)
+# SECURITY: Default to false - must explicitly set DEBUG=true for development
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+
+# Production safety check - warn if DEBUG is enabled
+if DEBUG:
+    logger.warning("=" * 80)
+    logger.warning("⚠️  DEBUG MODE ENABLED - NOT FOR PRODUCTION USE")
+    logger.warning("⚠️  CORS allows localhost origins, API docs are exposed")
+    logger.warning("⚠️  Set DEBUG=false in production environments")
+    logger.warning("=" * 80)
 
 # Create FastAPI app with lifespan
 # Swagger/ReDoc disabled in production (DEBUG=false)

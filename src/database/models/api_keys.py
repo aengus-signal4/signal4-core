@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Tuple, Optional
 import uuid
 import hashlib
+import bcrypt
 
 from .base import Base
 
@@ -27,7 +28,8 @@ class ApiKey(Base):
     rate limiting and audit purposes. Keys can be disabled instantly.
 
     Security features:
-    - Keys are hashed (SHA-256) before storage - raw key only shown once at creation
+    - Keys are hashed using bcrypt (cost factor 12) before storage
+    - Legacy SHA-256 hashes are supported for backward compatibility
     - Per-key rate limits with automatic disable on threshold
     - Full audit trail via ApiKeyUsage
     - Scoped permissions (which endpoints/actions allowed)
@@ -41,18 +43,21 @@ class ApiKey(Base):
             name="User's app"
         )
 
-        # Validate key
-        api_key = session.query(ApiKey).filter(
-            ApiKey.key_hash == ApiKey.hash_key(provided_key),
-            ApiKey.is_enabled == True
-        ).first()
+        # Validate key - must iterate all keys and use verify_key()
+        # since bcrypt hashes cannot be looked up directly
+        for api_key in session.query(ApiKey).filter(ApiKey.is_enabled == True):
+            if api_key.verify_key(provided_key):
+                # Key is valid
+                break
     """
     __tablename__ = 'api_keys'
 
     id = Column(Integer, primary_key=True)
 
     # Key identification (hash only - raw key never stored)
-    key_hash = Column(String(64), unique=True, nullable=False, index=True)
+    # Note: Column size increased from 64 to 128 to support bcrypt hashes (60 chars)
+    # Legacy SHA-256 hashes are 64 chars, bcrypt hashes are 60 chars
+    key_hash = Column(String(128), unique=True, nullable=False, index=True)
     key_prefix = Column(String(8), nullable=False)  # First 8 chars for identification (e.g., "sk_a1b2...")
 
     # User identification
@@ -95,6 +100,9 @@ class ApiKey(Base):
         Index('idx_api_key_email_enabled', 'user_email', 'is_enabled'),
     )
 
+    # Bcrypt cost factor - 12 is standard, provides good security/performance balance
+    BCRYPT_COST_FACTOR = 12
+
     @staticmethod
     def generate_key() -> str:
         """Generate a new API key. Returns the raw key (store securely, shown only once)."""
@@ -102,8 +110,52 @@ class ApiKey(Base):
 
     @staticmethod
     def hash_key(raw_key: str) -> str:
-        """Hash a raw API key for storage/lookup."""
+        """
+        Hash a raw API key for storage using bcrypt.
+
+        Bcrypt provides resistance against rainbow table attacks due to:
+        - Built-in salt (unique per hash)
+        - Configurable cost factor (intentionally slow)
+
+        Returns:
+            bcrypt hash string (60 characters, starting with '$2b$')
+        """
+        return bcrypt.hashpw(raw_key.encode(), bcrypt.gensalt(rounds=ApiKey.BCRYPT_COST_FACTOR)).decode()
+
+    @staticmethod
+    def _hash_key_sha256(raw_key: str) -> str:
+        """Legacy SHA-256 hashing for backward compatibility verification."""
         return hashlib.sha256(raw_key.encode()).hexdigest()
+
+    @staticmethod
+    def is_bcrypt_hash(hash_value: str) -> bool:
+        """Check if a hash is a bcrypt hash (starts with $2b$, $2a$, or $2y$)."""
+        return hash_value.startswith(('$2b$', '$2a$', '$2y$'))
+
+    def verify_key(self, raw_key: str) -> bool:
+        """
+        Verify a raw API key against this key's stored hash.
+
+        Supports both bcrypt (new) and SHA-256 (legacy) hashes for
+        backward compatibility during migration.
+
+        Args:
+            raw_key: The raw API key to verify
+
+        Returns:
+            True if the key matches, False otherwise
+        """
+        if self.is_bcrypt_hash(self.key_hash):
+            # Bcrypt verification
+            try:
+                return bcrypt.checkpw(raw_key.encode(), self.key_hash.encode())
+            except (ValueError, TypeError):
+                return False
+        else:
+            # Legacy SHA-256 verification (constant-time comparison)
+            import hmac
+            expected_hash = self._hash_key_sha256(raw_key)
+            return hmac.compare_digest(self.key_hash, expected_hash)
 
     def check_rate_limit(self) -> Tuple[bool, Optional[str]]:
         """

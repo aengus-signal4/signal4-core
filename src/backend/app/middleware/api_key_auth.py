@@ -117,6 +117,42 @@ def _is_public_path(path: str) -> bool:
     return False
 
 
+def _find_api_key_by_raw_key(db: Session, raw_key: str) -> Optional[ApiKey]:
+    """
+    Find an API key by its raw value, supporting both bcrypt and legacy SHA-256 hashes.
+
+    For bcrypt hashes: Uses key_prefix for efficient lookup, then verifies with bcrypt.
+    For legacy SHA-256: Falls back to direct hash lookup for backward compatibility.
+
+    Args:
+        db: Database session
+        raw_key: The raw API key value
+
+    Returns:
+        The matching ApiKey or None if not found
+    """
+    key_prefix = raw_key[:8]
+
+    # First, try to find by prefix and verify with bcrypt
+    # This handles new bcrypt-hashed keys efficiently
+    candidates = db.query(ApiKey).filter(
+        ApiKey.key_prefix == key_prefix
+    ).all()
+
+    for candidate in candidates:
+        if candidate.verify_key(raw_key):
+            return candidate
+
+    # Fallback: try legacy SHA-256 direct lookup
+    # This handles old keys that haven't been rehashed
+    legacy_hash = ApiKey._hash_key_sha256(raw_key)
+    legacy_key = db.query(ApiKey).filter(
+        ApiKey.key_hash == legacy_hash
+    ).first()
+
+    return legacy_key
+
+
 async def validate_api_key(
     request: Request,
     api_key_value: Optional[str] = Depends(api_key_header)
@@ -125,17 +161,16 @@ async def validate_api_key(
     Validate API key from header and return the ApiKey object.
     Returns None if no key provided (for optional auth).
     Raises HTTPException if key is invalid or rate limited.
+
+    Supports both bcrypt (new) and SHA-256 (legacy) hashed keys.
     """
     if not api_key_value:
         return None
 
     db = _get_db_session()
     try:
-        # Look up key by hash
-        key_hash = ApiKey.hash_key(api_key_value)
-        api_key = db.query(ApiKey).filter(
-            ApiKey.key_hash == key_hash
-        ).first()
+        # Find the API key using prefix lookup + verification
+        api_key = _find_api_key_by_raw_key(db, api_key_value)
 
         if not api_key:
             logger.warning(f"Invalid API key attempted from {_get_client_ip(request)}")
@@ -307,8 +342,8 @@ class ApiKeyMiddleware:
         # Validate the key
         db = _get_db_session()
         try:
-            key_hash = ApiKey.hash_key(api_key_value)
-            api_key = db.query(ApiKey).filter(ApiKey.key_hash == key_hash).first()
+            # Find API key using prefix lookup + verification (supports bcrypt and legacy SHA-256)
+            api_key = _find_api_key_by_raw_key(db, api_key_value)
 
             if not api_key:
                 # Security event: Invalid API key attempt
