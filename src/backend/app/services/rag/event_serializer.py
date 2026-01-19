@@ -20,7 +20,8 @@ SKIP_KEYS: Set[str] = {
     "embedding",
     "embeddings",
     "query_embeddings",
-    "query_embedding"
+    "query_embedding",
+    "query_embeddings_cached"  # Don't send cached embeddings to frontend
 }
 
 
@@ -73,8 +74,6 @@ def clean_event_for_json(event: Dict[str, Any]) -> Dict[str, Any]:
     - Other non-JSON-serializable data
 
     Note: Segment objects are already converted to dicts in the pipeline.
-    Note: query_embeddings_cached is NOT skipped because it's already
-          serializable (list of lists) and we need it for caching.
 
     Args:
         event: Event dict with potential non-serializable data
