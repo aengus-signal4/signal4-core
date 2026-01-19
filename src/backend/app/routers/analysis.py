@@ -17,9 +17,10 @@ Architecture:
 - Steps: Individual components (expand_query, retrieve_segments, etc.)
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from ..models.requests import AnalysisRequest
+from ..middleware.api_key_auth import validate_project_access
 from ..services.rag.analysis_pipeline import AnalysisPipeline
 from ..services.rag.step_registry import (
     list_steps,
@@ -141,7 +142,7 @@ async def get_available_workflows():
 # ============================================================================
 
 @router.post("/stream")
-async def analyze_stream(request: AnalysisRequest):
+async def analyze_stream(request: AnalysisRequest, http_request: Request):
     """
     Streaming analysis with real-time progress updates (SSE).
 
@@ -198,6 +199,9 @@ async def analyze_stream(request: AnalysisRequest):
     Returns:
         StreamingResponse with Server-Sent Events
     """
+    # Validate project access before starting the generator
+    validate_project_access(http_request, request.projects or [])
+
     async def event_generator():
         db_session = None
         try:
@@ -820,9 +824,10 @@ async def analyze_stream(request: AnalysisRequest):
 
         except Exception as e:
             logger.error(f"[{request.dashboard_id}] Analysis error: {e}", exc_info=True)
+            # Don't expose internal error details to client
             error_event = json.dumps({
                 "type": "error",
-                "error": str(e)
+                "error": "Analysis failed. Please try again."
             })
             yield f"data: {error_event}\n\n"
 
@@ -842,7 +847,7 @@ async def analyze_stream(request: AnalysisRequest):
 
 
 @router.post("")
-async def analyze_batch(request: AnalysisRequest):
+async def analyze_batch(request: AnalysisRequest, http_request: Request):
     """
     Batch analysis (convenience wrapper around streaming).
 
@@ -864,6 +869,9 @@ async def analyze_batch(request: AnalysisRequest):
         Final analysis result (no progress updates)
     """
     start_time = time.time()
+
+    # Validate project access
+    validate_project_access(http_request, request.projects or [])
 
     try:
         # Validate request
@@ -986,4 +994,5 @@ async def analyze_batch(request: AnalysisRequest):
             f"[{request.dashboard_id}] Batch analysis error after {processing_time_ms:.0f}ms: {e}",
             exc_info=True
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        # Don't expose internal error details to client
+        raise HTTPException(status_code=500, detail="Internal server error")

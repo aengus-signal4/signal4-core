@@ -5,7 +5,7 @@ Query Router
 Read-only API endpoint for querying project content with flexible filtering and search.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 import time
 import logging
 from pathlib import Path
@@ -16,6 +16,8 @@ import sys
 sys.path.insert(0, str(get_project_root()))
 from src.utils.logger import setup_worker_logger
 logger = setup_worker_logger("backend.query_router")
+
+from ..middleware.api_key_auth import validate_project_access
 
 from ..models.requests import QueryRequest
 from ..models.responses import (
@@ -31,7 +33,7 @@ router = APIRouter(prefix="/api", tags=["query"])
 
 
 @router.post("/query", response_model=QueryResponse)
-async def query_segments(request: QueryRequest):
+async def query_segments(request: QueryRequest, http_request: Request):
     """
     Query segments with filtering and optional search.
 
@@ -47,6 +49,9 @@ async def query_segments(request: QueryRequest):
     Returns segment data with metadata.
     """
     start_time = time.time()
+
+    # Validate project access for API key restrictions
+    validate_project_access(http_request, [request.project] if request.project else [])
 
     try:
         # Initialize query service
@@ -96,6 +101,6 @@ async def query_segments(request: QueryRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
     except Exception as e:
-        # Server error
+        # Server error - log details but don't expose to client
         logger.error(f"Query execution error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Query execution failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")

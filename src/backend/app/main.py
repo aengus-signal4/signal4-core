@@ -53,17 +53,7 @@ def _load_models_sync():
 
     models = {}
 
-    # Load 4B model (2000-dim truncated) - primary model for high-quality embeddings
-    logger.info("Loading Qwen3-Embedding-4B (2000-dim truncated)...")
-    model_start = time.time()
-    model_4b = SentenceTransformer('Qwen/Qwen3-Embedding-4B', trust_remote_code=True, truncate_dim=2000)
-    model_4b = model_4b.to(device)
-    # Test embedding
-    test_emb_4b = model_4b.encode(["warmup test"], convert_to_numpy=True)
-    models['4B'] = model_4b
-    logger.info(f"✓ Loaded 4B model in {time.time() - model_start:.1f}s (dim: {test_emb_4b.shape[1]})")
-
-    # Load 0.6B model (1024-dim) - fallback for dashboards using 1024-dim
+    # Load 0.6B model only (1024-dim) - lightweight model for responsive backend
     logger.info("Loading Qwen3-Embedding-0.6B (1024-dim)...")
     model_start = time.time()
     model_0_6b = SentenceTransformer('Qwen/Qwen3-Embedding-0.6B', trust_remote_code=True)
@@ -74,7 +64,7 @@ def _load_models_sync():
     logger.info(f"✓ Loaded 0.6B model in {time.time() - model_start:.1f}s (dim: {test_emb_0_6b.shape[1]})")
 
     logger.info("=" * 80)
-    logger.info("✓ Both embedding models (4B + 0.6B) loaded and warm - API ready for fast responses")
+    logger.info("✓ Embedding model (0.6B) loaded and warm - API ready for fast responses")
     logger.info("=" * 80)
 
     return models
@@ -133,30 +123,60 @@ async def lifespan(app: FastAPI):
     logger.info("Cleaning up embedding models...")
     _embedding_models.clear()
 
+# Debug mode from environment (controls docs and CORS)
+DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+
 # Create FastAPI app with lifespan
+# Swagger/ReDoc disabled in production (DEBUG=false)
 app = FastAPI(
     title="Signal4 Backend API",
     description="LLM, embedding, and search services for website dashboards",
     version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if DEBUG else None,
+    redoc_url="/redoc" if DEBUG else None,
     lifespan=lifespan
 )
 
-# CORS configuration - allow Flask frontend
+# CORS configuration
+# Production origins always allowed; development origins only when DEBUG=true
+CORS_ORIGINS_PRODUCTION = [
+    "https://signal4.ca",
+    "https://api.signal4.ca",
+]
+CORS_ORIGINS_DEVELOPMENT = [
+    "http://localhost:5847",  # Flask production
+    "http://127.0.0.1:5847",
+    "http://localhost:5848",  # Flask staging
+    "http://127.0.0.1:5848",
+    "http://localhost:3000",  # Next.js development
+    "http://127.0.0.1:3000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5847",  # Flask production
-        "http://127.0.0.1:5847",
-        "http://localhost:5848",  # Flask staging
-        "http://127.0.0.1:5848",
-        "https://signal4.ca",  # Production
-    ],
+    allow_origins=CORS_ORIGINS_PRODUCTION + (CORS_ORIGINS_DEVELOPMENT if DEBUG else []),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-API-Key", "Authorization"],
 )
+
+# API Key authentication middleware
+# Enforces API key on all requests except public paths (/health, /docs, etc.)
+from .middleware.api_key_auth import ApiKeyMiddleware
+app.add_middleware(ApiKeyMiddleware)
+
+# Security headers middleware
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Add security headers to all responses"""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
 
 # Request logging middleware
 @app.middleware("http")
@@ -177,21 +197,22 @@ async def log_requests(request: Request, call_next):
 # Global exception handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Catch all unhandled exceptions"""
+    """Catch all unhandled exceptions - log details but don't expose to client"""
     logger.error(f"Unhandled exception: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={"error": "Internal server error", "detail": str(exc)}
+        content={"error": "Internal server error"}
     )
 
 # Include routers
-from .routers import health, media, analysis, query, health_dashboard
+from .routers import health, media, analysis, query, health_dashboard, api_keys
 
 app.include_router(health.router)            # Health monitoring
 app.include_router(media.router)             # Media serving + transcription
 app.include_router(analysis.router)          # All RAG/search operations
 app.include_router(query.router)             # Read-only segment query API
 app.include_router(health_dashboard.router)  # Health & Wellness dashboard
+app.include_router(api_keys.router)          # API key management
 
 # Root endpoint
 @app.get("/")

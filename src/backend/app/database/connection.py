@@ -14,12 +14,14 @@ from ..config import settings
 
 logger = logging.getLogger(__name__)
 
-# Create engine
+# Create engine with optimized connection pooling
 engine = create_engine(
     settings.DATABASE_URL,
-    pool_pre_ping=True,  # Verify connections before using
-    pool_size=5,
-    max_overflow=10
+    pool_pre_ping=True,      # Verify connections before using (detects stale connections)
+    pool_size=20,            # Maintain 20 connections in the pool
+    max_overflow=40,         # Allow up to 40 additional connections under load
+    pool_recycle=3600,       # Recycle connections after 1 hour (prevents stale connections)
+    pool_timeout=30,         # Wait up to 30s for available connection
 )
 
 # Session factory

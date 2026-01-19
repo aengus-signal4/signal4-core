@@ -21,14 +21,36 @@ import tempfile
 import asyncio
 import time
 import json
+import re
 from pathlib import Path
 from src.utils.paths import get_project_root, get_config_path
 from typing import Optional, Tuple, AsyncGenerator
 from io import BytesIO
 from collections import defaultdict
-from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Response, Query, Request
+
+
+# Content ID validation pattern - alphanumeric, underscores, hyphens, periods
+CONTENT_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_.-]+$')
+
+
+def validate_content_id(content_id: str) -> None:
+    """
+    Validate content_id to prevent path traversal and injection attacks.
+
+    Raises HTTPException 400 if content_id is invalid.
+    """
+    if not content_id:
+        raise HTTPException(status_code=400, detail="content_id is required")
+    if not CONTENT_ID_PATTERN.match(content_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid content_id format. Only alphanumeric characters, underscores, hyphens, and periods are allowed."
+        )
+    # Explicit path traversal check
+    if '..' in content_id or '/' in content_id or '\\' in content_id:
+        raise HTTPException(status_code=400, detail="Invalid content_id: path traversal not allowed")
 from fastapi.responses import StreamingResponse, RedirectResponse, JSONResponse
 from pydub import AudioSegment
 from sqlalchemy import func
@@ -61,51 +83,8 @@ RATE_LIMIT_SECONDS = 1  # Minimum seconds between requests
 REQUEST_TIMEOUT_SECONDS = 30  # Timeout for processing
 request_counter = 0
 
-# Media segment cache (in-memory, TTL=300s)
-from collections import OrderedDict
-import hashlib
-
-class MediaCache:
-    def __init__(self, max_size_mb: int = 500, ttl_seconds: int = 300):
-        self.cache = OrderedDict()
-        self.max_size_bytes = max_size_mb * 1024 * 1024
-        self.current_size = 0
-        self.ttl_seconds = ttl_seconds
-
-    def _make_key(self, content_id: str, start: float, end: float, media_type: str, format: str) -> str:
-        key_str = f"{content_id}:{start}:{end}:{media_type}:{format}"
-        return hashlib.md5(key_str.encode()).hexdigest()
-
-    def get(self, content_id: str, start: float, end: float, media_type: str, format: str):
-        key = self._make_key(content_id, start, end, media_type, format)
-        if key in self.cache:
-            data, timestamp = self.cache[key]
-            if time.time() - timestamp < self.ttl_seconds:
-                # Move to end (most recently used)
-                self.cache.move_to_end(key)
-                logger.debug(f"Media cache HIT: {key[:8]}")
-                return data
-            else:
-                # Expired
-                self.current_size -= len(data)
-                del self.cache[key]
-        return None
-
-    def put(self, content_id: str, start: float, end: float, media_type: str, format: str, data: bytes):
-        key = self._make_key(content_id, start, end, media_type, format)
-        data_size = len(data)
-
-        # Remove old entries if needed
-        while self.current_size + data_size > self.max_size_bytes and self.cache:
-            old_key, (old_data, _) = self.cache.popitem(last=False)
-            self.current_size -= len(old_data)
-            logger.debug(f"Media cache EVICT: {old_key[:8]}")
-
-        self.cache[key] = (data, time.time())
-        self.current_size += data_size
-        logger.debug(f"Media cache PUT: {key[:8]} ({data_size / 1024 / 1024:.2f} MB, total: {self.current_size / 1024 / 1024:.2f} MB)")
-
-media_cache = MediaCache(max_size_mb=500, ttl_seconds=300)
+# Public API URL for media URLs returned to frontend
+PUBLIC_API_URL = os.environ.get('PUBLIC_API_URL', '')
 
 
 def initialize_storage():
@@ -119,8 +98,8 @@ def initialize_storage():
         # Initialize database connection for transcription
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
-        DATABASE_URL = f"postgresql://{os.getenv('POSTGRES_USER', 'signal4')}:{os.getenv('POSTGRES_PASSWORD', 'signal4')}@10.0.0.4:{os.getenv('POSTGRES_PORT', '5432')}/{os.getenv('POSTGRES_DB', 'av_content')}"
-        _db_engine = create_engine(DATABASE_URL)
+        from src.backend.app.config.database import get_database_url
+        _db_engine = create_engine(get_database_url())
         _SessionLocal = sessionmaker(bind=_db_engine)
 
         logger.info("Media storage and database initialization completed successfully")
@@ -461,23 +440,13 @@ async def _stream_media_with_transcription(
 
         media_data, actual_media_type = media_result
 
-        # STEP 3: Cache media and send URL IMMEDIATELY (don't wait for transcript)
+        # STEP 3: Send media URL IMMEDIATELY (don't wait for transcript)
         media_size_mb = len(media_data) / 1024 / 1024
+        logger.info(f"[MEDIA] Extracted {media_size_mb:.2f}MB, sending media_ready event")
 
-        # Cache with actual boundaries
-        media_cache.put(content_id, actual_start_time, actual_end_time, media_type, format, media_data)
-        logger.info(f"[MEDIA] Cached {media_size_mb:.2f}MB")
-
-        # Verify cache write succeeded by immediately reading back
-        cached_verification = media_cache.get(content_id, actual_start_time, actual_end_time, media_type, format)
-        if not cached_verification:
-            logger.error(f"[MEDIA] CRITICAL: Cache write verification failed! Media was not cached properly.")
-            raise RuntimeError("Media caching failed - cannot send media_ready event")
-
-        logger.info(f"[MEDIA] ✓ Cache verified ({len(cached_verification)/1024/1024:.2f}MB), sending media_ready event")
-
-        # Build media URL
-        media_url = f"/api/media/content/{content_id}"
+        # Build media URL (use public URL if configured for external access)
+        base_url = PUBLIC_API_URL if PUBLIC_API_URL else ""
+        media_url = f"{base_url}/api/media/content/{content_id}"
         params = []
         if actual_start_time is not None:
             params.append(f"start_time={actual_start_time}")
@@ -1144,6 +1113,9 @@ async def get_media(
     client_ip = get_client_ip(request)
     await check_rate_limit(client_ip)
 
+    # Validate content_id to prevent path traversal
+    validate_content_id(content_id)
+
     logger.info(f"[MEDIA] Request from {client_ip}: content_id={content_id}, media_type={media_type}, start={start_time}, end={end_time}, format={format}, transcribe={transcribe}, stream={stream}")
 
     if media_type not in ['auto', 'video', 'audio']:
@@ -1180,59 +1152,8 @@ async def get_media(
             }
         )
 
-    # CRITICAL: Check cache BEFORE acquiring lock (allows instant cache hits while SSE is streaming)
-    if start_time is not None and end_time is not None:
-        # First, try exact match with requested times
-        cached_data = media_cache.get(content_id, start_time, end_time, media_type, format)
-
-        # If no exact match, we may have cached with adjusted EmbeddingSegment boundaries
-        # Try to find any cached segment for this content_id within a reasonable time range
-        if not cached_data:
-            logger.debug(f"[MEDIA] No exact cache match for {content_id} ({start_time:.2f}s-{end_time:.2f}s), checking alternate timings...")
-            # The SSE stream may have cached with EmbeddingSegment boundaries which differ from requested times
-            # This is expected behavior - log and proceed to extraction which will use correct boundaries
-
-        if cached_data:
-            duration_ms = (time.time() - request_start) * 1000
-            actual_media_type = 'video' if format in ['mp4', 'webm'] else 'audio'
-            content_type = f"video/{format}" if actual_media_type == 'video' else "audio/webm"
-            logger.info(f"[MEDIA] ✓ Cache HIT for {content_id} - returning {len(cached_data)/1024/1024:.2f}MB in {duration_ms:.0f}ms (bypassed lock)")
-            return StreamingResponse(
-                BytesIO(cached_data),
-                media_type=content_type,
-                headers={
-                    "Content-Disposition": f"inline; filename={content_id}.{format}",
-                    "Content-Length": str(len(cached_data)),
-                    "Accept-Ranges": "bytes",
-                    "X-Media-Type": actual_media_type,
-                    "X-Cache": "HIT",
-                    "X-Processing-Time-Ms": str(int(duration_ms))
-                }
-            )
-
     async def process():
         try:
-            # Double-check cache inside lock (handles race with SSE stream)
-            if start_time is not None and end_time is not None:
-                cached_data = media_cache.get(content_id, start_time, end_time, media_type, format)
-                if cached_data:
-                    duration_ms = (time.time() - request_start) * 1000
-                    actual_media_type = 'video' if format in ['mp4', 'webm'] else 'audio'
-                    content_type = f"video/{format}" if actual_media_type == 'video' else "audio/webm"
-                    logger.info(f"[MEDIA] ✓ Cache HIT (inside lock) for {content_id} - returning {len(cached_data)/1024/1024:.2f}MB in {duration_ms:.0f}ms")
-                    return StreamingResponse(
-                        BytesIO(cached_data),
-                        media_type=content_type,
-                        headers={
-                            "Content-Disposition": f"inline; filename={content_id}.{format}",
-                            "Content-Length": str(len(cached_data)),
-                            "Accept-Ranges": "bytes",
-                            "X-Media-Type": actual_media_type,
-                            "X-Cache": "HIT-LOCKED",
-                            "X-Processing-Time-Ms": str(int(duration_ms))
-                        }
-                    )
-
             # Determine what media to return
             video_path = get_video_path(content_id)
             has_video = video_path is not None
@@ -1261,9 +1182,6 @@ async def get_media(
                         video_data = await extract_video_segment_ffmpeg(s3_url, start_time, end_time, output_format=format)
                         extract_duration_ms = (time.time() - extract_start) * 1000
                         logger.info(f"[MEDIA] ✓ Extracted video segment for {content_id}: {len(video_data) / 1024 / 1024:.2f}MB in {extract_duration_ms:.0f}ms")
-
-                        # Cache the extracted segment
-                        media_cache.put(content_id, start_time, end_time, media_type, format, video_data)
                     except ValueError as e:
                         logger.warning(f"Invalid time range for {content_id}: {e}")
                         raise HTTPException(status_code=400, detail=str(e))
@@ -1287,7 +1205,7 @@ async def get_media(
                         "Content-Length": str(len(video_data)),
                         "Accept-Ranges": "bytes",
                         "X-Media-Type": "video",
-                        "X-Cache": "MISS",
+                        "X-Cache": "NONE",
                         "X-Processing-Time-Ms": str(int(total_duration_ms))
                     }
                 )
@@ -1311,9 +1229,6 @@ async def get_media(
                         audio_data = await extract_audio_segment_ffmpeg(s3_url, start_time, end_time)
                         extract_duration_ms = (time.time() - extract_start) * 1000
                         logger.info(f"[MEDIA] ✓ Extracted audio segment for {content_id}: {len(audio_data) / 1024 / 1024:.2f}MB in {extract_duration_ms:.0f}ms")
-
-                        # Cache the extracted segment
-                        media_cache.put(content_id, start_time, end_time, media_type, 'webm', audio_data)
                     except ValueError as e:
                         logger.warning(f"Invalid time range for {content_id}: {e}")
                         raise HTTPException(status_code=400, detail=str(e))
@@ -1335,7 +1250,7 @@ async def get_media(
                         "Content-Disposition": f"inline; filename={content_id}.webm",
                         "Content-Length": str(len(audio_data)),
                         "X-Media-Type": "audio",
-                        "X-Cache": "MISS",
+                        "X-Cache": "NONE",
                         "X-Processing-Time-Ms": str(int(total_duration_ms))
                     }
                 )
@@ -1364,7 +1279,8 @@ async def get_media(
             )
 
             # Return JSON response with both media URL and transcription
-            media_url = f"/api/media/content/{content_id}"
+            base_url = PUBLIC_API_URL if PUBLIC_API_URL else ""
+            media_url = f"{base_url}/api/media/content/{content_id}"
             params = []
             if start_time is not None:
                 params.append(f"start_time={start_time}")
