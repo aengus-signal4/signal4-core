@@ -50,6 +50,14 @@ class FailureTracker:
                        f"(not counting toward worker pause): {error_message}")
             return False
 
+        # Check if this is a timeout/SIGKILL error
+        # These indicate the task was killed due to timeout, not a processing bug
+        # Don't count toward worker pausing as the content may just be unusually long
+        if self._is_timeout_error(error_message, error_code):
+            logger.info(f"Timeout/SIGKILL error for worker {worker_id} task type {task_type} "
+                       f"(not counting toward worker pause): {error_message}")
+            return False
+
         failure_info = self.worker_task_failures[worker_id][task_type]
 
         # Reset count if enough time has passed since last failure
@@ -249,7 +257,46 @@ class FailureTracker:
 
         error_lower = error_message.lower()
         return any(pattern.lower() in error_lower for pattern in permanent_error_patterns)
-    
+
+    def _is_timeout_error(self, error_message: str, error_code: Optional[str] = None) -> bool:
+        """
+        Check if error indicates a timeout or SIGKILL termination.
+
+        These errors occur when a task is killed due to exceeding time limits.
+        They should NOT trigger worker-level pausing since:
+        - The content may just be unusually long (legitimate)
+        - Temporary resource contention may have slowed processing
+        - The worker itself is not broken, just the specific task took too long
+        """
+        # Check by error code first
+        timeout_error_codes = [
+            'timeout',
+            'timed_out',
+            'sigkill',
+            'killed',
+        ]
+
+        if error_code and error_code.lower() in timeout_error_codes:
+            return True
+
+        # Check error message for timeout/SIGKILL patterns
+        # Exit code -9 = SIGKILL (128 + 9 = 137, or negative = -9)
+        # Exit code -15 = SIGTERM
+        timeout_error_patterns = [
+            "exit code -9",      # SIGKILL (negative form)
+            "exit code 137",     # SIGKILL (128 + 9)
+            "exit code -15",     # SIGTERM (negative form)
+            "exit code 143",     # SIGTERM (128 + 15)
+            "timed out",
+            "timeout",
+            "task timed out",
+            "sigkill",
+            "killed by signal",
+        ]
+
+        error_lower = error_message.lower()
+        return any(pattern in error_lower for pattern in timeout_error_patterns)
+
     def get_stats(self) -> Dict[str, Any]:
         """Get failure tracking statistics"""
         now = datetime.now(timezone.utc)
