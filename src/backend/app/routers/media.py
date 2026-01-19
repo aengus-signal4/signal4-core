@@ -78,8 +78,6 @@ _SessionLocal = None
 
 # Safety features
 processing_lock = asyncio.Lock()  # Ensure single processing
-rate_limit_tracker: defaultdict[str, float] = defaultdict(float)
-RATE_LIMIT_SECONDS = 1  # Minimum seconds between requests
 REQUEST_TIMEOUT_SECONDS = 30  # Timeout for processing
 request_counter = 0
 
@@ -122,36 +120,6 @@ def get_db_session():
     if _SessionLocal is None:
         initialize_storage()
     return _SessionLocal()
-
-
-def get_client_ip(request: Request) -> str:
-    """Get client IP address from request"""
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
-
-
-async def check_rate_limit(client_ip: str) -> None:
-    """Check if client has exceeded rate limit"""
-    # Skip rate limiting for localhost/internal requests
-    if client_ip in ["127.0.0.1", "::1", "localhost"]:
-        logger.debug(f"Skipping rate limit for localhost request from {client_ip}")
-        return
-
-    current_time = time.time()
-    last_request_time = rate_limit_tracker[client_ip]
-
-    if last_request_time > 0:
-        time_since_last = current_time - last_request_time
-        if time_since_last < RATE_LIMIT_SECONDS:
-            remaining = RATE_LIMIT_SECONDS - time_since_last
-            raise HTTPException(
-                status_code=429,
-                detail=f"Rate limit exceeded. Please wait {remaining:.1f} seconds before next request."
-            )
-
-    rate_limit_tracker[client_ip] = current_time
 
 
 async def safe_process_request(func, *args, **kwargs):
@@ -890,7 +858,7 @@ def _get_episode_metadata(content_id: str) -> Optional[dict]:
     Get episode metadata from Content table.
 
     Returns:
-        Dict with episode_title, episode_description, channel_name, publish_date
+        Dict with episode_title, episode_description, channel_name, publish_date, platform, source_url
         or None if content not found
     """
     db = get_db_session()
@@ -900,11 +868,18 @@ def _get_episode_metadata(content_id: str) -> Optional[dict]:
             logger.warning(f"Content not found for metadata lookup: {content_id}")
             return None
 
+        # Extract source URL from metadata for podcasts
+        source_url = None
+        if content.meta_data and isinstance(content.meta_data, dict):
+            source_url = content.meta_data.get('episode_url')
+
         return {
             'episode_title': content.title,
             'episode_description': content.description,
             'channel_name': content.channel_name,
-            'publish_date': content.publish_date.isoformat() if content.publish_date else None
+            'publish_date': content.publish_date.isoformat() if content.publish_date else None,
+            'platform': content.platform,
+            'source_url': source_url
         }
     except Exception as e:
         logger.error(f"Error fetching episode metadata: {e}")
@@ -1003,9 +978,6 @@ async def get_media_by_segment(
 
     Backend looks up segment, extracts content_id + timing, and serves media.
     """
-    client_ip = get_client_ip(request)
-    await check_rate_limit(client_ip)
-
     logger.info(f"[MEDIA] Segment lookup request: segment_id={segment_id}, stream={stream}, transcribe={transcribe}")
 
     # Look up segment in database
@@ -1110,13 +1082,11 @@ async def get_media(
         - If stream=true: SSE stream with media_ready and transcript_ready events
     """
     request_start = time.time()
-    client_ip = get_client_ip(request)
-    await check_rate_limit(client_ip)
 
     # Validate content_id to prevent path traversal
     validate_content_id(content_id)
 
-    logger.info(f"[MEDIA] Request from {client_ip}: content_id={content_id}, media_type={media_type}, start={start_time}, end={end_time}, format={format}, transcribe={transcribe}, stream={stream}")
+    logger.info(f"[MEDIA] Request: content_id={content_id}, media_type={media_type}, start={start_time}, end={end_time}, format={format}, transcribe={transcribe}, stream={stream}")
 
     if media_type not in ['auto', 'video', 'audio']:
         raise HTTPException(status_code=400, detail="media_type must be 'auto', 'video', or 'audio'")
