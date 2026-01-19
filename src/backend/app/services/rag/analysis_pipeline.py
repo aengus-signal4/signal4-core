@@ -54,13 +54,15 @@ class AnalysisPipeline:
             .generate_summaries(template="theme_summary", max_concurrent=20)
         )
 
-        # Batch execution
-        result = await pipeline.execute()
-
-        # Streaming execution
-        async for update in pipeline.execute_stream():
-            if update["type"] == "partial":
+        # Streaming execution (always returns async generator)
+        async for update in pipeline.execute():
+            if update["type"] == "result":
+                # Step completed - extract data
+                data = update.get("data", {})
+            elif update["type"] == "partial":
                 print(f"Partial result: {update['data']}")
+            elif update["type"] == "complete":
+                break
     """
 
     def __init__(
@@ -658,41 +660,7 @@ class AnalysisPipeline:
     # Execution Methods
     # ========================================================================
 
-    async def execute(self) -> PipelineResult:
-        """
-        Execute pipeline in batch mode (no streaming).
-
-        Returns:
-            PipelineResult with final data and metadata
-        """
-        start_time = time.time()
-        results = {}
-        steps_completed = 0
-
-        logger.info(f"Executing pipeline '{self.name}' with {len(self.steps)} steps")
-
-        for step_idx, (step_type, params) in enumerate(self.steps):
-            logger.info(f"Step {step_idx + 1}/{len(self.steps)}: {step_type}")
-
-            try:
-                results = await self._execute_step(step_type, params, results)
-                steps_completed += 1
-            except Exception as e:
-                logger.error(f"Pipeline '{self.name}' failed at step {step_idx + 1} ({step_type}): {e}", exc_info=True)
-                raise
-
-        execution_time = int((time.time() - start_time) * 1000)
-        logger.info(f"Pipeline '{self.name}' completed in {execution_time}ms")
-
-        return PipelineResult(
-            name=self.name,
-            data=results,
-            execution_time_ms=execution_time,
-            steps_completed=steps_completed,
-            total_steps=len(self.steps)
-        )
-
-    async def execute_stream(
+    async def execute(
         self,
         verbose: bool = False,
         initial_context: Optional[Dict[str, Any]] = None
@@ -734,7 +702,7 @@ class AnalysisPipeline:
             try:
                 # Execute step with streaming
                 step_result_data = None
-                async for update in self._execute_step_stream(step_type, params, results):
+                async for update in self._execute_step(step_type, params, results):
                     if update["type"] == "result":
                         # Step completed, update results and capture for emission
                         results = update["data"]
@@ -795,976 +763,6 @@ class AnalysisPipeline:
     # ========================================================================
 
     async def _execute_step(
-        self,
-        step_type: str,
-        params: Dict[str, Any],
-        context: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Execute a single step in batch mode."""
-
-        if step_type == "expand_query":
-            query = params.get("query")
-            strategy = params.get("strategy", "multi_query")
-
-            if not query:
-                raise ValueError("query parameter required for expand_query step")
-
-            logger.info(f"Expanding query: '{query[:50]}...' (strategy={strategy})")
-
-            if strategy == "multi_query":
-                # Generate 10 query variations (5 EN + 5 FR)
-                result = self.llm_service.optimize_search_query(query)
-                expanded_queries = result.get("query_variations", [query])
-                keywords = result.get("keywords", [])
-            elif strategy == "query2doc":
-                # Generate pseudo-document
-                pseudo_doc = self.llm_service.query2doc(query)
-                expanded_query = f"{query} {pseudo_doc}" if pseudo_doc else query
-                expanded_queries = [expanded_query]
-                keywords = query.split()
-            elif strategy == "theme_queries":
-                # Generate discourse-focused query variations using TextGenerator
-                from .text_generator import TextGenerator
-                generator = TextGenerator(self.llm_service)
-
-                try:
-                    import json
-                    result = await generator.generate_from_template(
-                        template_name="theme_queries",
-                        context={"theme_name": query},
-                        model="grok-4-fast-non-reasoning-latest",
-                        temperature=0.3,
-                        max_tokens=800
-                    )
-                    parsed = json.loads(result)
-                    expanded_queries = parsed.get("query_variations", [query])
-                    keywords = [query]
-                    logger.info(f"Generated {len(expanded_queries)} theme query variations")
-                except Exception as e:
-                    logger.error(f"Failed to generate theme queries: {e}, falling back to original query")
-                    expanded_queries = [query]
-                    keywords = query.split()
-            elif strategy == "stance_variation":
-                # Generate multiple pseudo-documents with different stances
-                n_stances = params.get("n_stances", 3)
-                stance_docs = self.llm_service.query2doc_stances(query, n_stances=n_stances)
-                if stance_docs:
-                    expanded_queries = [f"{query} {doc}" for doc in stance_docs]
-                else:
-                    # Fallback to original query if generation fails
-                    logger.warning("Failed to generate stance variations, falling back to original query")
-                    expanded_queries = [query]
-                keywords = query.split()
-            else:
-                raise ValueError(f"Unknown expansion strategy: {strategy}")
-
-            # Store expanded queries in context (will be embedded in retrieve_segments_by_search)
-            context["original_query"] = query
-            context["expanded_queries"] = expanded_queries
-            context["keywords"] = keywords
-            context["expansion_strategy"] = strategy
-            logger.info(f"Expanded to {len(expanded_queries)} query variations")
-            return context
-
-        elif step_type == "retrieve_segments_by_search":
-            # Get expanded queries from context
-            expanded_queries = context.get("expanded_queries")
-            if not expanded_queries:
-                raise ValueError("expand_query step must be called before retrieve_segments_by_search")
-
-            # Embed all query variations using EmbeddingService
-            if not self.embedding_service:
-                raise RuntimeError("EmbeddingService required for retrieve_segments_by_search step")
-
-            try:
-                embeddings = await self.embedding_service.encode_queries(expanded_queries)
-            except RuntimeError as e:
-                logger.error(f"Failed to generate embeddings for expanded queries: {e}")
-                context["segments"] = []
-                return context
-
-            logger.info(f"Generated {len(embeddings)} query embeddings")
-
-            # Get search service (need to initialize if not present)
-            if self._search_service is None:
-                from ..pgvector_search_service import PgVectorSearchService
-                if not self.dashboard_id or not self.config:
-                    raise ValueError("dashboard_id and config required for PgVectorSearchService initialization")
-                self._search_service = PgVectorSearchService(self.dashboard_id, self.config)
-
-            # Batch search with all embeddings
-            # k is optional - if not provided, returns ALL segments above threshold
-            k = params.get("k")  # None = no limit
-            threshold = params.get("threshold", 0.4)
-            time_window_days = params.get("time_window_days")
-
-            # Extract filters to pass through
-            search_filters = {}
-            if "projects" in params:
-                search_filters["projects"] = params["projects"]
-            if "languages" in params:
-                search_filters["languages"] = params["languages"]
-            if "channels" in params:
-                search_filters["channels"] = params["channels"]
-
-            # Entity/keyword filters for hybrid search
-            must_contain = params.get("must_contain")
-            must_contain_any = params.get("must_contain_any")
-
-            # Use unified batch search - returns all segments above threshold
-            unique_segments = self._search_service.batch_search_unified(
-                embeddings,
-                time_window_days=time_window_days,
-                k=k,  # None = no limit, returns all above threshold
-                threshold=threshold,
-                must_contain=must_contain,
-                must_contain_any=must_contain_any,
-                **search_filters
-            )
-
-            context["segments"] = unique_segments
-            context["query_embeddings"] = embeddings
-            # Store embeddings as serializable lists for caching
-            context["query_embeddings_cached"] = [emb.tolist() for emb in embeddings]
-
-            # Log with keyword info
-            keyword_info = []
-            if must_contain:
-                keyword_info.append(f"must_contain={must_contain}")
-            if must_contain_any:
-                keyword_info.append(f"must_contain_any={must_contain_any}")
-            keyword_str = f" [{', '.join(keyword_info)}]" if keyword_info else ""
-            logger.info(f"Retrieved {len(unique_segments)} unique segments from unified batch search{keyword_str}")
-            return context
-
-        elif step_type == "retrieve_segments":
-            retriever = self._get_retriever()
-            segments = retriever.fetch_by_filter(**params)
-            context["segments"] = segments
-            logger.info(f"Retrieved {len(segments)} segments")
-            return context
-
-        elif step_type == "retrieve_all_segments":
-            # Retrieve ALL segments for filters (landing page workflow)
-            retriever = self._get_retriever()
-
-            # Build date range from time_window_days
-            time_window_days = params.get("time_window_days", 30)
-            from datetime import datetime, timezone, timedelta
-            end_date = datetime.now(timezone.utc)
-            start_date = end_date - timedelta(days=time_window_days)
-
-            # Build filter params
-            filter_params = {
-                "date_range": (start_date, end_date),
-                "must_be_stitched": params.get("must_be_stitched", True),
-                "must_be_embedded": params.get("must_be_embedded", True)
-            }
-
-            # Add optional filters
-            for key in ["projects", "languages", "channels"]:
-                if key in params and params[key]:
-                    filter_params[key] = params[key]
-
-            segments = retriever.fetch_by_filter(**filter_params)
-            context["segments"] = segments
-            context["all_segments"] = segments  # Store for corpus analysis
-            logger.info(f"Retrieved all {len(segments)} segments for time window {time_window_days}d")
-            return context
-
-        elif step_type == "rerank_segments":
-            # Rerank segments based on multiple quality signals
-            from .segment_reranker import SegmentReranker, RerankerWeights, DiversityConstraints
-
-            segments = context.get("segments", [])
-            if not segments:
-                logger.warning("No segments available for reranking")
-                return context
-
-            # Build weights from params
-            weights = RerankerWeights(
-                similarity=params.get("similarity_weight", 0.4),
-                popularity=params.get("popularity_weight", 0.2),
-                recency=params.get("recency_weight", 0.2),
-                single_speaker=params.get("single_speaker_weight", 0.1),
-                named_speaker=params.get("named_speaker_weight", 0.1)
-            )
-
-            # Build diversity constraints
-            diversity = DiversityConstraints(
-                best_per_episode=params.get("best_per_episode", True),
-                max_per_channel=params.get("max_per_channel")
-            )
-
-            time_window_days = params.get("time_window_days", 30)
-
-            # Initialize reranker (uses embedded psycopg2 connection)
-            reranker = SegmentReranker()
-            reranked = reranker.rerank(
-                segments,
-                weights=weights,
-                diversity=diversity,
-                time_window_days=time_window_days
-            )
-
-            # Update context with reranked segments
-            context["segments"] = reranked
-            context["segments_before_rerank"] = len(segments)
-            context["segments_after_rerank"] = len(reranked)
-            logger.info(f"Reranked segments: {len(segments)} -> {len(reranked)} "
-                       f"(best_per_episode={diversity.best_per_episode})")
-            return context
-
-        elif step_type == "corpus_analysis":
-            # Corpus-level quantitative analysis
-            analyzer = self._get_quantitative_analyzer()
-            segments = context.get("all_segments") or context.get("segments", [])
-
-            if not segments:
-                logger.warning("No segments available for corpus analysis")
-                context["corpus_stats"] = analyzer._empty_analysis()
-                return context
-
-            # Run quantitative analysis on full corpus
-            corpus_stats = analyzer.analyze(
-                segments=segments,
-                baseline_segments=None  # No baseline for corpus analysis
-            )
-
-            context["corpus_stats"] = corpus_stats
-            logger.info(
-                f"Corpus analysis: {corpus_stats['total_segments']} segments, "
-                f"{corpus_stats['episode_count']} episodes, "
-                f"{corpus_stats.get('total_duration_hours', 'N/A')}h total"
-            )
-            return context
-
-        elif step_type == "analyze_themes_with_subthemes":
-            # Parallel analysis of themes with sub-themes
-            themes = context.get("themes", [])
-
-            if not themes:
-                logger.warning("No themes available for sub-theme analysis")
-                context["themes_analysis"] = {}
-                return context
-
-            # Process all themes in parallel
-            max_concurrent = params.get("max_concurrent", 8)
-            semaphore = asyncio.Semaphore(max_concurrent)
-
-            async def analyze_one_theme(theme):
-                """Analyze single theme with sub-themes."""
-                async with semaphore:
-                    theme_id = theme.theme_id
-                    theme_segments = theme.segments
-
-                    logger.info(f"Analyzing theme {theme_id} ({len(theme_segments)} segments)...")
-
-                    analysis = {
-                        "theme_id": theme_id,
-                        "theme_name": theme.theme_name,  # Will be updated if generate_theme_names=True
-                        "segment_count": len(theme_segments)
-                    }
-
-                    # 1. Sub-theme detection (quick_cluster_check)
-                    extractor = self._get_extractor()
-                    quick_check_config = params.get("quick_cluster_check", {})
-
-                    min_cluster_size = quick_check_config.get("min_cluster_size", 10)
-                    min_silhouette = quick_check_config.get("min_silhouette_score", 0.15)
-                    skip_threshold = quick_check_config.get("skip_if_few_segments", 30)
-
-                    subthemes = []
-                    if len(theme_segments) >= skip_threshold:
-                        try:
-                            # Run clustering
-                            subthemes = extractor.extract_by_clustering(
-                                segments=theme_segments,
-                                method="hdbscan",
-                                min_cluster_size=min_cluster_size,
-                                min_segments_per_theme=min_cluster_size
-                            )
-
-                            # Validate with silhouette score
-                            if subthemes and len(subthemes) >= 2:
-                                embeddings = np.vstack([self._get_segment_embedding(seg) for seg in theme_segments if self._get_segment_embedding(seg) is not None])
-
-                                # Build cluster labels
-                                cluster_labels = np.full(len(embeddings), -1)
-                                valid_segments = [seg for seg in theme_segments if self._get_segment_embedding(seg) is not None]
-
-                                for i, subtheme in enumerate(subthemes):
-                                    subtheme_seg_ids = {self._get_segment_id(seg) for seg in subtheme.segments}
-                                    for j, seg in enumerate(valid_segments):
-                                        if self._get_segment_id(seg) in subtheme_seg_ids:
-                                            cluster_labels[j] = i
-
-                                is_valid, metrics = extractor._validate_clusters(embeddings, cluster_labels, min_silhouette)
-
-                                if not is_valid:
-                                    logger.info(f"Theme {theme_id}: Sub-clusters not valid (silhouette={metrics.get('silhouette_score', 0):.3f})")
-                                    subthemes = []
-                                else:
-                                    logger.info(f"Theme {theme_id}: {len(subthemes)} valid sub-themes detected")
-                        except Exception as e:
-                            logger.error(f"Error detecting sub-themes for theme {theme_id}: {e}")
-                            subthemes = []
-
-                    analysis["subthemes"] = subthemes
-                    analysis["has_subthemes"] = len(subthemes) > 0
-
-                    # 2. Quantitative analysis (per theme)
-                    if params.get("quantitative_per_theme", True):
-                        analyzer = self._get_quantitative_analyzer()
-                        theme_metrics = analyzer.analyze(
-                            segments=theme_segments,
-                            baseline_segments=None
-                        )
-                        analysis["quantitative_metrics"] = theme_metrics
-
-                    # 3. Generate theme name with LLM
-                    if params.get("generate_theme_names", True):
-                        try:
-                            generator = self._get_generator()
-                            representative_segs = theme.representative_segments[:5]
-                            seg_texts = [seg.text[:200] for seg in representative_segs]
-
-                            # Generate theme name
-                            prompt = f"Generate a concise 3-5 word theme name for these segments:\n\n" + "\n\n".join([f"- {text}" for text in seg_texts])
-
-                            theme_name = await generator.generate(
-                                prompt=prompt,
-                                model=params.get("model", "grok-4-fast-non-reasoning-latest"),
-                                temperature=0.3,
-                                max_tokens=50
-                            )
-
-                            # Clean up theme name
-                            theme_name = theme_name.strip().strip('"').strip()
-                            theme.theme_name = theme_name
-                            analysis["theme_name"] = theme_name
-                            logger.info(f"Theme {theme_id}: Generated name '{theme_name}'")
-                        except Exception as e:
-                            logger.error(f"Error generating theme name for {theme_id}: {e}")
-
-                    # 4. Segment selection
-                    selector = self._get_selector()
-                    if subthemes:
-                        # Balanced selection across sub-themes
-                        selected = selector.select_from_themes(
-                            themes=subthemes,
-                            n_per_theme=params.get("select_segments_per_subtheme", 8),
-                            strategy="balanced"
-                        )
-                    else:
-                        # Diversity selection from theme
-                        selected = selector.select(
-                            theme_segments,
-                            n=params.get("select_segments_per_subtheme", 8),
-                            strategy="diversity"
-                        )
-
-                    # Add unclustered segments if sub-themes exist
-                    if subthemes and params.get("select_unclustered", 0) > 0:
-                        clustered_ids = {id(seg) for subtheme in subthemes for seg in subtheme.segments}
-                        unclustered = [seg for seg in theme_segments if id(seg) not in clustered_ids]
-                        if unclustered:
-                            unclustered_selected = selector.select(
-                                unclustered,
-                                n=params.get("select_unclustered", 6),
-                                strategy="diversity"
-                            )
-                            selected.extend(unclustered_selected)
-
-                    analysis["selected_segments"] = selected
-
-                    return theme_id, analysis
-
-            # Run all theme analyses in parallel
-            results = await asyncio.gather(*[analyze_one_theme(theme) for theme in themes])
-
-            # Store results
-            themes_analysis = dict(results)
-            context["themes_analysis"] = themes_analysis
-            logger.info(f"Analyzed {len(themes)} themes in parallel")
-            return context
-
-        elif step_type == "extract_themes":
-            extractor = self._get_extractor()
-            segments = context.get("segments", [])
-
-            if not segments:
-                logger.warning("No segments available for theme extraction")
-                context["themes"] = []
-                return context
-
-            themes = extractor.extract_by_clustering(
-                segments=segments,
-                method=params.get("method", "hdbscan"),
-                n_clusters=params.get("n_clusters"),
-                min_cluster_size=params.get("min_cluster_size", 5),
-                max_themes=params.get("max_themes"),
-                use_faiss=params.get("use_faiss", False),
-                min_theme_percentage=params.get("min_theme_percentage")
-            )
-
-            context["themes"] = themes
-            logger.info(f"Extracted {len(themes)} themes")
-            return context
-
-        elif step_type == "quick_cluster_check":
-            extractor = self._get_extractor()
-            segments = context.get("segments", [])
-
-            skip_threshold = params.get("skip_if_few_segments", 30)
-            min_silhouette = params.get("min_silhouette_score", 0.15)
-
-            # Default: no clusters detected
-            context["has_subclusters"] = False
-            context["cluster_validation"] = {"skipped": True, "reason": "unknown"}
-
-            if not segments:
-                logger.info("No segments available for quick cluster check")
-                context["themes"] = []
-                context["cluster_validation"] = {"skipped": True, "reason": "no_segments"}
-                return context
-
-            if len(segments) < skip_threshold:
-                logger.info(f"Skipping clustering: {len(segments)} segments < {skip_threshold} threshold")
-                context["themes"] = []
-                context["cluster_validation"] = {
-                    "skipped": True,
-                    "reason": "too_few_segments",
-                    "segment_count": len(segments),
-                    "threshold": skip_threshold
-                }
-                return context
-
-            method = params.get("method", "hdbscan")
-
-            # FAST PATH: Use PCA + KMeans (no UMAP, much faster)
-            if method == "fast":
-                logger.info(f"Running FAST cluster check on {len(segments)} segments (PCA + KMeans)...")
-                from .fast_clustering import cluster_segments_fast
-                from .theme_extractor import Theme
-
-                # Fast clustering works directly on dict segments with embeddings
-                groups, cluster_result = cluster_segments_fast(
-                    segments,
-                    min_cluster_size=params.get("min_cluster_size", 10),
-                    min_silhouette=min_silhouette,
-                    max_clusters=params.get("max_themes", 4)
-                )
-
-                if cluster_result.is_valid and cluster_result.n_clusters >= 2:
-                    # Build Theme objects from groups
-                    themes = []
-                    for i, group in enumerate(groups):
-                        if len(group) >= params.get("min_cluster_size", 10):
-                            theme = Theme(
-                                theme_id=f"cluster_{i}",
-                                theme_name=f"Cluster {i+1}",
-                                segments=group,
-                                representative_segments=group[:5],
-                                keywords=[],
-                                embedding=None,
-                                metadata={"cluster_size": len(group)}
-                            )
-                            themes.append(theme)
-
-                    context["has_subclusters"] = True
-                    context["themes"] = themes
-                    context["cluster_validation"] = {
-                        "skipped": False,
-                        "silhouette_score": cluster_result.silhouette_score,
-                        "num_clusters": cluster_result.n_clusters,
-                        "cluster_sizes": cluster_result.cluster_sizes,
-                        "method": "fast_pca_kmeans",
-                        "elapsed_ms": cluster_result.metadata.get("elapsed_ms", 0)
-                    }
-                    logger.info(f"✓ Fast clustering: {len(themes)} clusters "
-                               f"(sil={cluster_result.silhouette_score:.3f}) in "
-                               f"{cluster_result.metadata.get('elapsed_ms', 0):.1f}ms")
-                else:
-                    context["has_subclusters"] = False
-                    context["themes"] = []
-                    context["cluster_validation"] = {
-                        "skipped": False,
-                        "silhouette_score": cluster_result.silhouette_score,
-                        "reason": "no_valid_clusters",
-                        "method": "fast_pca_kmeans"
-                    }
-                    logger.info(f"✗ Fast clustering: no valid clusters "
-                               f"(sil={cluster_result.silhouette_score:.3f})")
-
-                return context
-
-            # STANDARD PATH: Fetch embeddings for dict segments, use UMAP + HDBSCAN
-            if segments and isinstance(segments[0], dict):
-                logger.info(f"Fetching embeddings for {len(segments)} dict segments")
-                from ..rag.segment_retriever import SegmentRetriever
-                retriever = SegmentRetriever(self.db_session)
-                segment_ids = [seg.get('segment_id') for seg in segments if seg.get('segment_id')]
-                segments = retriever.fetch_by_ids(segment_ids)
-                logger.info(f"Fetched {len(segments)} segments with embeddings")
-
-            # Run HDBSCAN clustering first
-            logger.info(f"Running quick cluster check on {len(segments)} segments...")
-            themes = extractor.extract_by_clustering(
-                segments=segments,
-                method=method,
-                n_clusters=params.get("n_clusters"),
-                min_cluster_size=params.get("min_cluster_size", 10),
-                min_segments_per_theme=params.get("min_cluster_size", 10),
-                max_themes=params.get("max_themes")
-            )
-
-            # Handle 1-cluster case: treat as core+fringe structure
-            if len(themes) == 1:
-                logger.info(f"HDBSCAN found 1 cluster - will use core (cluster) + fringe (noise) structure")
-                # We already have unclustered_segments identified above
-                # Just keep the single theme and proceed to selection which will handle core+fringe
-
-            # K-means fallback if HDBSCAN found 0 clusters
-            fallback_used = False
-            if len(themes) == 0 and params.get("force_split", True):
-                logger.info(f"HDBSCAN found 0 clusters - trying k-means fallback...")
-
-                # Compute UMAP embeddings for fallback
-                import umap
-                embeddings = np.vstack([self._get_segment_embedding(seg) for seg in segments if self._get_segment_embedding(seg) is not None])
-                valid_segments = [seg for seg in segments if self._get_segment_embedding(seg) is not None]
-
-                umap_params = {
-                    "n_neighbors": min(15, len(valid_segments) - 1),
-                    "n_components": min(5, len(valid_segments) - 1),
-                    "metric": "cosine",
-                    "random_state": 42
-                }
-                reducer = umap.UMAP(**umap_params)
-                reduced_embeddings = reducer.fit_transform(embeddings)
-
-                # Try k-means with k=2,3,4
-                fallback_themes, fallback_metrics = extractor.extract_with_forced_kmeans(
-                    segments=valid_segments,
-                    reduced_embeddings=reduced_embeddings,
-                    k_values=[2, 3, 4],
-                    min_silhouette=min_silhouette,
-                    min_segments_per_theme=params.get("min_cluster_size", 10)
-                )
-
-                if fallback_themes:
-                    themes = fallback_themes
-                    fallback_used = True
-                    logger.info(f"✓ K-means fallback successful: {len(themes)} clusters")
-                else:
-                    logger.info(f"✗ K-means fallback failed - treating as homogeneous")
-
-            # Track which segments were clustered to identify noise/outliers
-            clustered_segment_ids = set()
-            for theme in themes:
-                for seg in theme.segments:
-                    clustered_segment_ids.add(self._get_segment_id(seg))
-
-            # Collect unclustered segments (noise points that don't fit any cluster)
-            unclustered_segments = []
-            for seg in segments:
-                if self._get_segment_id(seg) not in clustered_segment_ids:
-                    unclustered_segments.append(seg)
-
-            context["unclustered_segments"] = unclustered_segments
-            context["fallback_used"] = fallback_used
-            logger.info(f"Found {len(unclustered_segments)} unclustered segments (noise/outliers)")
-
-            # Validate cluster quality
-            if len(themes) == 1:
-                # Single cluster: treat as core+fringe structure (no validation needed)
-                context["has_subclusters"] = True  # Enable clustered selection mode
-                context["themes"] = themes
-                context["cluster_validation"] = {
-                    "skipped": False,
-                    "reason": "single_cluster_core_fringe",
-                    "num_clusters": 1
-                }
-                logger.info(f"✓ 1 cluster detected - using core+fringe structure ({len(themes[0].segments)} core + {len(unclustered_segments)} fringe)")
-
-            elif len(themes) >= 2:
-                # Get embeddings and build cluster labels array
-                embeddings = np.vstack([self._get_segment_embedding(seg) for seg in segments if self._get_segment_embedding(seg) is not None])
-                cluster_labels = np.full(len(embeddings), -1, dtype=int)  # -1 = noise
-                valid_segments = [seg for seg in segments if self._get_segment_embedding(seg) is not None]
-
-                # Assign cluster labels based on theme membership
-                for theme_idx, theme in enumerate(themes):
-                    theme_seg_ids = {self._get_segment_id(seg) for seg in theme.segments}
-                    for seg_idx, seg in enumerate(valid_segments):
-                        seg_id = self._get_segment_id(seg)
-                        if seg_id in theme_seg_ids:
-                            cluster_labels[seg_idx] = theme_idx
-
-                # Validate clusters
-                is_valid, validation_metrics = extractor._validate_clusters(
-                    embeddings,
-                    cluster_labels,
-                    min_silhouette_score=min_silhouette
-                )
-
-                # Add skipped flag to track whether clustering was attempted
-                validation_metrics["skipped"] = False
-                context["cluster_validation"] = validation_metrics
-
-                if is_valid:
-                    context["has_subclusters"] = True
-                    context["themes"] = themes
-                    logger.info(
-                        f"✓ Detected {len(themes)} valid sub-clusters "
-                        f"(silhouette={validation_metrics.get('silhouette_score', 0):.3f})"
-                    )
-                else:
-                    context["has_subclusters"] = False
-                    context["themes"] = []
-                    logger.info(
-                        f"✗ Clusters not validated "
-                        f"(silhouette={validation_metrics.get('silhouette_score', 0):.3f} < {min_silhouette}). "
-                        f"Treating as homogeneous."
-                    )
-            else:
-                context["has_subclusters"] = False
-                context["themes"] = []
-                context["cluster_validation"] = {
-                    "skipped": True,
-                    "reason": "insufficient_clusters",
-                    "num_clusters": len(themes)
-                }
-                logger.info(f"Insufficient clusters detected: {len(themes)} < 2. Treating as homogeneous.")
-
-            return context
-
-        elif step_type == "extract_subthemes":
-            extractor = self._get_extractor()
-            themes = context.get("themes", [])
-
-            if not themes:
-                logger.warning("No themes available for sub-theme extraction")
-                context["subtheme_map"] = {}
-                return context
-
-            # Use batch extraction with parallelization and validation
-            subtheme_map = await extractor.extract_subthemes_batch(
-                themes=themes,
-                method=params.get("method", "hdbscan"),
-                n_subthemes_per_theme=params.get("n_subthemes"),
-                min_cluster_size=params.get("min_cluster_size", 3),
-                max_concurrent=params.get("max_concurrent", 5),
-                require_valid_clusters=params.get("require_valid_clusters", True),
-                min_silhouette_score=params.get("min_silhouette_score", 0.15),
-                min_clusters_to_validate=params.get("min_clusters_to_validate", 2)
-            )
-
-            context["subtheme_map"] = subtheme_map
-            total_subthemes = sum(len(subs) for subs in subtheme_map.values())
-            themes_with_subthemes = sum(1 for subs in subtheme_map.values() if len(subs) > 0)
-            logger.info(
-                f"Extracted {total_subthemes} sub-themes from {themes_with_subthemes}/{len(themes)} themes "
-                f"(validation={'enabled' if params.get('require_valid_clusters', True) else 'disabled'})"
-            )
-            return context
-
-        elif step_type == "select_segments":
-            selector = self._get_selector()
-            strategy = params.get("strategy", "diversity")
-            n = params.get("n", 10)
-
-            # Check if we have clusters from quick_cluster_check
-            has_subclusters = context.get("has_subclusters", False)
-
-            # Case 1: Themes detected (from quick_cluster_check or extract_themes)
-            if "themes" in context and context.get("themes"):
-                all_selected = []
-                num_clusters = len(context['themes'])
-
-                # Adaptive per-cluster sizing
-                # 1 cluster (core+fringe): 8-14 from core + 6 from fringe
-                # 2 clusters → 8 each, 3 clusters → 8 each, 4 clusters → 6 each
-                if num_clusters == 1:
-                    n_per_cluster = min(14, n)  # More from core since it represents main discourse
-                elif num_clusters == 2:
-                    n_per_cluster = min(8, n)
-                elif num_clusters == 3:
-                    n_per_cluster = min(8, n)
-                else:  # 4+ clusters
-                    n_per_cluster = min(6, n)
-
-                for theme in context["themes"]:
-                    theme.selected = selector.select(
-                        theme.segments,
-                        n=n_per_cluster,
-                        strategy=strategy
-                    )
-                    all_selected.extend(theme.selected)
-
-                logger.info(f"Selected {n_per_cluster} segments per theme ({num_clusters} themes) using {strategy} strategy")
-
-                # Also select from unclustered segments if available (noise/outliers)
-                unclustered_segments = context.get("unclustered_segments", [])
-                unclustered_selected = []
-                if unclustered_segments and has_subclusters:
-                    # Use explicit n_unclustered param if provided, otherwise default to 6
-                    n_unclustered = params.get("n_unclustered", 6)
-                    n_unclustered = min(n_unclustered, len(unclustered_segments))
-                    unclustered_selected = selector.select(
-                        unclustered_segments,
-                        n=n_unclustered,
-                        strategy=strategy
-                    )
-                    all_selected.extend(unclustered_selected)
-                    logger.info(f"Selected {len(unclustered_selected)} unclustered segments (outliers/noise)")
-
-                # Store unclustered selection separately for prompt formatting
-                context["unclustered_selected"] = unclustered_selected
-
-                # ALWAYS set selected_segments when we have themes (even if validation failed)
-                # This ensures downstream generate_summaries has segments to work with
-                context["selected_segments"] = all_selected
-                context["selected_by_cluster"] = has_subclusters
-
-                total_clustered = len(all_selected) - len(unclustered_selected)
-                if has_subclusters:
-                    logger.info(f"Aggregated {len(all_selected)} total segments ({total_clustered} clustered + {len(unclustered_selected)} unclustered)")
-                else:
-                    logger.info(f"Selected {len(all_selected)} segments from themes (clustering validation failed, no sub-themes)")
-
-            # Case 2: Select from subthemes if available
-            elif "subtheme_map" in context:
-                for theme_id, subthemes in context["subtheme_map"].items():
-                    for subtheme in subthemes:
-                        subtheme.selected = selector.select(
-                            subtheme.segments,
-                            n=n,
-                            strategy=strategy
-                        )
-                logger.info(f"Selected {n} segments per sub-theme using {strategy} strategy")
-
-            # Case 3: No themes - select from flat segment list (standard simple RAG)
-            else:
-                segments = context.get("segments", [])
-
-                # If clustering was attempted but failed validation, increase selection
-                # to compensate for lack of cluster-based diversity sampling
-                if context.get("cluster_validation", {}).get("skipped") == False:
-                    # Clustering was attempted but didn't pass validation
-                    # Use a higher baseline: n + n_unclustered for better coverage
-                    n_unclustered = params.get("n_unclustered", 6)
-                    n_total = n + n_unclustered
-                    logger.info(f"Clustering validation failed - increasing selection to {n_total} segments for better coverage")
-                else:
-                    n_total = n
-
-                if segments:
-                    selected = selector.select(segments, n=n_total, strategy=strategy)
-                    context["selected_segments"] = selected
-                    context["selected_by_cluster"] = False
-                    logger.info(f"Selected {len(selected)} segments from {len(segments)} using {strategy} strategy (no clustering)")
-
-            return context
-
-        elif step_type == "generate_summaries":
-            generator = self._get_generator()
-            template = params.get("template")
-            max_concurrent = params.get("max_concurrent", 20)
-            level = params.get("level", "theme")
-
-            # Prepare generation tasks (now returns tuple with segment IDs)
-            tasks, segment_id_map = self._prepare_generation_tasks(context, template, level, params)
-
-            if not tasks:
-                logger.warning(f"No tasks to generate for level '{level}'")
-                context.setdefault("summaries", {})[level] = []
-                context.setdefault("segment_ids", {})[level] = {}
-                return context
-
-            # Check if two-pass generation is needed
-            two_pass = context.get("_two_pass_generation", False)
-
-            if two_pass:
-                # TWO-PASS GENERATION
-                themes = context.get("themes", [])
-                query = context.get("_two_pass_query", "the topic")
-
-                # Pass 1: Generate group summaries in parallel
-                logger.info(f"Pass 1: Generating {len(tasks)} group summaries...")
-                pass1_results = await generator.generate_batch(tasks, max_concurrent=max_concurrent)
-
-                # Pass 2: Generate overall synthesis
-                logger.info("Pass 2: Generating overall synthesis...")
-                group_summaries_with_sources = self._format_group_summaries_with_sources(
-                    group_summaries=pass1_results,
-                    themes=themes
-                )
-
-                synthesis_task = {
-                    "template_name": "rag_synthesis",
-                    "context": {
-                        "theme_name": query,
-                        "group_summaries_with_sources": group_summaries_with_sources
-                    },
-                    "model": params.get("model", "grok-2-1212"),
-                    "temperature": params.get("temperature"),
-                    "max_tokens": params.get("max_tokens", 800),
-                    "metadata": {
-                        "task_id": "overall_synthesis",
-                        "type": "overall_synthesis"
-                    }
-                }
-
-                synthesis_result = await generator.generate_from_template(
-                    template_name="rag_synthesis",
-                    context=synthesis_task["context"],
-                    model=synthesis_task["model"],
-                    temperature=synthesis_task.get("temperature"),
-                    max_tokens=synthesis_task.get("max_tokens")
-                )
-
-                # Collect all segment IDs from all groups
-                all_segment_ids = []
-                for task_id, ids in segment_id_map.items():
-                    all_segment_ids.extend(ids)
-                segment_id_map["overall_synthesis"] = all_segment_ids
-
-                # Store results in structured format
-                if "summaries" not in context:
-                    context["summaries"] = {}
-
-                context["summaries"][level] = {
-                    "overall_summary": synthesis_result,
-                    "group_summaries": [
-                        {
-                            "group_index": i + 1,
-                            "summary": summary,
-                            "segment_ids": segment_id_map.get(f"group_{i+1}", [])
-                        }
-                        for i, summary in enumerate(pass1_results)
-                    ],
-                    "has_groups": True,
-                    "num_groups": len(pass1_results)
-                }
-
-                # Clean up temporary context flags
-                context.pop("_two_pass_generation", None)
-                context.pop("_two_pass_query", None)
-
-                logger.info(f"Two-pass generation complete: {len(pass1_results)} group summaries + 1 synthesis")
-
-            else:
-                # SINGLE-PASS GENERATION (no clusters)
-                results = await generator.generate_batch(tasks, max_concurrent=max_concurrent)
-
-                # Store results
-                if "summaries" not in context:
-                    context["summaries"] = {}
-
-                # For single-pass, wrap in consistent structure
-                context["summaries"][level] = {
-                    "overall_summary": results[0] if results else None,
-                    "group_summaries": [],
-                    "has_groups": False,
-                    "num_groups": 0
-                }
-
-                logger.info(f"Single-pass generation complete: 1 summary")
-
-            # Store segment ID mapping
-            if "segment_ids" not in context:
-                context["segment_ids"] = {}
-            context["segment_ids"][level] = segment_id_map
-
-            return context
-
-        elif step_type == "quantitative_analysis":
-            analyzer = self._get_quantitative_analyzer()
-            segments = context.get("segments", [])
-
-            if not segments:
-                logger.warning("No segments available for quantitative analysis")
-                context["quantitative_metrics"] = analyzer._empty_analysis()
-                return context
-
-            # Get baseline segments if requested
-            baseline_segments = None
-            if params.get("include_baseline", False):
-                retriever = self._get_retriever()
-                time_window_days = params.get("time_window_days", 7)
-
-                # Calculate date range
-                from datetime import datetime, timezone, timedelta
-                end_date = datetime.now(timezone.utc)
-                start_date = end_date - timedelta(days=time_window_days)
-
-                # Retrieve baseline with same filters as original query (if available in context)
-                baseline_filters = {
-                    "date_range": (start_date, end_date),
-                    "must_be_stitched": True,
-                    "must_be_embedded": True
-                }
-
-                # Copy project/language/channel filters from original retrieval if available
-                for filter_key in ["projects", "languages", "channels"]:
-                    if filter_key in context:
-                        baseline_filters[filter_key] = context[filter_key]
-
-                # Use SQL aggregation instead of loading all segments (100x faster!)
-                baseline_segments = retriever.get_baseline_stats(**baseline_filters)
-                logger.info(
-                    f"Retrieved baseline stats: {baseline_segments['total_segments']} segments, "
-                    f"{baseline_segments['unique_videos']} videos, {baseline_segments['unique_channels']} channels"
-                )
-
-            # Perform analysis
-            metrics = analyzer.analyze(
-                segments=segments,
-                baseline_segments=baseline_segments,
-                time_window_days=params.get("time_window_days")
-            )
-
-            context["quantitative_metrics"] = metrics
-
-            if metrics.get('discourse_centrality'):
-                logger.info(
-                    f"Quantitative analysis complete: {metrics['total_segments']} segments, "
-                    f"centrality={metrics['discourse_centrality']['score']:.2f}"
-                )
-            else:
-                logger.info(
-                    f"Quantitative analysis complete: {metrics['total_segments']} segments "
-                    f"(no centrality - baseline not provided)"
-                )
-
-            return context
-
-        elif step_type == "group_by":
-            field = params.get("field")
-            segments = context.get("segments", [])
-
-            from collections import defaultdict
-            groups = defaultdict(list)
-            for seg in segments:
-                key = getattr(seg, field, "unknown")
-                groups[key].append(seg)
-
-            context["groups"] = dict(groups)
-            logger.info(f"Grouped {len(segments)} segments by '{field}' into {len(groups)} groups")
-            return context
-
-        elif step_type == "custom":
-            func = params.pop("func")
-            name = params.get("name", "custom")
-            logger.info(f"Executing custom step: {name}")
-            return await func(context, **params)
-
-        else:
-            raise ValueError(f"Unknown step type: {step_type}")
-
-    async def _execute_step_stream(
         self,
         step_type: str,
         params: Dict[str, Any],
@@ -2464,10 +1462,284 @@ class AnalysisPipeline:
 
             yield {"type": "result", "data": context}
 
-        else:
-            # For other steps, execute in batch and yield result
-            result = await self._execute_step(step_type, params, context)
+        elif step_type == "retrieve_all_segments":
+            # Retrieve ALL segments for filters (landing page workflow)
+            retriever = self._get_retriever()
+
+            # Build date range from time_window_days
+            time_window_days = params.get("time_window_days", 30)
+            from datetime import datetime, timezone, timedelta
+            end_date = datetime.now(timezone.utc)
+            start_date = end_date - timedelta(days=time_window_days)
+
+            # Build filter params
+            filter_params = {
+                "date_range": (start_date, end_date),
+                "must_be_stitched": params.get("must_be_stitched", True),
+                "must_be_embedded": params.get("must_be_embedded", True)
+            }
+
+            # Add optional filters
+            for key in ["projects", "languages", "channels"]:
+                if key in params and params[key]:
+                    filter_params[key] = params[key]
+
+            segments = retriever.fetch_by_filter(**filter_params)
+            context["segments"] = segments
+            context["all_segments"] = segments  # Store for corpus analysis
+            logger.info(f"Retrieved all {len(segments)} segments for time window {time_window_days}d")
+            yield {"type": "result", "data": context}
+
+        elif step_type == "corpus_analysis":
+            # Corpus-level quantitative analysis
+            analyzer = self._get_quantitative_analyzer()
+            segments = context.get("all_segments") or context.get("segments", [])
+
+            if not segments:
+                logger.warning("No segments available for corpus analysis")
+                context["corpus_stats"] = analyzer._empty_analysis()
+                yield {"type": "result", "data": context}
+                return
+
+            # Run quantitative analysis on full corpus
+            corpus_stats = analyzer.analyze(
+                segments=segments,
+                baseline_segments=None  # No baseline for corpus analysis
+            )
+
+            context["corpus_stats"] = corpus_stats
+            logger.info(
+                f"Corpus analysis: {corpus_stats['total_segments']} segments, "
+                f"{corpus_stats['episode_count']} episodes, "
+                f"{corpus_stats.get('total_duration_hours', 'N/A')}h total"
+            )
+            yield {"type": "result", "data": context}
+
+        elif step_type == "extract_themes":
+            extractor = self._get_extractor()
+            segments = context.get("segments", [])
+
+            if not segments:
+                logger.warning("No segments available for theme extraction")
+                context["themes"] = []
+                yield {"type": "result", "data": context}
+                return
+
+            themes = extractor.extract_by_clustering(
+                segments=segments,
+                method=params.get("method", "hdbscan"),
+                n_clusters=params.get("n_clusters"),
+                min_cluster_size=params.get("min_cluster_size", 5),
+                max_themes=params.get("max_themes"),
+                use_faiss=params.get("use_faiss", False),
+                min_theme_percentage=params.get("min_theme_percentage")
+            )
+
+            context["themes"] = themes
+            logger.info(f"Extracted {len(themes)} themes")
+            yield {"type": "result", "data": context}
+
+        elif step_type == "quick_cluster_check":
+            extractor = self._get_extractor()
+            segments = context.get("segments", [])
+
+            skip_threshold = params.get("skip_if_few_segments", 30)
+            min_silhouette = params.get("min_silhouette_score", 0.15)
+
+            # Default: no clusters detected
+            context["has_subclusters"] = False
+            context["cluster_validation"] = {"skipped": True, "reason": "unknown"}
+
+            if not segments:
+                logger.info("No segments available for quick cluster check")
+                context["themes"] = []
+                context["cluster_validation"] = {"skipped": True, "reason": "no_segments"}
+                yield {"type": "result", "data": context}
+                return
+
+            if len(segments) < skip_threshold:
+                logger.info(f"Skipping clustering: {len(segments)} segments < {skip_threshold} threshold")
+                context["themes"] = []
+                context["cluster_validation"] = {
+                    "skipped": True,
+                    "reason": "too_few_segments",
+                    "segment_count": len(segments),
+                    "threshold": skip_threshold
+                }
+                yield {"type": "result", "data": context}
+                return
+
+            method = params.get("method", "hdbscan")
+
+            # FAST PATH: Use PCA + KMeans (no UMAP, much faster)
+            if method == "fast":
+                logger.info(f"Running FAST cluster check on {len(segments)} segments (PCA + KMeans)...")
+                from .fast_clustering import cluster_segments_fast
+                from .theme_extractor import Theme
+
+                groups, cluster_result = cluster_segments_fast(
+                    segments,
+                    min_cluster_size=params.get("min_cluster_size", 10),
+                    min_silhouette=min_silhouette,
+                    max_clusters=params.get("max_themes", 4)
+                )
+
+                if cluster_result.is_valid and cluster_result.n_clusters >= 2:
+                    themes = []
+                    for i, group in enumerate(groups):
+                        if len(group) >= params.get("min_cluster_size", 10):
+                            theme = Theme(
+                                theme_id=f"cluster_{i}",
+                                theme_name=f"Cluster {i+1}",
+                                segments=group,
+                                representative_segments=group[:5],
+                                keywords=[],
+                                embedding=None,
+                                metadata={"cluster_size": len(group)}
+                            )
+                            themes.append(theme)
+
+                    context["has_subclusters"] = True
+                    context["themes"] = themes
+                    context["cluster_validation"] = {
+                        "skipped": False,
+                        "silhouette_score": cluster_result.silhouette_score,
+                        "num_clusters": cluster_result.n_clusters,
+                        "cluster_sizes": cluster_result.cluster_sizes,
+                        "method": "fast_pca_kmeans",
+                        "elapsed_ms": cluster_result.metadata.get("elapsed_ms", 0)
+                    }
+                    logger.info(f"✓ Fast clustering: {len(themes)} clusters "
+                               f"(sil={cluster_result.silhouette_score:.3f})")
+                else:
+                    context["has_subclusters"] = False
+                    context["themes"] = []
+                    context["cluster_validation"] = {
+                        "skipped": False,
+                        "silhouette_score": cluster_result.silhouette_score,
+                        "reason": "no_valid_clusters",
+                        "method": "fast_pca_kmeans"
+                    }
+                    logger.info(f"✗ Fast clustering: no valid clusters")
+
+                yield {"type": "result", "data": context}
+                return
+
+            # STANDARD PATH: UMAP + HDBSCAN
+            if segments and isinstance(segments[0], dict):
+                logger.info(f"Fetching embeddings for {len(segments)} dict segments")
+                from ..rag.segment_retriever import SegmentRetriever
+                retriever = SegmentRetriever(self.db_session)
+                segment_ids = [seg.get('segment_id') for seg in segments if seg.get('segment_id')]
+                segments = retriever.fetch_by_ids(segment_ids)
+                logger.info(f"Fetched {len(segments)} segments with embeddings")
+
+            logger.info(f"Running quick cluster check on {len(segments)} segments...")
+            themes = extractor.extract_by_clustering(
+                segments=segments,
+                method=method,
+                n_clusters=params.get("n_clusters"),
+                min_cluster_size=params.get("min_cluster_size", 10),
+                min_segments_per_theme=params.get("min_cluster_size", 10),
+                max_themes=params.get("max_themes")
+            )
+
+            # Track unclustered segments
+            clustered_segment_ids = set()
+            for theme in themes:
+                for seg in theme.segments:
+                    clustered_segment_ids.add(self._get_segment_id(seg))
+
+            unclustered_segments = [seg for seg in segments if self._get_segment_id(seg) not in clustered_segment_ids]
+            context["unclustered_segments"] = unclustered_segments
+
+            # Validate clusters
+            if len(themes) >= 2:
+                embeddings = np.vstack([self._get_segment_embedding(seg) for seg in segments if self._get_segment_embedding(seg) is not None])
+                cluster_labels = np.full(len(embeddings), -1, dtype=int)
+                valid_segments = [seg for seg in segments if self._get_segment_embedding(seg) is not None]
+
+                for theme_idx, theme in enumerate(themes):
+                    theme_seg_ids = {self._get_segment_id(seg) for seg in theme.segments}
+                    for seg_idx, seg in enumerate(valid_segments):
+                        if self._get_segment_id(seg) in theme_seg_ids:
+                            cluster_labels[seg_idx] = theme_idx
+
+                is_valid, validation_metrics = extractor._validate_clusters(embeddings, cluster_labels, min_silhouette)
+                validation_metrics["skipped"] = False
+                context["cluster_validation"] = validation_metrics
+
+                if is_valid:
+                    context["has_subclusters"] = True
+                    context["themes"] = themes
+                    logger.info(f"✓ Detected {len(themes)} valid sub-clusters")
+                else:
+                    context["has_subclusters"] = False
+                    context["themes"] = []
+                    logger.info(f"✗ Clusters not validated")
+            elif len(themes) == 1:
+                context["has_subclusters"] = True
+                context["themes"] = themes
+                context["cluster_validation"] = {"skipped": False, "reason": "single_cluster_core_fringe", "num_clusters": 1}
+                logger.info(f"✓ 1 cluster detected - using core+fringe structure")
+            else:
+                context["has_subclusters"] = False
+                context["themes"] = []
+                context["cluster_validation"] = {"skipped": True, "reason": "insufficient_clusters", "num_clusters": 0}
+
+            yield {"type": "result", "data": context}
+
+        elif step_type == "analyze_themes_with_subthemes":
+            # Complex parallel analysis - simplified for streaming
+            themes = context.get("themes", [])
+            if not themes:
+                context["themes_analysis"] = {}
+                yield {"type": "result", "data": context}
+                return
+
+            max_concurrent = params.get("max_concurrent", 8)
+            semaphore = asyncio.Semaphore(max_concurrent)
+
+            async def analyze_one_theme(theme):
+                async with semaphore:
+                    analysis = {
+                        "theme_id": theme.theme_id,
+                        "theme_name": theme.theme_name,
+                        "segment_count": len(theme.segments)
+                    }
+                    selector = self._get_selector()
+                    selected = selector.select(theme.segments, n=params.get("select_segments_per_subtheme", 8), strategy="diversity")
+                    analysis["selected_segments"] = selected
+                    return theme.theme_id, analysis
+
+            results = await asyncio.gather(*[analyze_one_theme(theme) for theme in themes])
+            context["themes_analysis"] = dict(results)
+            logger.info(f"Analyzed {len(themes)} themes")
+            yield {"type": "result", "data": context}
+
+        elif step_type == "group_by":
+            field = params.get("field")
+            segments = context.get("segments", [])
+
+            from collections import defaultdict
+            groups = defaultdict(list)
+            for seg in segments:
+                key = getattr(seg, field, "unknown")
+                groups[key].append(seg)
+
+            context["groups"] = dict(groups)
+            logger.info(f"Grouped {len(segments)} segments by '{field}' into {len(groups)} groups")
+            yield {"type": "result", "data": context}
+
+        elif step_type == "custom":
+            func = params.pop("func")
+            name = params.get("name", "custom")
+            logger.info(f"Executing custom step: {name}")
+            result = await func(context, **params)
             yield {"type": "result", "data": result}
+
+        else:
+            raise ValueError(f"Unknown step type: {step_type}")
 
     def _prepare_generation_tasks(
         self,
@@ -2514,7 +1786,7 @@ class AnalysisPipeline:
 
                         # Pass 1: Create group summary tasks (one per cluster)
                         for i, theme in enumerate(themes):
-                            theme_segments = getattr(theme, "selected", theme.segments[:10])
+                            theme_segments = getattr(theme, "selected", None) or theme.segments[:10]
                             if not theme_segments:
                                 continue
 
@@ -2575,7 +1847,7 @@ class AnalysisPipeline:
             # This is for workflows that want per-theme summaries without an overall summary
             elif themes and "selected_segments" not in context:
                 for theme in themes:
-                    theme_selected = getattr(theme, "selected", theme.segments[:10])
+                    theme_selected = getattr(theme, "selected", None) or theme.segments[:10]
                     segments_text = self._format_segments_for_prompt(theme_selected)
 
                     task_id = f"theme_{theme.theme_id}"
@@ -2614,7 +1886,8 @@ class AnalysisPipeline:
                 parent_theme_name = theme_name_map.get(parent_theme_id, "Unknown Theme")
 
                 for subtheme in subthemes:
-                    selected_segments = getattr(subtheme, "selected", subtheme.segments[:10])
+                    # Use selected if available and non-empty, otherwise use first 10 segments
+                    selected_segments = getattr(subtheme, "selected", None) or subtheme.segments[:10]
                     segments_text = self._format_segments_for_prompt(selected_segments)
 
                     task_id = f"subtheme_{subtheme.theme_id}"
@@ -2689,7 +1962,7 @@ class AnalysisPipeline:
         current_seg_id = 1  # Global segment counter for citations
 
         for i, (summary, theme) in enumerate(zip(group_summaries, themes)):
-            theme_segments = getattr(theme, "selected", theme.segments[:10])
+            theme_segments = getattr(theme, "selected", None) or theme.segments[:10]
 
             # Format transcripts for this group with globally unique segment IDs
             transcript_parts = []
@@ -2837,6 +2110,50 @@ Source transcripts:
                 "summaries": context.get("summaries", {}),
                 "segment_ids": context.get("segment_ids", {})
             }
+
+        elif step_type == "retrieve_segments":
+            segments = context.get("segments", [])
+            return {
+                "segment_count": len(segments),
+                "segments": segments
+            }
+
+        elif step_type == "retrieve_all_segments":
+            segments = context.get("segments", [])
+            return {
+                "segment_count": len(segments),
+                "segments": segments
+            }
+
+        elif step_type == "extract_themes":
+            themes = context.get("themes", [])
+            return {
+                "themes": themes,
+                "theme_count": len(themes)
+            }
+
+        elif step_type == "extract_subthemes":
+            subtheme_map = context.get("subtheme_map", {})
+            return {
+                "subtheme_map": subtheme_map,
+                "total_subthemes": sum(len(subs) for subs in subtheme_map.values())
+            }
+
+        elif step_type == "group_by":
+            groups = context.get("groups", {})
+            return {
+                "groups": groups,
+                "num_groups": len(groups)
+            }
+
+        elif step_type == "corpus_analysis":
+            return {
+                "corpus_stats": context.get("corpus_stats", {})
+            }
+
+        elif step_type == "custom":
+            # Return entire context for custom steps
+            return context
 
         else:
             # For unknown steps, return minimal context

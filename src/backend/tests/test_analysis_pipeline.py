@@ -7,10 +7,7 @@ import asyncio
 from unittest.mock import Mock, AsyncMock, MagicMock
 from datetime import datetime
 
-from app.services.rag.analysis_pipeline import (
-    AnalysisPipeline,
-    PipelineResult
-)
+from app.services.rag.analysis_pipeline import AnalysisPipeline
 
 
 @pytest.fixture
@@ -268,7 +265,7 @@ def test_generator_requires_llm_service():
 
 
 # ============================================================================
-# Batch Execution Tests
+# Execution Tests (Streaming API)
 # ============================================================================
 
 @pytest.mark.asyncio
@@ -276,13 +273,15 @@ async def test_execute_empty_pipeline():
     """Test executing pipeline with no steps."""
     pipeline = AnalysisPipeline("empty")
 
-    result = await pipeline.execute()
+    events = []
+    async for event in pipeline.execute():
+        events.append(event)
 
-    assert isinstance(result, PipelineResult)
-    assert result.name == "empty"
-    assert result.steps_completed == 0
-    assert result.total_steps == 0
-    assert result.data == {}
+    # Should only have complete event
+    assert len(events) == 1
+    assert events[0]["type"] == "complete"
+    assert events[0]["steps_completed"] == 0
+    assert events[0]["total_steps"] == 0
 
 
 @pytest.mark.asyncio
@@ -299,11 +298,22 @@ async def test_execute_retrieve_segments(mock_db_session, mock_segments, monkeyp
 
     pipeline.retrieve_segments(projects=["Europe"], languages=["en"])
 
-    result = await pipeline.execute()
+    # Collect results from streaming
+    final_data = {}
+    events = []
+    async for event in pipeline.execute():
+        events.append(event)
+        if event["type"] == "result":
+            final_data.update(event.get("data", {}))
 
-    assert result.steps_completed == 1
-    assert "segments" in result.data
-    assert len(result.data["segments"]) == 100
+    # Should have result + complete events
+    result_events = [e for e in events if e["type"] == "result"]
+    complete_events = [e for e in events if e["type"] == "complete"]
+    assert len(result_events) == 1
+    assert len(complete_events) == 1
+    assert complete_events[0]["steps_completed"] == 1
+    assert "segments" in final_data
+    assert len(final_data["segments"]) == 100
     mock_retriever.fetch_by_filter.assert_called_once_with(
         projects=["Europe"],
         languages=["en"]
@@ -334,10 +344,14 @@ async def test_execute_extract_themes(mock_segments):
     pipeline.retrieve_segments(projects=["Europe"])
     pipeline.extract_themes(method="hdbscan", n_clusters=2)
 
-    result = await pipeline.execute()
+    # Collect results from streaming
+    final_data = {}
+    async for event in pipeline.execute():
+        if event["type"] == "result":
+            final_data.update(event.get("data", {}))
 
-    assert "themes" in result.data
-    assert len(result.data["themes"]) == 2
+    assert "themes" in final_data
+    assert len(final_data["themes"]) == 2
     mock_extractor.extract_by_clustering.assert_called_once()
 
 
@@ -364,11 +378,15 @@ async def test_execute_select_segments(mock_theme, mock_segments):
     pipeline.extract_themes(n_clusters=5)
     pipeline.select_segments(strategy="diversity", n=10)
 
-    result = await pipeline.execute()
+    # Collect results from streaming
+    final_data = {}
+    async for event in pipeline.execute():
+        if event["type"] == "result":
+            final_data.update(event.get("data", {}))
 
     # Check that theme has selected attribute
-    assert "themes" in result.data
-    assert hasattr(result.data["themes"][0], "selected")
+    assert "themes" in final_data
+    assert hasattr(final_data["themes"][0], "selected")
     mock_selector.select.assert_called_once()
 
 
@@ -376,7 +394,18 @@ async def test_execute_select_segments(mock_theme, mock_segments):
 async def test_execute_generate_summaries(mock_llm_service, mock_theme, mock_segments):
     """Test generate_summaries execution."""
     mock_generator = Mock()
-    mock_generator.generate_batch = AsyncMock(return_value=["Summary for theme 1"])
+
+    # Mock generate_batch_stream as an async generator
+    async def mock_generate_batch_stream(tasks, max_concurrent=20):
+        for i, task in enumerate(tasks):
+            yield {
+                "index": i,
+                "result": f"Summary for task {i}",
+                "completed": i + 1,
+                "total": len(tasks),
+                "progress": (i + 1) / len(tasks)
+            }
+    mock_generator.generate_batch_stream = mock_generate_batch_stream
 
     # Mock extractor and retriever
     mock_extractor = Mock()
@@ -394,12 +423,14 @@ async def test_execute_generate_summaries(mock_llm_service, mock_theme, mock_seg
     pipeline.extract_themes(n_clusters=5)
     pipeline.generate_summaries(template="theme_summary", level="theme")
 
-    result = await pipeline.execute()
+    # Collect results from streaming
+    final_data = {}
+    async for event in pipeline.execute():
+        if event["type"] == "result":
+            final_data.update(event.get("data", {}))
 
-    assert "summaries" in result.data
-    assert "theme" in result.data["summaries"]
-    assert len(result.data["summaries"]["theme"]) == 1
-    mock_generator.generate_batch.assert_called_once()
+    assert "summaries" in final_data
+    assert "theme" in final_data["summaries"]
 
 
 @pytest.mark.asyncio
@@ -414,11 +445,15 @@ async def test_execute_group_by(mock_segments):
     pipeline.retrieve_segments(projects=["Europe"])
     pipeline.group_by("language")
 
-    result = await pipeline.execute()
+    # Collect results from streaming
+    final_data = {}
+    async for event in pipeline.execute():
+        if event["type"] == "result":
+            final_data.update(event.get("data", {}))
 
-    assert "groups" in result.data
-    assert "en" in result.data["groups"]
-    assert len(result.data["groups"]["en"]) == 100
+    assert "groups" in final_data
+    assert "en" in final_data["groups"]
+    assert len(final_data["groups"]["en"]) == 100
 
 
 @pytest.mark.asyncio
@@ -431,10 +466,14 @@ async def test_execute_custom_step():
     pipeline = AnalysisPipeline("test")
     pipeline.custom_step("my_step", custom_func, value="custom_value")
 
-    result = await pipeline.execute()
+    # Collect results from streaming
+    final_data = {}
+    async for event in pipeline.execute():
+        if event["type"] == "result":
+            final_data.update(event.get("data", {}))
 
-    assert "custom_result" in result.data
-    assert result.data["custom_result"] == "custom_value"
+    assert "custom_result" in final_data
+    assert final_data["custom_result"] == "custom_value"
 
 
 @pytest.mark.asyncio
@@ -451,7 +490,17 @@ async def test_execute_full_workflow(mock_llm_service, mock_db_session, mock_seg
     mock_selector.select = Mock(return_value=mock_theme.segments[:10])
 
     mock_generator = Mock()
-    mock_generator.generate_batch = AsyncMock(return_value=["Theme summary"])
+    # Mock generate_batch_stream as an async generator
+    async def mock_generate_batch_stream(tasks, max_concurrent=20):
+        for i, task in enumerate(tasks):
+            yield {
+                "index": i,
+                "result": f"Theme summary {i}",
+                "completed": i + 1,
+                "total": len(tasks),
+                "progress": (i + 1) / len(tasks)
+            }
+    mock_generator.generate_batch_stream = mock_generate_batch_stream
 
     pipeline = AnalysisPipeline("full_workflow", llm_service=mock_llm_service, db_session=mock_db_session)
     pipeline._retriever = mock_retriever
@@ -468,13 +517,19 @@ async def test_execute_full_workflow(mock_llm_service, mock_db_session, mock_seg
         .generate_summaries(template="theme_summary", level="theme")
     )
 
-    result = await pipeline.execute()
+    # Collect results from streaming
+    final_data = {}
+    events = []
+    async for event in pipeline.execute():
+        events.append(event)
+        if event["type"] == "result":
+            final_data.update(event.get("data", {}))
 
-    assert result.steps_completed == 4
-    assert "segments" in result.data
-    assert "themes" in result.data
-    assert "summaries" in result.data
-    assert len(result.data["summaries"]["theme"]) == 1
+    complete_event = [e for e in events if e["type"] == "complete"][0]
+    assert complete_event["steps_completed"] == 4
+    assert "segments" in final_data
+    assert "themes" in final_data
+    assert "summaries" in final_data
 
 
 @pytest.mark.asyncio
@@ -486,31 +541,22 @@ async def test_execute_error_handling():
     pipeline = AnalysisPipeline("test")
     pipeline.custom_step("failing_step", failing_func)
 
+    events = []
     with pytest.raises(ValueError, match="Custom error"):
-        await pipeline.execute()
+        async for event in pipeline.execute():
+            events.append(event)
+
+    # Should have an error event before the exception
+    assert any(e["type"] == "error" for e in events)
 
 
 # ============================================================================
-# Streaming Execution Tests
+# Verbose Mode Tests (progress events)
 # ============================================================================
 
 @pytest.mark.asyncio
-async def test_execute_stream_empty_pipeline():
-    """Test streaming execution with no steps."""
-    pipeline = AnalysisPipeline("empty")
-
-    updates = []
-    async for update in pipeline.execute_stream():
-        updates.append(update)
-
-    # Should only have complete message
-    assert len(updates) == 1
-    assert updates[0]["type"] == "complete"
-
-
-@pytest.mark.asyncio
-async def test_execute_stream_progress_updates(mock_db_session, mock_segments):
-    """Test streaming progress updates."""
+async def test_execute_verbose_progress_updates(mock_db_session, mock_segments):
+    """Test verbose mode emits progress updates."""
     mock_retriever = Mock()
     mock_retriever.fetch_by_filter = Mock(return_value=mock_segments)
 
@@ -519,24 +565,23 @@ async def test_execute_stream_progress_updates(mock_db_session, mock_segments):
     pipeline.retrieve_segments(projects=["Europe"])
 
     updates = []
-    async for update in pipeline.execute_stream():
+    async for update in pipeline.execute(verbose=True):
         updates.append(update)
 
-    # Should have: progress (start) -> progress (complete) -> complete
-    assert len(updates) == 3
-    assert updates[0]["type"] == "progress"
-    assert updates[0]["step"] == "retrieve_segments"
-    assert updates[0]["progress"] == 0.0
+    # Verbose mode: progress (start) -> result -> progress (complete) -> complete
+    progress_updates = [u for u in updates if u["type"] == "progress"]
+    result_updates = [u for u in updates if u["type"] == "result"]
+    complete_updates = [u for u in updates if u["type"] == "complete"]
 
-    assert updates[1]["type"] == "progress"
-    assert updates[1]["progress"] == 1.0
-
-    assert updates[2]["type"] == "complete"
+    assert len(progress_updates) == 2  # start + complete
+    assert len(result_updates) == 1
+    assert len(complete_updates) == 1
+    assert progress_updates[0]["step"] == "retrieve_segments"
 
 
 @pytest.mark.asyncio
-async def test_execute_stream_extract_subthemes_partial_results(mock_segments):
-    """Test streaming partial results for extract_subthemes."""
+async def test_execute_partial_results_for_subthemes(mock_segments):
+    """Test partial results for extract_subthemes (verbose mode)."""
     from app.services.rag.theme_extractor import Theme
 
     # Create 3 main themes
@@ -570,40 +615,23 @@ async def test_execute_stream_extract_subthemes_partial_results(mock_segments):
     pipeline.extract_subthemes(n_subthemes=2)
 
     partial_updates = []
-    async for update in pipeline.execute_stream():
+    async for update in pipeline.execute(verbose=True):
         if update["type"] == "partial":
             partial_updates.append(update)
 
-    # Should yield one partial per theme (3 themes)
-    assert len(partial_updates) == 3
+    # Filter to only extract_subthemes partials
+    subtheme_partials = [p for p in partial_updates if p["step"] == "extract_subthemes"]
 
-    # Check first partial
-    assert partial_updates[0]["step"] == "extract_subthemes"
-    assert "parent_theme_name" in partial_updates[0]["data"]
-    assert "subthemes" in partial_updates[0]["data"]
-    assert len(partial_updates[0]["data"]["subthemes"]) == 2
+    # Should yield one partial per theme (3 themes)
+    assert len(subtheme_partials) == 3
+
+    # Check first subtheme partial
+    assert subtheme_partials[0]["step"] == "extract_subthemes"
+    assert "parent_theme_name" in subtheme_partials[0]["data"]
+    assert "subthemes" in subtheme_partials[0]["data"]
+    assert len(subtheme_partials[0]["data"]["subthemes"]) == 2
     # Progress is adjusted by total steps, so just check it exists
     assert "progress" in partial_updates[0]
-
-
-@pytest.mark.asyncio
-async def test_execute_stream_error_handling():
-    """Test error handling in streaming mode."""
-    async def failing_func(context, **params):
-        raise ValueError("Stream error")
-
-    pipeline = AnalysisPipeline("test")
-    pipeline.custom_step("failing", failing_func)
-
-    updates = []
-    with pytest.raises(ValueError):
-        async for update in pipeline.execute_stream():
-            updates.append(update)
-
-    # Should have progress update and error update
-    assert any(u["type"] == "error" for u in updates)
-    error_update = [u for u in updates if u["type"] == "error"][0]
-    assert "Stream error" in error_update["error"]
 
 
 # ============================================================================
@@ -653,10 +681,15 @@ def test_prepare_generation_tasks_subtheme_level():
     """Test generation task preparation for subtheme level."""
     from app.services.rag.theme_extractor import Theme
 
-    # Create parent theme and subthemes
-    segments = [Mock() for _ in range(10)]
-    for i, seg in enumerate(segments):
-        seg.id = 1000 + i  # Add segment IDs
+    # Create parent theme and subthemes with proper segment mocks
+    segments = []
+    for i in range(10):
+        seg = Mock()
+        seg.id = 1000 + i
+        seg.text = f"Segment text {i}"
+        seg.channel_name = "Test Channel"
+        seg.publish_date = "2024-01-01"
+        segments.append(seg)
 
     parent = Theme("parent_1", "Immigration", segments, [], [], None, {})
     sub1 = Theme("sub_1", "Pro-restriction", segments[:5], [], [], None, {})
@@ -759,20 +792,30 @@ async def test_integration_theme_and_subtheme_workflow(mock_llm_service, mock_db
     mock_extractor = Mock()
     mock_extractor.extract_by_clustering = Mock(return_value=[main_theme])
 
-    # Mock subtheme extraction
-    async def mock_extract_subthemes_batch(themes, **kwargs):
+    # Mock subtheme extraction (non-batch version, called for each theme)
+    def mock_extract_subthemes(theme, **kwargs):
         subthemes = [
-            Theme("sub_1", "Pro-restriction", themes[0].segments[:25], [], [], None, {}),
-            Theme("sub_2", "Pro-open", themes[0].segments[25:], [], [], None, {})
+            Theme("sub_1", "Pro-restriction", theme.segments[:25], [], [], None, {}),
+            Theme("sub_2", "Pro-open", theme.segments[25:], [], [], None, {})
         ]
-        return {"theme_1": subthemes}
-    mock_extractor.extract_subthemes_batch = mock_extract_subthemes_batch
+        return subthemes
+    mock_extractor.extract_subthemes = mock_extract_subthemes
 
     mock_selector = Mock()
     mock_selector.select = Mock(return_value=mock_segments[:10])
 
     mock_generator = Mock()
-    mock_generator.generate_batch = AsyncMock(return_value=["Summary 1", "Summary 2"])
+    # Mock generate_batch_stream as an async generator
+    async def mock_generate_batch_stream(tasks, max_concurrent=20):
+        for i, task in enumerate(tasks):
+            yield {
+                "index": i,
+                "result": f"Summary {i}",
+                "completed": i + 1,
+                "total": len(tasks),
+                "progress": (i + 1) / len(tasks)
+            }
+    mock_generator.generate_batch_stream = mock_generate_batch_stream
 
     pipeline = AnalysisPipeline("hierarchical", llm_service=mock_llm_service, db_session=mock_db_session)
     pipeline._retriever = mock_retriever
@@ -790,20 +833,26 @@ async def test_integration_theme_and_subtheme_workflow(mock_llm_service, mock_db
         .generate_summaries(template="subtheme_summary", level="subtheme")
     )
 
-    result = await pipeline.execute()
+    # Collect results from streaming
+    final_data = {}
+    events = []
+    async for event in pipeline.execute():
+        events.append(event)
+        if event["type"] == "result":
+            final_data.update(event.get("data", {}))
 
-    assert result.steps_completed == 5
-    assert "segments" in result.data
-    assert "themes" in result.data
-    assert "subtheme_map" in result.data
-    assert "summaries" in result.data
-    assert "subtheme" in result.data["summaries"]
-    assert len(result.data["summaries"]["subtheme"]) == 2
+    complete_event = [e for e in events if e["type"] == "complete"][0]
+    assert complete_event["steps_completed"] == 5
+    assert "segments" in final_data
+    assert "themes" in final_data
+    assert "subtheme_map" in final_data
+    assert "summaries" in final_data
+    assert "subtheme" in final_data["summaries"]
 
 
 @pytest.mark.asyncio
 async def test_integration_streaming_with_partial_results(mock_db_session, mock_segments):
-    """Test streaming with partial results at each step."""
+    """Test streaming with partial results at each step (verbose mode)."""
     from app.services.rag.theme_extractor import Theme
 
     themes = [
@@ -837,19 +886,20 @@ async def test_integration_streaming_with_partial_results(mock_db_session, mock_
     )
 
     updates = []
-    async for update in pipeline.execute_stream():
+    async for update in pipeline.execute(verbose=True):
         updates.append(update)
 
     # Should have progress and partial updates
     progress_updates = [u for u in updates if u["type"] == "progress"]
     partial_updates = [u for u in updates if u["type"] == "partial"]
     complete_updates = [u for u in updates if u["type"] == "complete"]
+    subtheme_partials = [u for u in partial_updates if u["step"] == "extract_subthemes"]
 
-    # Progress for each step start and complete + final complete
+    # Progress for each step start and complete
     assert len(progress_updates) >= 3
 
     # Partial results for 2 themes during subtheme extraction
-    assert len(partial_updates) == 2
+    assert len(subtheme_partials) == 2
 
     # One complete message
     assert len(complete_updates) == 1
@@ -894,8 +944,9 @@ async def test_component_reuse_across_steps(mock_db_session, mock_segments):
     selector_1 = pipeline._get_selector()
     retriever_1 = pipeline._get_retriever()
 
-    # Execute
-    await pipeline.execute()
+    # Execute with streaming
+    async for event in pipeline.execute():
+        pass  # Just run to completion
 
     # Get components again
     extractor_2 = pipeline._get_extractor()

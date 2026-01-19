@@ -148,20 +148,25 @@ class SimpleRAGWorkflow:
             )
         )
 
-        # Execute
-        result = await pipeline.execute()
+        # Execute with streaming, collect final result
+        final_context = {}
+        async for event in pipeline.execute():
+            if event['type'] == 'result':
+                final_context.update(event.get('data', {}))
+            elif event['type'] == 'complete':
+                break
 
         # Extract results
-        summaries = result.data.get("summaries", {}).get("theme", [])
+        summaries = final_context.get("summaries", {}).get("theme", [])
         summary = summaries[0] if summaries else None
 
         # Extract segment IDs
-        segment_ids_map = result.data.get("segment_ids", {}).get("theme", {})
+        segment_ids_map = final_context.get("segment_ids", {}).get("theme", {})
         task_id = "theme_query_response"
         segment_ids = segment_ids_map.get(task_id, [])
 
         # Extract quantitative metrics if generated
-        quantitative_metrics = result.data.get("quantitative_metrics")
+        quantitative_metrics = final_context.get("quantitative_metrics")
 
         logger.info(f"SimpleRAG complete: generated {len(summary) if summary else 0} chars, used {len(segment_ids)} segments")
 
@@ -295,25 +300,30 @@ class SimpleRAGWorkflow:
             )
         )
 
-        # Execute
-        result = await pipeline.execute()
+        # Execute with streaming, collect final result
+        final_context = {}
+        async for event in pipeline.execute():
+            if event['type'] == 'result':
+                final_context.update(event.get('data', {}))
+            elif event['type'] == 'complete':
+                break
 
         # Extract results
-        summaries = result.data.get("summaries", {}).get("theme", [])
+        summaries = final_context.get("summaries", {}).get("theme", [])
         summary = summaries[0] if summaries else None
 
         # Extract segment IDs
-        segment_ids_map = result.data.get("segment_ids", {}).get("theme", {})
+        segment_ids_map = final_context.get("segment_ids", {}).get("theme", {})
         task_id = "theme_query_response"
         segment_ids = segment_ids_map.get(task_id, [])
 
         # Get expanded queries from context
-        expanded_queries = result.data.get("expanded_queries", [])
-        segments = result.data.get("segments", [])
+        expanded_queries = final_context.get("expanded_queries", [])
+        segments = final_context.get("segments", [])
         segments_count = len(segments)
 
         # Extract quantitative metrics if generated
-        quantitative_metrics = result.data.get("quantitative_metrics")
+        quantitative_metrics = final_context.get("quantitative_metrics")
 
         # Convert segments to search results format (with all metadata for UI)
         search_results = []
@@ -450,7 +460,7 @@ class SimpleRAGWorkflow:
         )
 
         # Execute with streaming - AnalysisPipeline handles all event generation
-        async for event in pipeline.execute_stream():
+        async for event in pipeline.execute():
             yield event
 
         logger.info(f"SimpleRAG with expansion (streaming) complete")

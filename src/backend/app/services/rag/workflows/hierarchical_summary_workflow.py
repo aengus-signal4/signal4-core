@@ -186,9 +186,14 @@ class HierarchicalSummaryWorkflow:
                 max_tokens=max_tokens
             )
 
-            # Execute pipeline
+            # Execute pipeline with streaming, collect final result
             try:
-                result = await pipeline.execute()
+                final_context = {}
+                async for event in pipeline.execute():
+                    if event['type'] == 'result':
+                        final_context.update(event.get('data', {}))
+                    elif event['type'] == 'complete':
+                        break
             except Exception as e:
                 logger.error(f"Error processing group {group_id}: {e}", exc_info=True)
                 group_results[group_id] = {
@@ -200,11 +205,11 @@ class HierarchicalSummaryWorkflow:
                 continue
 
             # Extract results
-            themes = result.data.get("themes", [])
-            summaries = result.data.get("summaries", {}).get(summary_level, [])
-            segment_ids_map = result.data.get("segment_ids", {}).get(summary_level, {})
-            segments = result.data.get("segments", [])
-            quantitative_metrics = result.data.get("quantitative_metrics")
+            themes = final_context.get("themes", [])
+            summaries = final_context.get("summaries", {}).get(summary_level, [])
+            segment_ids_map = final_context.get("segment_ids", {}).get(summary_level, {})
+            segments = final_context.get("segments", [])
+            quantitative_metrics = final_context.get("quantitative_metrics")
 
             logger.info(f"Group {group_id}: extracted {len(themes)} themes, generated {len(summaries)} summaries")
 

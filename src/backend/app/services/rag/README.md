@@ -157,7 +157,7 @@ def sentiment_analysis(self, model="vader") -> "AnalysisPipeline":
     return self
 ```
 
-**2. Add execution logic in `_execute_step_stream()`**:
+**2. Add execution logic in `_execute_step()`**:
 ```python
 elif step_type == "sentiment_analysis":
     segments = context.get("segments", [])
