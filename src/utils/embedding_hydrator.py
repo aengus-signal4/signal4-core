@@ -1305,12 +1305,37 @@ class EmbeddingHydrator:
 
 # CLI entry point for scheduled task execution
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Embedding Hydrator CLI")
-    parser.add_argument("--batch-size", type=int, default=128, help="Batch size for embedding generation")
+    parser = argparse.ArgumentParser(
+        description='Batch generate embeddings for segments',
+        epilog='''
+Examples:
+  # Default: Generate ALL primary (0.6B) embeddings, then ALL alternative (4B)
+  uv run python -m src.utils.embedding_hydrator
+
+  # Alternative first: Generate 4B embeddings first, then 0.6B
+  uv run python -m src.utils.embedding_hydrator --alt-first
+
+  # Only primary (0.6B) embeddings
+  uv run python -m src.utils.embedding_hydrator --primary-only
+
+  # Only alternative (4B) embeddings for configured projects
+  uv run python -m src.utils.embedding_hydrator --alternative-only
+
+  # Larger batches for faster processing
+  uv run python -m src.utils.embedding_hydrator --batch-size 256
+
+IMPORTANT:
+  - Default: Runs BOTH phases (primary 0.6B, then alternative 4B)
+  - --alt-first: Just changes order (4B first, then 0.6B)
+  - --primary-only or --alternative-only: Run only one phase
+        ''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--batch-size", type=int, default=128, help="Batch size for embedding generation (default: 128)")
     parser.add_argument("--project", type=str, default=None, help="Filter to specific project")
     parser.add_argument("--primary-only", action="store_true", help="Only generate primary (0.6B) embeddings")
     parser.add_argument("--alternative-only", action="store_true", help="Only generate alternative (4B) embeddings")
-    parser.add_argument("--alt-first", action="store_true", help="Prioritize alternative embeddings for configured projects")
+    parser.add_argument("--alt-first", action="store_true", help="Generate alternative (4B) embeddings first, then primary (0.6B)")
     parser.add_argument("--force-reembed", action="store_true", help="Re-generate embeddings even if version exists")
     parser.add_argument("--stitch-version", type=str, default=None, help="Filter to specific stitch version prefix (e.g., 'stitch_v14')")
 
@@ -1323,15 +1348,98 @@ if __name__ == "__main__":
 
     # Run hydration
     hydrator = EmbeddingHydrator()
-    result = asyncio.run(hydrator.hydrate_batch(
-        batch_size=args.batch_size,
-        project=args.project,
-        primary_only=args.primary_only,
-        alternative_only=args.alternative_only,
-        alt_first=args.alt_first,
-        force_reembed=args.force_reembed,
-        stitch_versions=stitch_versions
-    ))
+
+    # Default behavior: do primary first, then alternative
+    # --alt-first: do alternative first, then primary
+    # --primary-only: only do primary
+    # --alternative-only: only do alternative
+
+    if args.primary_only:
+        # Only primary
+        result = asyncio.run(hydrator.hydrate_batch(
+            batch_size=args.batch_size,
+            project=args.project,
+            primary_only=True,
+            alternative_only=False,
+            alt_first=False,
+            force_reembed=args.force_reembed,
+            stitch_versions=stitch_versions
+        ))
+    elif args.alternative_only:
+        # Only alternative
+        result = asyncio.run(hydrator.hydrate_batch(
+            batch_size=args.batch_size,
+            project=args.project,
+            primary_only=False,
+            alternative_only=True,
+            alt_first=True,
+            force_reembed=args.force_reembed,
+            stitch_versions=stitch_versions
+        ))
+    else:
+        # Do both: order depends on --alt-first
+        if args.alt_first:
+            # Alternative first
+            logger.info("Phase 1: Generating alternative (4B) embeddings...")
+            result_alt = asyncio.run(hydrator.hydrate_batch(
+                batch_size=args.batch_size,
+                project=args.project,
+                primary_only=False,
+                alternative_only=True,
+                alt_first=True,
+                force_reembed=args.force_reembed,
+                stitch_versions=stitch_versions
+            ))
+
+            logger.info("Phase 2: Generating primary (0.6B) embeddings...")
+            result_primary = asyncio.run(hydrator.hydrate_batch(
+                batch_size=args.batch_size,
+                project=args.project,
+                primary_only=True,
+                alternative_only=False,
+                alt_first=False,
+                force_reembed=args.force_reembed,
+                stitch_versions=stitch_versions
+            ))
+
+            # Combine results
+            result = {
+                'status': 'success',
+                'primary_generated': result_primary.get('primary_generated', 0),
+                'alternative_generated': result_alt.get('alternative_generated', 0),
+                'total_segments': result_primary.get('total_segments', 0) + result_alt.get('total_segments', 0)
+            }
+        else:
+            # Primary first (default)
+            logger.info("Phase 1: Generating primary (0.6B) embeddings...")
+            result_primary = asyncio.run(hydrator.hydrate_batch(
+                batch_size=args.batch_size,
+                project=args.project,
+                primary_only=True,
+                alternative_only=False,
+                alt_first=False,
+                force_reembed=args.force_reembed,
+                stitch_versions=stitch_versions
+            ))
+
+            logger.info("Phase 2: Generating alternative (4B) embeddings...")
+            result_alt = asyncio.run(hydrator.hydrate_batch(
+                batch_size=args.batch_size,
+                project=args.project,
+                primary_only=False,
+                alternative_only=True,
+                alt_first=True,
+                force_reembed=args.force_reembed,
+                stitch_versions=stitch_versions
+            ))
+
+            # Combine results
+            result = {
+                'status': 'success',
+                'primary_generated': result_primary.get('primary_generated', 0),
+                'alternative_generated': result_alt.get('alternative_generated', 0),
+                'total_segments': result_primary.get('total_segments', 0) + result_alt.get('total_segments', 0)
+            }
 
     logger.info(f"Hydration result: {result}")
 
