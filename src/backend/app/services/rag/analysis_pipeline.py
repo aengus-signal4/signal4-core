@@ -16,9 +16,19 @@ Features:
 import asyncio
 import logging
 import time
-from typing import Dict, Any, List, Optional, AsyncGenerator, Callable
+from typing import Dict, Any, List, Optional, AsyncGenerator, Callable, TYPE_CHECKING
 from dataclasses import dataclass
 import numpy as np
+
+# Type hints for lazy-initialized components (imported at runtime)
+if TYPE_CHECKING:
+    from .segment_retriever import SegmentRetriever
+    from .theme_extractor import ThemeExtractor
+    from .segment_selector import SegmentSelector
+    from .text_generator import TextGenerator
+    from .quantitative_analyzer import QuantitativeAnalyzer
+    from ..pgvector_search_service import PgVectorSearchService as SearchService
+    from .interfaces import WorkflowEvent
 
 logger = logging.getLogger(__name__)
 
@@ -96,13 +106,13 @@ class AnalysisPipeline:
         self.dashboard_id = dashboard_id
         self.config = config
 
-        # Lazy-initialized components
-        self._retriever = None
-        self._extractor = None
-        self._selector = None
-        self._generator = None
-        self._quantitative_analyzer = None
-        self._search_service = None
+        # Lazy-initialized components (type hints use string literals for forward refs)
+        self._retriever: Optional["SegmentRetriever"] = None
+        self._extractor: Optional["ThemeExtractor"] = None
+        self._selector: Optional["SegmentSelector"] = None
+        self._generator: Optional["TextGenerator"] = None
+        self._quantitative_analyzer: Optional["QuantitativeAnalyzer"] = None
+        self._search_service: Optional["SearchService"] = None
 
         logger.info(f"Created pipeline: {name}")
 
@@ -110,28 +120,28 @@ class AnalysisPipeline:
     # Component Access (Lazy Initialization)
     # ========================================================================
 
-    def _get_retriever(self):
+    def _get_retriever(self) -> "SegmentRetriever":
         """Get or create SegmentRetriever."""
         if self._retriever is None:
             from .segment_retriever import SegmentRetriever
             self._retriever = SegmentRetriever(db=self.db_session)
         return self._retriever
 
-    def _get_extractor(self):
+    def _get_extractor(self) -> "ThemeExtractor":
         """Get or create ThemeExtractor."""
         if self._extractor is None:
             from .theme_extractor import ThemeExtractor
             self._extractor = ThemeExtractor()
         return self._extractor
 
-    def _get_selector(self):
+    def _get_selector(self) -> "SegmentSelector":
         """Get or create SegmentSelector."""
         if self._selector is None:
             from .segment_selector import SegmentSelector
             self._selector = SegmentSelector()
         return self._selector
 
-    def _get_generator(self):
+    def _get_generator(self) -> "TextGenerator":
         """Get or create TextGenerator."""
         if self._generator is None:
             if self.llm_service is None:
@@ -140,7 +150,7 @@ class AnalysisPipeline:
             self._generator = TextGenerator(self.llm_service)
         return self._generator
 
-    def _get_quantitative_analyzer(self):
+    def _get_quantitative_analyzer(self) -> "QuantitativeAnalyzer":
         """Get or create QuantitativeAnalyzer."""
         if self._quantitative_analyzer is None:
             from .quantitative_analyzer import QuantitativeAnalyzer
