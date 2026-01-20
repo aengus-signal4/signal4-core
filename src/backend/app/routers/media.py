@@ -959,7 +959,7 @@ async def get_media_by_segment(
     segment_id: int,
     media_type: str = Query("auto", description="Media type: 'video', 'audio', or 'auto'"),
     format: str = Query("mp4", description="Output format (mp4 or webm for video)"),
-    transcribe: bool = Query(False, description="Enable AssemblyAI transcription"),
+    transcribe: bool = Query(False, description="Enable AssemblyAI transcription (currently disabled)"),
     transcription_provider: str = Query("assemblyai", description="Transcription provider"),
     transcription_model: str = Query("best", description="Transcription model"),
     language: Optional[str] = Query(None, description="Language code (auto-detect if None)"),
@@ -1038,8 +1038,8 @@ async def get_media(
     media_type: str = Query("auto", description="Media type: 'video', 'audio', or 'auto' (default: auto - returns video if available, else audio)"),
     format: str = Query("mp4", description="Output format (mp4 or webm for video)"),
 
-    # NEW: Transcription parameters
-    transcribe: bool = Query(False, description="Enable AssemblyAI transcription"),
+    # NEW: Transcription parameters (AssemblyAI disabled - see DISABLED_ASSEMBLYAI)
+    transcribe: bool = Query(False, description="Enable AssemblyAI transcription (currently disabled)"),
     transcription_provider: str = Query("assemblyai", description="Transcription provider (only 'assemblyai' supported)"),
     transcription_model: str = Query("best", description="Transcription model"),
     language: Optional[str] = Query(None, description="Language code (e.g., 'en', 'fr') - auto-detect if None"),
@@ -1096,6 +1096,12 @@ async def get_media(
 
     if transcribe and transcription_provider != "assemblyai":
         raise HTTPException(status_code=400, detail="Only 'assemblyai' transcription provider is supported")
+
+    # DISABLED_ASSEMBLYAI: AssemblyAI transcription is disabled - use existing transcripts only
+    # To re-enable, remove this block and the service will generate new transcriptions
+    if transcribe:
+        logger.info(f"[MEDIA] AssemblyAI transcription disabled - will use cached/existing transcripts only")
+        transcribe = False
 
     # Streaming mode
     if stream:
