@@ -136,7 +136,7 @@ class LLMService:
             logger.error(f"[{self.dashboard_id}] Embedding generation failed: {e}")
             return None
 
-    def query2doc(self, query: str) -> str:
+    def query2doc(self, query: str, backend: str = "xai") -> str:
         """
         Query2doc: Generate a pseudo-document for the query (faster than multi-query)
 
@@ -150,12 +150,13 @@ class LLMService:
 
         Args:
             query: Natural language query
+            backend: "xai" for Grok API, "local" for local LLM balancer
 
         Returns:
             Pseudo-document text to append to query
         """
-        # Check cache first
-        cache_key = f"query2doc:{query}"
+        # Check cache first (include backend in cache key for separation)
+        cache_key = f"query2doc:{query}:{backend}"
         if self._cache:
             cached_response = self._cache.get(cache_key, query_embedding=None, cache_type='query2doc')
             if cached_response:
@@ -164,50 +165,87 @@ class LLMService:
         start_time = time.time()
         try:
             from ..config import settings
-            if not settings.XAI_API_KEY:
-                logger.warning("XAI_API_KEY not found, skipping query2doc")
-                return ""
 
             # Use TextGenerator with query2doc template
             text_gen = self._get_text_generator()
+            template = text_gen.prompt_manager.get("query2doc")
 
-            # Note: Using sync requests.post instead of async to maintain backward compatibility
-            # The template is designed for sync generation
-            response = requests.post(
-                "https://api.x.ai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {settings.XAI_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "grok-4-fast-non-reasoning-latest",
-                    "messages": [{
-                        "role": "system",
-                        "content": text_gen.prompt_manager.get("query2doc").system_message
-                    }, {
-                        "role": "user",
-                        "content": text_gen.prompt_manager.get("query2doc").prompt_template.format(query=query)
-                    }],
-                    "temperature": 0.3,
-                    "max_tokens": 150
-                },
-                timeout=10
-            )
+            system_message = template.system_message
+            user_message = template.prompt_template.format(query=query)
 
-            duration_ms = (time.time() - start_time) * 1000
+            if backend == "local":
+                # Route to local LLM balancer
+                response = requests.post(
+                    f"{settings.LLM_BACKEND_URL}/llm-request",
+                    json={
+                        "messages": [
+                            {"role": "system", "content": system_message},
+                            {"role": "user", "content": user_message}
+                        ],
+                        "model": "tier_2",
+                        "temperature": 0.3,
+                        "max_tokens": 150,
+                        "top_p": 0.9,
+                        "priority": 1,
+                        "task_type": "query_expansion"
+                    },
+                    timeout=30
+                )
 
-            if response.status_code == 200:
-                pseudo_doc = response.json().get('choices', [{}])[0].get('message', {}).get('content', '').strip()
-                logger.info(f"[{self.dashboard_id}] query2doc generated in {duration_ms:.0f}ms: {pseudo_doc[:80]}...")
+                duration_ms = (time.time() - start_time) * 1000
 
-                # Cache result
-                if self._cache:
-                    self._cache.put(cache_key, query_embedding=None, response=pseudo_doc, cache_type='query2doc')
+                if response.status_code == 200:
+                    result = response.json()
+                    pseudo_doc = result.get("response", "").strip()
+                    logger.info(f"[{self.dashboard_id}] query2doc (local) generated in {duration_ms:.0f}ms: {pseudo_doc[:80]}...")
 
-                return pseudo_doc
+                    if self._cache and pseudo_doc:
+                        self._cache.put(cache_key, query_embedding=None, response=pseudo_doc, cache_type='query2doc')
+
+                    return pseudo_doc
+                else:
+                    logger.warning(f"[{self.dashboard_id}] query2doc (local) failed: {response.status_code}")
+                    return ""
             else:
-                logger.warning(f"[{self.dashboard_id}] query2doc failed: {response.status_code}")
-                return ""
+                # Default: xAI Grok API
+                if not settings.XAI_API_KEY:
+                    logger.warning("XAI_API_KEY not found, skipping query2doc")
+                    return ""
+
+                response = requests.post(
+                    "https://api.x.ai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {settings.XAI_API_KEY}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": "grok-4-fast-non-reasoning-latest",
+                        "messages": [{
+                            "role": "system",
+                            "content": system_message
+                        }, {
+                            "role": "user",
+                            "content": user_message
+                        }],
+                        "temperature": 0.3,
+                        "max_tokens": 150
+                    },
+                    timeout=10
+                )
+
+                duration_ms = (time.time() - start_time) * 1000
+
+                if response.status_code == 200:
+                    pseudo_doc = response.json().get('choices', [{}])[0].get('message', {}).get('content', '').strip()
+                    logger.info(f"[{self.dashboard_id}] query2doc generated in {duration_ms:.0f}ms: {pseudo_doc[:80]}...")
+
+                    if self._cache and pseudo_doc:
+                        self._cache.put(cache_key, query_embedding=None, response=pseudo_doc, cache_type='query2doc')
+
+                    return pseudo_doc
+                else:
+                    logger.warning(f"[{self.dashboard_id}] query2doc failed: {response.status_code}")
+                    return ""
 
         except Exception as e:
             logger.warning(f"[{self.dashboard_id}] query2doc error: {e}")
@@ -218,7 +256,8 @@ class LLMService:
         query: str,
         strategy: str = 'multi_stance',
         n_variations: int = 5,
-        include_keywords: bool = False
+        include_keywords: bool = False,
+        backend: str = "xai"
     ) -> Dict[str, Any]:
         """
         Generate retrieval queries using different strategies, optionally with bilingual keywords.
@@ -237,6 +276,7 @@ class LLMService:
                 - 'conversational': Generate conversational paragraphs simulating natural speech
             n_variations: Number of query variations to generate (default 5)
             include_keywords: Whether to also generate bilingual keyword phrases (default False, not recommended)
+            backend: "xai" for Grok API, "local" for local LLM balancer
 
         Returns:
             Dictionary containing:
@@ -248,8 +288,8 @@ class LLMService:
             # result['queries'] = ["I've been reading about climate change...", ...]
             # result['keywords'] = []  # Not using keywords
         """
-        # Check cache first
-        cache_key = f"generate_retrieval_queries:{query}:{strategy}:{n_variations}:{include_keywords}"
+        # Check cache first (include backend in cache key for separation)
+        cache_key = f"generate_retrieval_queries:{query}:{strategy}:{n_variations}:{include_keywords}:{backend}"
         if self._cache:
             cached_response = self._cache.get(cache_key, query_embedding=None, cache_type='query2doc_stances')
             if cached_response:
@@ -258,9 +298,6 @@ class LLMService:
         start_time = time.time()
         try:
             from ..config import settings
-            if not settings.XAI_API_KEY:
-                logger.warning("XAI_API_KEY not found, skipping generate_retrieval_queries")
-                return {'queries': [], 'keywords': []}
 
             # Select template based on strategy
             text_gen = self._get_text_generator()
@@ -278,78 +315,113 @@ class LLMService:
                 return {'queries': [], 'keywords': []}
 
             # Format prompt
+            system_message = template.system_message
             prompt_text = template.prompt_template.format(query=query, n_variations=n_variations)
 
-            response = requests.post(
-                "https://api.x.ai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {settings.XAI_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "grok-4-fast-non-reasoning-latest",
-                    "messages": [{
-                        "role": "system",
-                        "content": template.system_message
-                    }, {
-                        "role": "user",
-                        "content": prompt_text
-                    }],
-                    "temperature": template.default_temperature,
-                    "max_tokens": template.default_max_tokens
-                },
-                timeout=15
-            )
+            if backend == "local":
+                # Route to local LLM balancer
+                response = requests.post(
+                    f"{settings.LLM_BACKEND_URL}/llm-request",
+                    json={
+                        "messages": [
+                            {"role": "system", "content": system_message},
+                            {"role": "user", "content": prompt_text}
+                        ],
+                        "model": "tier_2",
+                        "temperature": template.default_temperature,
+                        "max_tokens": template.default_max_tokens,
+                        "top_p": 0.9,
+                        "priority": 1,
+                        "task_type": "query_expansion"
+                    },
+                    timeout=60
+                )
 
-            duration_ms = (time.time() - start_time) * 1000
+                duration_ms = (time.time() - start_time) * 1000
 
-            if response.status_code == 200:
-                content = response.json().get('choices', [{}])[0].get('message', {}).get('content', '').strip()
-
-                # Parse JSON response
-                try:
-                    # Extract JSON from response (may have markdown code blocks)
-                    text = content
-                    if '```json' in text:
-                        text = text.split('```json')[1].split('```')[0].strip()
-                    elif '```' in text:
-                        text = text.split('```')[1].split('```')[0].strip()
-
-                    parsed = json.loads(text)
-                    queries = parsed.get('queries', [])
-
-                    if not queries or len(queries) < n_variations:
-                        logger.warning(f"[{self.dashboard_id}] Expected {n_variations} queries, got {len(queries)}")
-
-                    # Extract keywords separately if requested (for true keyword search)
-                    keywords = []
-                    if include_keywords:
-                        keywords_en = parsed.get('keywords_en', [])
-                        keywords_fr = parsed.get('keywords_fr', [])
-                        keywords = keywords_en + keywords_fr
-
-                    logger.info(f"[{self.dashboard_id}] generate_retrieval_queries ({strategy}) generated {len(queries)} queries + {len(keywords)} keywords in {duration_ms:.0f}ms")
-                    logger.debug(f"[{self.dashboard_id}] Queries: {[q[:60]+'...' for q in queries[:5]]}")
-                    if keywords:
-                        logger.debug(f"[{self.dashboard_id}] Keywords: {keywords[:10]}")
-
-                    result = {
-                        'queries': queries,
-                        'keywords': keywords  # Separate list for true keyword search
-                    }
-
-                    # Cache result
-                    if self._cache:
-                        self._cache.put(cache_key, query_embedding=None, response=result, cache_type='query2doc_stances')
-
-                    return result
-
-                except (json.JSONDecodeError, ValueError) as e:
-                    logger.warning(f"[{self.dashboard_id}] Failed to parse retrieval queries JSON: {e}")
-                    logger.warning(f"[{self.dashboard_id}] Raw content: {content[:1000]}")
+                if response.status_code == 200:
+                    result = response.json()
+                    content = result.get("response", "").strip()
+                else:
+                    logger.warning(f"[{self.dashboard_id}] generate_retrieval_queries (local) failed: {response.status_code}")
                     return {'queries': [], 'keywords': []}
             else:
-                logger.warning(f"[{self.dashboard_id}] generate_retrieval_queries failed: {response.status_code}")
+                # Default: xAI Grok API
+                if not settings.XAI_API_KEY:
+                    logger.warning("XAI_API_KEY not found, skipping generate_retrieval_queries")
+                    return {'queries': [], 'keywords': []}
+
+                response = requests.post(
+                    "https://api.x.ai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {settings.XAI_API_KEY}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": "grok-4-fast-non-reasoning-latest",
+                        "messages": [{
+                            "role": "system",
+                            "content": system_message
+                        }, {
+                            "role": "user",
+                            "content": prompt_text
+                        }],
+                        "temperature": template.default_temperature,
+                        "max_tokens": template.default_max_tokens
+                    },
+                    timeout=15
+                )
+
+                duration_ms = (time.time() - start_time) * 1000
+
+                if response.status_code == 200:
+                    content = response.json().get('choices', [{}])[0].get('message', {}).get('content', '').strip()
+                else:
+                    logger.warning(f"[{self.dashboard_id}] generate_retrieval_queries failed: {response.status_code}")
+                    return {'queries': [], 'keywords': []}
+
+            # Parse JSON response
+            try:
+                # Extract JSON from response (may have markdown code blocks)
+                text = content
+                if '```json' in text:
+                    text = text.split('```json')[1].split('```')[0].strip()
+                elif '```' in text:
+                    text = text.split('```')[1].split('```')[0].strip()
+
+                parsed = json.loads(text)
+                queries = parsed.get('queries', [])
+
+                if not queries or len(queries) < n_variations:
+                    logger.warning(f"[{self.dashboard_id}] Expected {n_variations} queries, got {len(queries)}")
+
+                # Extract keywords separately if requested (for true keyword search)
+                keywords = []
+                if include_keywords:
+                    keywords_en = parsed.get('keywords_en', [])
+                    keywords_fr = parsed.get('keywords_fr', [])
+                    keywords = keywords_en + keywords_fr
+
+                backend_label = f" ({backend})" if backend == "local" else ""
+                logger.info(f"[{self.dashboard_id}] generate_retrieval_queries ({strategy}){backend_label} generated {len(queries)} queries + {len(keywords)} keywords in {duration_ms:.0f}ms")
+                logger.debug(f"[{self.dashboard_id}] Queries: {[q[:60]+'...' for q in queries[:5]]}")
+                if keywords:
+                    logger.debug(f"[{self.dashboard_id}] Keywords: {keywords[:10]}")
+
+                result = {
+                    'queries': queries,
+                    'keywords': keywords  # Separate list for true keyword search
+                }
+
+                # Cache result
+                if self._cache:
+                    self._cache.put(cache_key, query_embedding=None, response=result, cache_type='query2doc_stances')
+
+                return result
+
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"[{self.dashboard_id}] Failed to parse retrieval queries JSON: {e}")
+                logger.warning(f"[{self.dashboard_id}] Raw content: {content[:1000]}")
                 return {'queries': [], 'keywords': []}
 
         except Exception as e:
@@ -371,9 +443,9 @@ class LLMService:
         )
         return result.get('queries', [])
 
-    def optimize_search_query(self, query: str, user_email: str = None) -> Dict[str, Any]:
+    def optimize_search_query(self, query: str, user_email: str = None, backend: str = "xai") -> Dict[str, Any]:
         """
-        Use xAI Grok to generate multiple query variations for expanded search
+        Use LLM to generate multiple query variations for expanded search
 
         Generates 5-6 query variations including:
         - Original query reformulated
@@ -385,6 +457,7 @@ class LLMService:
         Args:
             query: Natural language query
             user_email: User email for logging
+            backend: "xai" for Grok API, "local" for local LLM balancer
 
         Returns:
             Dict with 'keywords', 'query_variations', 'search_type', 'variation_embeddings' (optional)
@@ -396,9 +469,12 @@ class LLMService:
                 'search_type': 'keyword'
             }
 
+        # Include backend in cache key for separation
+        cache_key_prefix = f"{query}:{backend}"
+
         # Check cache with exact text match first (fast path, no embedding needed)
         if self._cache:
-            cached_response = self._cache.get(query, query_embedding=None, cache_type='query_optimization')
+            cached_response = self._cache.get(cache_key_prefix, query_embedding=None, cache_type='query_optimization')
             if cached_response:
                 logger.info(f"[{self.dashboard_id}] ✓ Cache hit for query optimization (exact text match)")
                 return cached_response
@@ -408,21 +484,19 @@ class LLMService:
 
         # Check cache with semantic similarity (catches paraphrases)
         if self._cache and query_embedding is not None:
-            cached_response = self._cache.get(query, query_embedding, cache_type='query_optimization')
+            cached_response = self._cache.get(cache_key_prefix, query_embedding, cache_type='query_optimization')
             if cached_response:
                 logger.info(f"[{self.dashboard_id}] ✓ Cache hit for query optimization (semantic similarity)")
                 return cached_response
 
         start_time = time.time()
         try:
-            logger.info(f"[{self.dashboard_id}] Generating query variations via Grok: '{query[:50]}...'")
+            backend_label = " (local)" if backend == "local" else ""
+            logger.info(f"[{self.dashboard_id}] Generating query variations{backend_label}: '{query[:50]}...'")
 
             from ..config import settings
-            if not settings.XAI_API_KEY:
-                logger.error("XAI_API_KEY not found in environment")
-                return self._create_fallback_variations(query)
-            xai_api_key = settings.XAI_API_KEY
 
+            system_message = "You are a helpful assistant for academic research query expansion. Always respond with valid JSON."
             prompt = f"""You are assisting academic research on political discourse and media content analysis. Generate 10 diverse search query variations for this research question. The goal is to maximize search recall by covering different perspectives, phrasings that reflect how people actually discuss these topics, and both English and French.
 
 CONTEXT: This is for analyzing existing media content and discourse (not generating or advocating for any viewpoint).
@@ -477,42 +551,79 @@ Example for "What is Mark Carney saying about climate?":
     "search_type": "semantic"
 }}"""
 
-            response = requests.post(
-                "https://api.x.ai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {xai_api_key}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "grok-4-fast-non-reasoning-latest",
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": "You are a helpful assistant for academic research query expansion. Always respond with valid JSON."
-                        },
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ],
-                    "temperature": 0.5,
-                    "max_tokens": 600
-                },
-                timeout=30
-            )
+            if backend == "local":
+                # Route to local LLM balancer
+                response = requests.post(
+                    f"{settings.LLM_BACKEND_URL}/llm-request",
+                    json={
+                        "messages": [
+                            {"role": "system", "content": system_message},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "model": "tier_2",
+                        "temperature": 0.5,
+                        "max_tokens": 600,
+                        "top_p": 0.9,
+                        "priority": 1,
+                        "task_type": "query_expansion"
+                    },
+                    timeout=90
+                )
 
-            duration_ms = (time.time() - start_time) * 1000
+                duration_ms = (time.time() - start_time) * 1000
 
-            if response.status_code != 200:
-                logger.error(f"[{self.dashboard_id}] Grok API error: {response.status_code} - {response.text[:200]}")
-                return self._create_fallback_variations(query)
+                if response.status_code != 200:
+                    logger.error(f"[{self.dashboard_id}] Local LLM error: {response.status_code} - {response.text[:200]}")
+                    return self._create_fallback_variations(query)
 
-            data = response.json()
-            content = data.get('choices', [{}])[0].get('message', {}).get('content', '')
+                result = response.json()
+                content = result.get("response", "").strip()
 
-            if not content:
-                logger.error(f"[{self.dashboard_id}] Empty response from Grok")
-                return self._create_fallback_variations(query)
+                if not content:
+                    logger.error(f"[{self.dashboard_id}] Empty response from local LLM")
+                    return self._create_fallback_variations(query)
+            else:
+                # Default: xAI Grok API
+                if not settings.XAI_API_KEY:
+                    logger.error("XAI_API_KEY not found in environment")
+                    return self._create_fallback_variations(query)
+
+                response = requests.post(
+                    "https://api.x.ai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {settings.XAI_API_KEY}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": "grok-4-fast-non-reasoning-latest",
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": system_message
+                            },
+                            {
+                                "role": "user",
+                                "content": prompt
+                            }
+                        ],
+                        "temperature": 0.5,
+                        "max_tokens": 600
+                    },
+                    timeout=30
+                )
+
+                duration_ms = (time.time() - start_time) * 1000
+
+                if response.status_code != 200:
+                    logger.error(f"[{self.dashboard_id}] Grok API error: {response.status_code} - {response.text[:200]}")
+                    return self._create_fallback_variations(query)
+
+                data = response.json()
+                content = data.get('choices', [{}])[0].get('message', {}).get('content', '')
+
+                if not content:
+                    logger.error(f"[{self.dashboard_id}] Empty response from Grok")
+                    return self._create_fallback_variations(query)
 
             # Parse JSON response
             try:
@@ -539,7 +650,7 @@ Example for "What is Mark Carney saying about climate?":
                 # Update parsed dict with formatted variations
                 parsed['query_variations'] = formatted_variations
 
-                logger.info(f"[{self.dashboard_id}] ✓ Generated {len(formatted_variations)} query variations via Grok in {duration_ms:.0f}ms")
+                logger.info(f"[{self.dashboard_id}] ✓ Generated {len(formatted_variations)} query variations{backend_label} in {duration_ms:.0f}ms")
                 logger.debug(f"[{self.dashboard_id}] Raw variations: {[v[:40]+'...' for v in raw_variations]}")
 
                 # Log to activity logger
@@ -559,19 +670,19 @@ Example for "What is Mark Carney saying about climate?":
 
                 # Cache the response WITH query embedding for semantic similarity matching
                 if self._cache and query_embedding is not None:
-                    self._cache.put(query, query_embedding, response=parsed, cache_type='query_optimization')
+                    self._cache.put(cache_key_prefix, query_embedding, response=parsed, cache_type='query_optimization')
                     logger.debug(f"[{self.dashboard_id}] Cached query optimization with query embedding + variation embeddings")
 
                 return parsed
 
             except (json.JSONDecodeError, ValueError) as e:
-                logger.warning(f"[{self.dashboard_id}] Failed to parse Grok response: {str(e)[:100]}")
+                logger.warning(f"[{self.dashboard_id}] Failed to parse LLM response: {str(e)[:100]}")
                 logger.debug(f"[{self.dashboard_id}] Raw content: {content[:500]}")
                 return self._create_fallback_variations(query)
 
         except requests.exceptions.RequestException as e:
             duration_ms = (time.time() - start_time) * 1000
-            logger.error(f"[{self.dashboard_id}] Grok API request error: {e}")
+            logger.error(f"[{self.dashboard_id}] LLM API request error: {e}")
 
             # Log failure
             if activity_logger and user_email:
@@ -1149,18 +1260,25 @@ Keep it concise and factual."""
         model: str = "grok-2-1212",
         temperature: float = 0.3,
         max_tokens: int = 3000,
-        timeout: int = 90
+        timeout: int = 90,
+        backend: str = "xai"
     ) -> str:
         """
-        Async call to xAI Grok API for LLM generation.
+        Async call to LLM for text generation.
+
+        Supports two backends:
+        - "xai": xAI Grok API (default, requires XAI_API_KEY)
+        - "local": Local LLM balancer (routes to MLX model servers)
 
         Args:
             prompt: User prompt
             system_message: System message for the LLM
-            model: Model name (default: grok-2-1212)
+            model: Model name. For xAI: "grok-2-1212", "grok-4-fast-non-reasoning-latest".
+                   For local: "tier_1" (80B), "tier_2" (30B), "tier_3" (4B)
             temperature: Temperature for generation
             max_tokens: Maximum tokens to generate
             timeout: Request timeout in seconds
+            backend: "xai" for Grok API, "local" for local LLM balancer
 
         Returns:
             Generated text from the LLM
@@ -1168,6 +1286,17 @@ Keep it concise and factual."""
         Raises:
             RuntimeError: If API call fails
         """
+        if backend == "local":
+            return await self._call_local_llm_async(
+                prompt=prompt,
+                system_message=system_message,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=timeout
+            )
+
+        # Default: xAI Grok API
         from ..config import settings
 
         if not settings.XAI_API_KEY:
@@ -1253,4 +1382,106 @@ Keep it concise and factual."""
             except Exception as e:
                 duration_ms = int((time.time() - start_time) * 1000)
                 logger.error(f"[{self.dashboard_id}] Grok API error: {e}", exc_info=True)
+                raise
+
+    async def _call_local_llm_async(
+        self,
+        prompt: str,
+        system_message: str,
+        model: str = "tier_2",
+        temperature: float = 0.3,
+        max_tokens: int = 3000,
+        timeout: int = 180,
+        priority: int = 1
+    ) -> str:
+        """
+        Async call to local LLM balancer for text generation.
+
+        Routes requests to MLX model servers via the LLM balancer.
+        Model tiers:
+        - tier_1: 80B model (complex reasoning)
+        - tier_2: 30B model (standard tasks) [default]
+        - tier_3: 4B model (fast/simple tasks)
+
+        Args:
+            prompt: User prompt
+            system_message: System message for the LLM
+            model: Model tier ("tier_1", "tier_2", "tier_3")
+            temperature: Temperature for generation
+            max_tokens: Maximum tokens to generate
+            timeout: Request timeout in seconds
+            priority: Request priority (1-5, lower = higher priority)
+
+        Returns:
+            Generated text from the LLM
+
+        Raises:
+            RuntimeError: If API call fails
+        """
+        from ..config import settings
+
+        start_time = time.time()
+        endpoint = f"{settings.LLM_BACKEND_URL}/llm-request"
+
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": prompt}
+            ],
+            "model": model,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "top_p": 0.9,
+            "priority": priority,
+            "task_type": "analysis"
+        }
+
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.post(
+                    endpoint,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=timeout)
+                ) as response:
+                    duration_ms = int((time.time() - start_time) * 1000)
+
+                    if response.status != 200:
+                        text = await response.text()
+                        logger.error(f"[{self.dashboard_id}] Local LLM error: {response.status} {text[:200]}")
+                        raise RuntimeError(f"Local LLM API returned {response.status}")
+
+                    result = await response.json()
+                    generated_text = result.get("response", "").strip()
+
+                    if not generated_text:
+                        raise RuntimeError("Empty response from local LLM")
+
+                    # Log to usage log (no cost for local)
+                    usage_logger.info(
+                        f"model={model} | "
+                        f"backend=local | "
+                        f"dashboard={self.dashboard_id} | "
+                        f"endpoint={result.get('endpoint_used', 'unknown')} | "
+                        f"priority={priority} | "
+                        f"duration_ms={duration_ms}"
+                    )
+
+                    logger.info(
+                        f"[{self.dashboard_id}] ✓ Local LLM call complete "
+                        f"({len(generated_text)} chars, {duration_ms}ms, {model})"
+                    )
+
+                    return generated_text
+
+            except asyncio.TimeoutError:
+                duration_ms = int((time.time() - start_time) * 1000)
+                logger.error(f"[{self.dashboard_id}] Local LLM timeout after {duration_ms}ms")
+                raise RuntimeError("Local LLM timeout")
+            except aiohttp.ClientError as e:
+                duration_ms = int((time.time() - start_time) * 1000)
+                logger.error(f"[{self.dashboard_id}] Local LLM connection error: {e}")
+                raise RuntimeError(f"Local LLM connection error: {e}")
+            except Exception as e:
+                duration_ms = int((time.time() - start_time) * 1000)
+                logger.error(f"[{self.dashboard_id}] Local LLM error: {e}", exc_info=True)
                 raise
