@@ -210,13 +210,14 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 # Include routers
-from .routers import health, media, analysis, query, api_keys
+from .routers import health, media, analysis, query, api_keys, entities
 
 app.include_router(health.router)            # Health monitoring
 app.include_router(media.router)             # Media serving + transcription
 app.include_router(analysis.router)          # All RAG/search operations
 app.include_router(query.router)             # Read-only segment query API
 app.include_router(api_keys.router)          # API key management
+app.include_router(entities.router)          # Entity details (episodes, speakers, channels)
 
 # Root endpoint
 @app.get("/")

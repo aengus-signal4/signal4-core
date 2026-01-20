@@ -233,3 +233,153 @@ class QueryResponse(BaseModel):
     status: str = "success"
     query_info: QueryInfo
     results: List[QuerySegmentResult]
+
+
+# ============================================================================
+# Entity Detail Response Models
+# ============================================================================
+
+class SpeakerPreview(BaseModel):
+    """Brief speaker info for embedding in other responses"""
+    speaker_id: str  # speaker_hash or speaker_identity_id
+    name: str
+    appearance_count: Optional[int] = None
+    image_url: Optional[str] = None
+
+
+class EpisodePreview(BaseModel):
+    """Brief episode info for embedding in other responses"""
+    content_id: str
+    content_id_numeric: int
+    title: str
+    channel_name: str
+    channel_id: Optional[int] = None
+    publish_date: Optional[str] = None
+    duration: Optional[int] = None  # seconds
+    platform: Optional[str] = None
+
+
+class ChannelPreview(BaseModel):
+    """Brief channel info for embedding in other responses"""
+    channel_id: int
+    channel_key: str
+    name: str
+    platform: Optional[str] = None
+    episode_count: Optional[int] = None
+    image_url: Optional[str] = None
+
+
+class DateRange(BaseModel):
+    """Date range for content"""
+    earliest: str
+    latest: str
+
+
+class ChannelWithCount(BaseModel):
+    """Channel with appearance count"""
+    channel_id: int
+    channel_key: str
+    name: str
+    platform: Optional[str] = None
+    count: int
+
+
+class TopicWithCount(BaseModel):
+    """Topic with occurrence count"""
+    topic: str
+    count: int
+
+
+class EpisodeDetailsResponse(BaseModel):
+    """Full episode details response"""
+    success: bool = True
+    content_id: int
+    content_id_string: str
+    title: str
+    description: Optional[str] = None
+    channel_id: Optional[int] = None
+    channel_name: str
+    channel_key: Optional[str] = None
+    platform: str
+    publish_date: Optional[str] = None
+    duration: Optional[int] = None  # seconds
+    main_language: Optional[str] = None
+
+    # Processing state
+    has_transcript: bool = False
+    has_diarization: bool = False
+    has_embeddings: bool = False
+
+    # Metadata
+    source_url: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+
+    # Speakers
+    speakers: List[SpeakerPreview] = Field(default_factory=list)
+
+    # Stats
+    segment_count: int = 0
+
+    # Related episodes (same channel)
+    related_episodes: List[EpisodePreview] = Field(default_factory=list)
+
+    processing_time_ms: float
+
+
+class SpeakerDetailsResponse(BaseModel):
+    """Full speaker details response"""
+    success: bool = True
+    speaker_id: str  # speaker_hash or identity ID
+    name: str
+
+    # From SpeakerIdentity if available
+    bio: Optional[str] = None
+    occupation: Optional[str] = None
+    organization: Optional[str] = None
+    role: Optional[str] = None
+    image_url: Optional[str] = None
+
+    # Aggregated stats
+    total_appearances: int = 0
+    total_duration_seconds: float = 0.0
+    total_episodes: int = 0
+
+    # Recent episodes
+    recent_episodes: List[EpisodePreview] = Field(default_factory=list)
+
+    # Top channels by appearance
+    top_channels: List[ChannelWithCount] = Field(default_factory=list)
+
+    # Related speakers (co-appear frequently)
+    related_speakers: List[SpeakerPreview] = Field(default_factory=list)
+
+    processing_time_ms: float
+
+
+class ChannelDetailsResponse(BaseModel):
+    """Full channel details response"""
+    success: bool = True
+    channel_id: int
+    channel_key: str
+    name: str
+    platform: str
+    description: Optional[str] = None
+    primary_url: Optional[str] = None
+    language: Optional[str] = None
+    status: Optional[str] = None
+
+    # Stats
+    episode_count: int = 0
+    date_range: Optional[DateRange] = None
+    publishing_frequency: Optional[str] = None
+
+    # Regular speakers
+    regular_speakers: List[SpeakerPreview] = Field(default_factory=list)
+
+    # Recent episodes
+    recent_episodes: List[EpisodePreview] = Field(default_factory=list)
+
+    # Tags
+    tags: List[str] = Field(default_factory=list)
+
+    processing_time_ms: float
