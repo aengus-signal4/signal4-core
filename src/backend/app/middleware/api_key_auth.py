@@ -30,9 +30,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 
 from src.database.models import ApiKey, ApiKeyUsage
-from src.utils.logger import setup_worker_logger
 
-logger = setup_worker_logger("api_key_auth")
+from ..utils.backend_logger import get_logger
+logger = get_logger("api_key_auth")
 
 # API key header name
 API_KEY_HEADER = "X-API-Key"

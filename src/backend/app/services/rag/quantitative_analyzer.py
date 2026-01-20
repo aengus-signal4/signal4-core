@@ -11,13 +11,13 @@ Provides quantitative metrics about search results:
 - Discourse centrality (how central is this topic)
 """
 
-import logging
 from typing import List, Dict, Any, Optional
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
-logger = logging.getLogger(__name__)
+from ...utils.backend_logger import get_logger
+logger = get_logger("quantitative_analyzer")
 
 
 class QuantitativeAnalyzer:

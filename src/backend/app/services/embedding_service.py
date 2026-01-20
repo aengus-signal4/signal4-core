@@ -16,13 +16,9 @@ import time
 from typing import List, Optional
 import numpy as np
 
-from pathlib import Path
-from src.utils.paths import get_project_root, get_config_path
-import sys
-sys.path.insert(0, str(get_project_root()))
-from src.utils.logger import setup_worker_logger
+from ..utils.backend_logger import get_logger
 
-logger = setup_worker_logger("backend.embedding")
+logger = get_logger("embedding_service")
 
 
 class EmbeddingService:
@@ -135,28 +131,22 @@ class EmbeddingService:
 
             logger.info(f"[{self.dashboard_id}] Lazy loading embedding model: {model_name}")
 
-            # Run loading in thread pool to avoid blocking
-            loop = asyncio.get_event_loop()
+            # Load model directly (avoid thread pool to prevent semaphore leaks)
+            if truncate_dim:
+                model = SentenceTransformer(
+                    model_name,
+                    trust_remote_code=True,
+                    truncate_dim=truncate_dim
+                )
+            else:
+                model = SentenceTransformer(
+                    model_name,
+                    trust_remote_code=True
+                )
 
-            def _load_sync():
-                if truncate_dim:
-                    model = SentenceTransformer(
-                        model_name,
-                        trust_remote_code=True,
-                        truncate_dim=truncate_dim
-                    )
-                else:
-                    model = SentenceTransformer(
-                        model_name,
-                        trust_remote_code=True
-                    )
-
-                # Move to device
-                device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-                model = model.to(device)
-                return model
-
-            self._embedding_model = await loop.run_in_executor(None, _load_sync)
+            # Move to device (use CPU to match main.py preloading)
+            device = torch.device("cpu")
+            self._embedding_model = model.to(device)
             logger.info(f"[{self.dashboard_id}] Lazy loaded model successfully")
 
         except Exception as e:
@@ -253,9 +243,9 @@ class EmbeddingService:
             )
 
             t_encode_start = time.time()
-            # Run encoding in thread pool to avoid blocking event loop
-            loop = asyncio.get_event_loop()
-            embeddings = await loop.run_in_executor(None, self._encode_batch_sync, query_texts, batch_size)
+            # Run encoding directly (no thread pool to avoid semaphore leaks)
+            # Model is on CPU and batch sizes are small, so this won't block long
+            embeddings = self._encode_batch_sync(query_texts, batch_size)
             t_encode_end = time.time()
 
             duration_ms = (t_encode_end - t_encode_start) * 1000
@@ -282,6 +272,9 @@ class EmbeddingService:
         """
         Convert single query to embedding vector (synchronous).
 
+        Uses pre-loaded model directly without async/threading to avoid
+        multiprocessing issues with semaphores.
+
         Args:
             query: Natural language query
 
@@ -292,10 +285,25 @@ class EmbeddingService:
             RuntimeError: If embedding generation fails
         """
         try:
-            # Run async method synchronously
-            loop = asyncio.get_event_loop()
-            embeddings = loop.run_until_complete(self.encode_queries([query]))
-            return embeddings[0]
+            # Get pre-loaded model directly (avoid async loading)
+            if self._embedding_model is None:
+                from ..main import _embedding_models
+                if '0.6B' in _embedding_models:
+                    self._embedding_model = _embedding_models['0.6B']
+                else:
+                    raise RuntimeError("Embedding model not pre-loaded. Call encode_queries() from async context instead.")
+
+            # Format query with instruction prefix (Qwen format)
+            query_text = f"Instruct: Retrieve relevant passages.\nQuery: {query}"
+
+            # Encode synchronously
+            embedding = self._embedding_model.encode(
+                [query_text],
+                convert_to_numpy=True,
+                normalize_embeddings=True
+            )
+
+            return embedding[0].astype(np.float32)
 
         except Exception as e:
             logger.error(f"[{self.dashboard_id}] Error encoding single query: {e}", exc_info=True)

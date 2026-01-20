@@ -60,12 +60,12 @@ project_root = get_project_root()
 sys.path.insert(0, str(project_root))
 
 from src.utils.config import load_config
-from src.utils.logger import setup_worker_logger
 from src.storage.s3_utils import create_s3_storage_from_config
 from src.database.models import EmbeddingSegment, AlternativeTranscription, Content, Speaker, SpeakerIdentity
 from src.utils.speaker_segments import format_speaker_attributed_text
 
-logger = setup_worker_logger("backend_media")
+from ..utils.backend_logger import get_logger
+logger = get_logger("media_router")
 
 router = APIRouter(prefix="/api/media", tags=["media"])
 

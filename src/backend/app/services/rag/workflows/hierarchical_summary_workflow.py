@@ -5,12 +5,12 @@ Hierarchical Summary Workflow
 Multi-group, multi-theme analysis with hierarchical summarization.
 """
 
-import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from ..analysis_pipeline import AnalysisPipeline
 
-logger = logging.getLogger(__name__)
+from ....utils.backend_logger import get_logger
+logger = get_logger("hierarchical_summary_workflow")
 
 
 class HierarchicalSummaryWorkflow:

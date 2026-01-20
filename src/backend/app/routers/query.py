@@ -8,14 +8,9 @@ Read-only API endpoint for querying project content with flexible filtering and 
 from fastapi import APIRouter, HTTPException, Request
 import time
 import logging
-from pathlib import Path
-from src.utils.paths import get_project_root, get_config_path
-import sys
 
-# Setup logger
-sys.path.insert(0, str(get_project_root()))
-from src.utils.logger import setup_worker_logger
-logger = setup_worker_logger("backend.query_router")
+from ..utils.backend_logger import get_logger
+logger = get_logger("query_router")
 
 from ..middleware.api_key_auth import validate_project_access
 

@@ -8,11 +8,11 @@ SQLAlchemy database session management.
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from contextlib import contextmanager
-import logging
 
 from ..config import settings
+from ..utils.backend_logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("database_connection")
 
 # Create engine with optimized connection pooling
 engine = create_engine(

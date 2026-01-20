@@ -19,11 +19,11 @@ Usage:
 """
 
 import os
-import logging
 from pathlib import Path
 from dotenv import load_dotenv
 
-logger = logging.getLogger(__name__)
+from ..utils.backend_logger import get_logger
+logger = get_logger("database_config")
 
 # Load .env file from core directory
 _env_loaded = False

@@ -17,13 +17,8 @@ from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass
 import time
 
-# Use backend logger instead of default Python logger
-import sys
-from pathlib import Path
-from src.utils.paths import get_project_root, get_config_path
-sys.path.insert(0, str(get_project_root()))
-from src.utils.logger import setup_worker_logger
-logger = setup_worker_logger("backend.text_generator")
+from ...utils.backend_logger import get_logger
+logger = get_logger("text_generator")
 
 
 @dataclass
@@ -579,6 +574,55 @@ STYLE:
             default_max_tokens=800
         ))
 
+        # Discourse portrait: overall summary for trending/discourse summary workflow
+        self.register(PromptTemplate(
+            name="discourse_portrait",
+            system_message="You are an expert analyst creating accessible portraits of media discourse for general audiences.",
+            prompt_template="""Create a portrait of the current discourse based on these theme summaries.
+
+Corpus Context:
+- Time period: {time_window_days} days
+- Total content analyzed: {total_episodes} episodes from {total_channels} channels
+- Total duration: {total_duration_hours} hours of content
+- Focus area: {projects}
+
+Theme Summaries:
+{theme_summaries}
+
+TASK: Write a discourse portrait (400-500 words) that paints a vivid picture of what people are talking about.
+
+STRUCTURE:
+1. **Opening hook** (2-3 sentences): What's the dominant conversation right now? Set the scene.
+
+2. **The big themes** (200-250 words): Walk through the major themes in a narrative flow:
+   - What are the hot topics?
+   - What are people arguing about?
+   - What perspectives or voices are prominent?
+   - Are there any surprising or emerging discussions?
+
+3. **The overall picture** (100-150 words): Step back and describe the discourse landscape:
+   - What does this tell us about current concerns and interests?
+   - Are conversations fragmented or unified?
+   - What's the general tone or mood?
+
+STYLE:
+- Write for a general audience, not academics
+- Be vivid and concrete - use specific examples from the themes
+- Avoid jargon like "discourse," "narrative," "framing" - just describe what people are saying
+- Be objective but engaging - paint a picture, don't lecture
+- No citations needed (this is synthesis)
+
+DO NOT:
+- Use bullet points or numbered lists
+- Use headers or subheaders
+- Use phrases like "In conclusion" or "To summarize"
+- Make value judgments about the content
+
+Write the discourse portrait now:""",
+            default_temperature=0.4,
+            default_max_tokens=700
+        ))
+
     def register(self, template: PromptTemplate):
         """Register a prompt template."""
         self.templates[template.name] = template
@@ -645,7 +689,8 @@ class TextGenerator:
         model: str = "grok-2-1212",
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-        timeout: int = 60
+        timeout: int = 60,
+        backend: str = "xai"
     ) -> str:
         """
         Generate text using a registered template.
@@ -653,10 +698,12 @@ class TextGenerator:
         Args:
             template_name: Name of registered template
             context: Dictionary of values to fill template placeholders
-            model: LLM model to use
+            model: LLM model to use. For xAI: "grok-2-1212", "grok-4-fast-non-reasoning-latest".
+                   For local: "tier_1" (80B), "tier_2" (30B), "tier_3" (4B)
             temperature: Sampling temperature (overrides template default)
             max_tokens: Max tokens (overrides template default)
             timeout: Request timeout in seconds
+            backend: "xai" for Grok API, "local" for local LLM balancer
 
         Returns:
             Generated text
@@ -684,9 +731,9 @@ class TextGenerator:
         temperature = temperature if temperature is not None else template.default_temperature
         max_tokens = max_tokens if max_tokens is not None else template.default_max_tokens
 
-        # Create cache key from template name + context + model + temperature
+        # Create cache key from template name + context + model + temperature + backend
         import json
-        cache_key = f"{template_name}:{json.dumps(context, sort_keys=True)}:{model}:{temperature}"
+        cache_key = f"{template_name}:{json.dumps(context, sort_keys=True)}:{model}:{temperature}:{backend}"
 
         # Check cache first (text-based exact match)
         start_time = time.time()
@@ -703,14 +750,15 @@ class TextGenerator:
 
         # Generate text
         try:
-            logger.info(f"Cache MISS for template '{template_name}' - calling LLM...")
+            logger.info(f"Cache MISS for template '{template_name}' - calling LLM (backend={backend})...")
             result = await self.llm_service.call_grok_async(
                 prompt=prompt,
                 system_message=template.system_message,
                 model=model,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                timeout=timeout
+                timeout=timeout,
+                backend=backend
             )
 
             # Cache the result
@@ -797,7 +845,8 @@ class TextGenerator:
                         model=task.get("model", "grok-2-1212"),
                         temperature=task.get("temperature"),
                         max_tokens=task.get("max_tokens"),
-                        timeout=task.get("timeout", 60)
+                        timeout=task.get("timeout", 60),
+                        backend=task.get("backend", "xai")
                     )
 
                     completed += 1
@@ -913,7 +962,8 @@ class TextGenerator:
                         model=task.get("model", "grok-2-1212"),
                         temperature=task.get("temperature"),
                         max_tokens=task.get("max_tokens"),
-                        timeout=task.get("timeout", 60)
+                        timeout=task.get("timeout", 60),
+                        backend=task.get("backend", "xai")
                     )
 
                     completed += 1
@@ -980,7 +1030,8 @@ class TextGenerator:
         model: str = "grok-2-1212",
         temperature: float = 0.3,
         max_tokens: int = 1500,
-        timeout: int = 60
+        timeout: int = 60,
+        backend: str = "xai"
     ) -> str:
         """
         Generate text without using a template (direct prompt).
@@ -988,10 +1039,12 @@ class TextGenerator:
         Args:
             prompt: Direct prompt text
             system_message: Optional system message
-            model: LLM model to use
+            model: LLM model to use. For xAI: "grok-2-1212", "grok-4-fast-non-reasoning-latest".
+                   For local: "tier_1" (80B), "tier_2" (30B), "tier_3" (4B)
             temperature: Sampling temperature
             max_tokens: Maximum tokens
             timeout: Request timeout in seconds
+            backend: "xai" for Grok API, "local" for local LLM balancer
 
         Returns:
             Generated text
@@ -1005,7 +1058,8 @@ class TextGenerator:
                 model=model,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                timeout=timeout
+                timeout=timeout,
+                backend=backend
             )
             return result
         except Exception as e:

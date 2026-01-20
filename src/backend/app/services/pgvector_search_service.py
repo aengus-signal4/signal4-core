@@ -44,13 +44,8 @@ from psycopg2.extras import RealDictCursor
 from typing import List, Dict, Any, Optional, Set
 from datetime import datetime, timedelta
 
-# Setup logger
-import sys
-from pathlib import Path
-from src.utils.paths import get_project_root
-sys.path.insert(0, str(get_project_root()))
-from src.utils.logger import setup_worker_logger
-logger = setup_worker_logger("backend.pgvector_search")
+from ..utils.backend_logger import get_logger
+logger = get_logger("pgvector_search")
 
 # Projects that have per-project HNSW indexes
 INDEXED_PROJECTS = {

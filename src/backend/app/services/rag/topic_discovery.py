@@ -12,12 +12,8 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 
-import sys
-from pathlib import Path
-from src.utils.paths import get_project_root, get_config_path
-sys.path.insert(0, str(get_project_root()))
-from src.utils.logger import setup_worker_logger
-logger = setup_worker_logger("backend.topic_discovery")
+from ...utils.backend_logger import get_logger
+logger = get_logger("topic_discovery")
 
 
 @dataclass

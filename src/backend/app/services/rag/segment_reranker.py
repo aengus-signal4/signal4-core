@@ -15,14 +15,14 @@ Also enforces diversity constraints:
 This component sits AFTER semantic retrieval and BEFORE final selection.
 """
 
-import logging
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 import numpy as np
 
-logger = logging.getLogger(__name__)
+from ...utils.backend_logger import get_logger
+logger = get_logger("segment_reranker")
 
 
 @dataclass

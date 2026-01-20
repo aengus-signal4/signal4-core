@@ -8,7 +8,6 @@ Supports multiple extraction strategies:
 - Hierarchical sub-themes (recursive clustering)
 """
 
-import logging
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any, Set, Tuple
 import numpy as np
@@ -56,8 +55,9 @@ def _get_segment_text(seg):
 
 
 from ..embedding_service import EmbeddingService
+from ...utils.backend_logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("theme_extractor")
 
 
 @dataclass
@@ -318,12 +318,10 @@ class ThemeExtractor:
         if not self.embedding_service:
             raise ValueError("EmbeddingService required for query-based extraction")
 
-        # Get query embeddings using async method (run synchronously)
-        import asyncio
-        loop = asyncio.get_event_loop()
-        query_embeddings_list = loop.run_until_complete(
-            self.embedding_service.encode_queries(theme_queries)
-        )
+        # Get query embeddings synchronously using pre-loaded model
+        query_embeddings_list = [
+            self.embedding_service.encode_query(q) for q in theme_queries
+        ]
         query_embeddings = np.array(query_embeddings_list)
 
         # Get segment embeddings

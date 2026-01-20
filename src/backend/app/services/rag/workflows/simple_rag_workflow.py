@@ -8,11 +8,11 @@ Direct Q&A workflow with two modes:
 2. run_with_expansion(): Query expansion → semantic search → sample → generate answer
 """
 
-import logging
 from typing import List, Dict, Any, Optional
 from ..analysis_pipeline import AnalysisPipeline
 
-logger = logging.getLogger(__name__)
+from ....utils.backend_logger import get_logger
+logger = get_logger("simple_rag_workflow")
 
 
 class SimpleRAGWorkflow:

@@ -14,7 +14,6 @@ Features:
 """
 
 import asyncio
-import logging
 import time
 from typing import Dict, Any, List, Optional, AsyncGenerator, Callable, TYPE_CHECKING
 from dataclasses import dataclass
@@ -30,7 +29,8 @@ if TYPE_CHECKING:
     from ..pgvector_search_service import PgVectorSearchService as SearchService
     from .interfaces import WorkflowEvent
 
-logger = logging.getLogger(__name__)
+from ...utils.backend_logger import get_logger
+logger = get_logger("analysis_pipeline")
 
 
 @dataclass
@@ -1104,12 +1104,11 @@ class AnalysisPipeline:
                 # Store unclustered selection separately for prompt formatting
                 context["unclustered_selected"] = unclustered_selected
 
-                # Aggregate for simple RAG with clustering
-                if has_subclusters:
-                    context["selected_segments"] = all_selected
-                    context["selected_by_cluster"] = True
-                    total_clustered = len(all_selected) - len(unclustered_selected)
-                    logger.info(f"Aggregated {len(all_selected)} total segments ({total_clustered} clustered + {len(unclustered_selected)} unclustered)")
+                # Always store selected segments when we have themes
+                context["selected_segments"] = all_selected
+                context["selected_by_cluster"] = has_subclusters
+                total_clustered = len(all_selected) - len(unclustered_selected)
+                logger.info(f"Aggregated {len(all_selected)} total segments ({total_clustered} clustered + {len(unclustered_selected)} unclustered)")
 
                 # Yield completion
                 yield {
@@ -1396,7 +1395,8 @@ class AnalysisPipeline:
                     },
                     model=params.get("model", "grok-2-1212"),
                     temperature=params.get("temperature"),
-                    max_tokens=params.get("max_tokens", 800)
+                    max_tokens=params.get("max_tokens", 800),
+                    backend=params.get("backend", "xai")
                 )
 
                 # Collect all segment IDs from all groups
@@ -1432,15 +1432,45 @@ class AnalysisPipeline:
             else:
                 # SINGLE-PASS GENERATION (streaming)
                 results = [None] * len(tasks)
+                themes = context.get("themes", [])
+
+                # Emit initial progress based on level
+                if level == "theme":
+                    yield {
+                        "type": "partial",
+                        "data": {"phase": "theme_summaries"},
+                        "progress": 0.0,
+                        "message": f"Generating summaries for {len(tasks)} themes..."
+                    }
+                elif level == "corpus":
+                    yield {
+                        "type": "partial",
+                        "data": {"phase": "corpus_portrait"},
+                        "progress": 0.0,
+                        "message": "Generating overall discourse portrait..."
+                    }
+
                 async for update in generator.generate_batch_stream(tasks, max_concurrent=max_concurrent):
                     idx = update["index"]
                     results[idx] = update.get("result")
+
+                    # Build friendly message based on level
+                    if level == "theme" and idx < len(themes):
+                        theme = themes[idx]
+                        theme_name = theme.theme_name if hasattr(theme, 'theme_name') else f"Theme {idx + 1}"
+                        segment_count = len(theme.segments) if hasattr(theme, 'segments') else 0
+                        friendly_message = f"Summarized: {theme_name} ({segment_count:,} segments)"
+                    elif level == "corpus":
+                        friendly_message = "Generated discourse portrait"
+                    else:
+                        friendly_message = f"Generated summary {update['completed']}/{update['total']}"
 
                     # Yield partial SSE event immediately
                     yield {
                         "type": "partial",
                         "data": {
-                            "phase": "single_pass",
+                            "phase": "theme_summaries" if level == "theme" else "corpus_portrait",
+                            "level": level,
                             "index": idx,
                             "summary": update.get("result"),
                             "completed": update["completed"],
@@ -1449,21 +1479,39 @@ class AnalysisPipeline:
                             "error": update.get("error")
                         },
                         "progress": update["progress"],
-                        "message": f"Generated summary {update['completed']}/{update['total']}"
+                        "message": friendly_message
                     }
 
                 # Store results in consistent structure
                 if "summaries" not in context:
                     context["summaries"] = {}
 
-                context["summaries"][level] = {
-                    "overall_summary": results[0] if results else None,
-                    "group_summaries": [],
-                    "has_groups": False,
-                    "num_groups": 0
-                }
-
-                logger.info(f"Single-pass streaming generation complete: 1 summary")
+                # Check if this was hierarchical (multiple themes) or single-pass
+                if len(tasks) > 1 and level == "theme":
+                    # Hierarchical mode: store as group_summaries for corpus-level to use
+                    context["summaries"][level] = {
+                        "overall_summary": None,
+                        "group_summaries": [
+                            {
+                                "theme_id": tasks[i].get("metadata", {}).get("theme_id", f"theme_{i}"),
+                                "theme_name": tasks[i].get("metadata", {}).get("theme_name", f"Theme {i+1}"),
+                                "summary": results[i]
+                            }
+                            for i in range(len(results)) if results[i]
+                        ],
+                        "has_groups": True,
+                        "num_groups": len(results)
+                    }
+                    logger.info(f"Hierarchical generation complete: {len(results)} theme summaries")
+                else:
+                    # Single-pass mode: store as overall_summary
+                    context["summaries"][level] = {
+                        "overall_summary": results[0] if results else None,
+                        "group_summaries": [],
+                        "has_groups": False,
+                        "num_groups": 0
+                    }
+                    logger.info(f"Single-pass streaming generation complete: {len(results)} summaries")
 
             # Store segment ID mapping
             if "segment_ids" not in context:
@@ -1482,6 +1530,14 @@ class AnalysisPipeline:
             end_date = datetime.now(timezone.utc)
             start_date = end_date - timedelta(days=time_window_days)
 
+            # Emit friendly progress message
+            yield {
+                "type": "partial",
+                "data": {"phase": "retrieval"},
+                "progress": 0.1,
+                "message": f"Loading discourse from the past {time_window_days} days..."
+            }
+
             # Build filter params
             filter_params = {
                 "date_range": (start_date, end_date),
@@ -1497,6 +1553,19 @@ class AnalysisPipeline:
             segments = retriever.fetch_by_filter(**filter_params)
             context["segments"] = segments
             context["all_segments"] = segments  # Store for corpus analysis
+
+            # Emit completion message
+            yield {
+                "type": "partial",
+                "data": {
+                    "phase": "retrieval",
+                    "segment_count": len(segments),
+                    "time_window_days": time_window_days
+                },
+                "progress": 1.0,
+                "message": f"Loaded {len(segments):,} segments from {time_window_days} days of discourse"
+            }
+
             logger.info(f"Retrieved all {len(segments)} segments for time window {time_window_days}d")
             yield {"type": "result", "data": context}
 
@@ -1511,6 +1580,14 @@ class AnalysisPipeline:
                 yield {"type": "result", "data": context}
                 return
 
+            # Emit progress message
+            yield {
+                "type": "partial",
+                "data": {"phase": "corpus_analysis"},
+                "progress": 0.3,
+                "message": "Analyzing corpus statistics..."
+            }
+
             # Run quantitative analysis on full corpus
             corpus_stats = analyzer.analyze(
                 segments=segments,
@@ -1518,6 +1595,23 @@ class AnalysisPipeline:
             )
 
             context["corpus_stats"] = corpus_stats
+
+            # Build friendly summary message
+            episode_count = corpus_stats.get('episode_count', 0)
+            channel_count = corpus_stats.get('unique_channels', 0)
+            duration_hours = corpus_stats.get('total_duration_hours')
+            duration_str = f", {duration_hours:.0f} hours of content" if duration_hours else ""
+
+            yield {
+                "type": "partial",
+                "data": {
+                    "phase": "corpus_analysis",
+                    "corpus_stats": corpus_stats
+                },
+                "progress": 1.0,
+                "message": f"Corpus: {episode_count:,} episodes from {channel_count} channels{duration_str}"
+            }
+
             logger.info(
                 f"Corpus analysis: {corpus_stats['total_segments']} segments, "
                 f"{corpus_stats['episode_count']} episodes, "
@@ -1535,6 +1629,14 @@ class AnalysisPipeline:
                 yield {"type": "result", "data": context}
                 return
 
+            # Emit progress message
+            yield {
+                "type": "partial",
+                "data": {"phase": "clustering"},
+                "progress": 0.1,
+                "message": f"Discovering themes in {len(segments):,} segments..."
+            }
+
             themes = extractor.extract_by_clustering(
                 segments=segments,
                 method=params.get("method", "hdbscan"),
@@ -1546,6 +1648,20 @@ class AnalysisPipeline:
             )
 
             context["themes"] = themes
+
+            # Emit theme discovery results with segment counts per theme
+            theme_sizes = [len(t.segments) for t in themes]
+            yield {
+                "type": "partial",
+                "data": {
+                    "phase": "clustering",
+                    "theme_count": len(themes),
+                    "theme_sizes": theme_sizes
+                },
+                "progress": 1.0,
+                "message": f"Discovered {len(themes)} themes in the discourse"
+            }
+
             logger.info(f"Extracted {len(themes)} themes")
             yield {"type": "result", "data": context}
 
@@ -1776,8 +1892,13 @@ class AnalysisPipeline:
         if level == "theme":
             themes = context.get("themes", [])
 
-            # Simple RAG case: if we have selected_segments
-            if "selected_segments" in context:
+            # Check if this is a theme-specific template that requires per-theme generation
+            # Templates like theme_summary_with_metrics need quantitative context per theme
+            theme_specific_templates = {"theme_summary_with_metrics", "theme_summary", "theme_analysis"}
+            use_hierarchical = template in theme_specific_templates and themes
+
+            # Simple RAG case: if we have selected_segments AND not using theme-specific template
+            if "selected_segments" in context and not use_hierarchical:
                 selected_segments = context["selected_segments"]
                 if selected_segments:
                     query = context.get("original_query", "the topic")
@@ -1810,6 +1931,7 @@ class AnalysisPipeline:
                                     "segments_text": theme_segments_text
                                 },
                                 "model": params.get("model", "grok-2-1212"),
+                                "backend": params.get("backend", "xai"),
                                 "temperature": params.get("temperature"),
                                 "max_tokens": 300,
                                 "metadata": {
@@ -1837,6 +1959,7 @@ class AnalysisPipeline:
                                 "segments_text": segments_text
                             },
                             "model": params.get("model", "grok-2-1212"),
+                            "backend": params.get("backend", "xai"),
                             "temperature": params.get("temperature"),
                             "max_tokens": params.get("max_tokens"),
                             "metadata": {
@@ -1853,23 +1976,52 @@ class AnalysisPipeline:
 
                         logger.info(f"Single-pass: Prepared summary task with {len(selected_segments)} segments (no clustering)")
 
-            # Hierarchical mode: Process themes individually (when NO selected_segments)
-            # This is for workflows that want per-theme summaries without an overall summary
-            elif themes and "selected_segments" not in context:
+            # Hierarchical mode: Process themes individually
+            # This is for workflows that want per-theme summaries (discourse_summary, landing_page)
+            # Triggers when: themes exist AND (no selected_segments OR using theme-specific template)
+            if themes and (use_hierarchical or "selected_segments" not in context):
                 for theme in themes:
                     theme_selected = getattr(theme, "selected", None) or theme.segments[:10]
                     segments_text = self._format_segments_for_prompt(theme_selected)
 
+                    # Build context based on template requirements
+                    task_context = {
+                        "theme_name": theme.theme_name,
+                        "segments_text": segments_text,
+                        "cluster_context": "",
+                        "cluster_instruction": ""
+                    }
+
+                    # Add quantitative context for theme_summary_with_metrics template
+                    if template == "theme_summary_with_metrics":
+                        # Calculate theme-specific metrics
+                        theme_segments = theme.segments
+                        unique_episodes = set()
+                        unique_channels = set()
+                        for seg in theme_segments:
+                            if hasattr(seg, 'content_id_string'):
+                                unique_episodes.add(seg.content_id_string)
+                            if hasattr(seg, 'content') and seg.content:
+                                unique_channels.add(getattr(seg.content, 'channel_name', 'Unknown'))
+
+                        # Get centrality from theme metadata if available
+                        centrality = theme.metadata.get('centrality_score', 0.0) if theme.metadata else 0.0
+                        centrality_interp = "moderate" if centrality > 0.5 else "distributed"
+
+                        task_context.update({
+                            "segment_count": len(theme_segments),
+                            "episode_count": len(unique_episodes),
+                            "channel_count": len(unique_channels),
+                            "centrality_score": f"{centrality:.2f}" if centrality else "N/A",
+                            "centrality_interpretation": centrality_interp
+                        })
+
                     task_id = f"theme_{theme.theme_id}"
                     tasks.append({
                         "template_name": template,
-                        "context": {
-                            "theme_name": theme.theme_name,
-                            "segments_text": segments_text,
-                            "cluster_context": "",
-                            "cluster_instruction": ""
-                        },
+                        "context": task_context,
                         "model": params.get("model", "grok-2-1212"),
+                        "backend": params.get("backend", "xai"),
                         "temperature": params.get("temperature"),
                         "max_tokens": params.get("max_tokens"),
                         "metadata": {
@@ -1909,6 +2061,7 @@ class AnalysisPipeline:
                             "segments_text": segments_text
                         },
                         "model": params.get("model", "grok-2-1212"),
+                        "backend": params.get("backend", "xai"),
                         "temperature": params.get("temperature"),
                         "max_tokens": params.get("max_tokens"),
                         "metadata": {
@@ -1921,6 +2074,54 @@ class AnalysisPipeline:
 
                     # Track segment IDs for this task
                     segment_id_map[task_id] = [self._get_segment_id(seg) for seg in selected_segments]
+
+        elif level == "corpus":
+            # Corpus-level: generate overall portrait from theme summaries
+            # Requires "include_all_theme_summaries" param and previous theme summaries in context
+            include_all = params.get("include_all_theme_summaries", False)
+            theme_summaries_data = context.get("summaries", {}).get("theme", {})
+
+            if include_all and theme_summaries_data:
+                # Extract theme summaries from stored context
+                group_summaries = theme_summaries_data.get("group_summaries", [])
+                overall_summary = theme_summaries_data.get("overall_summary")
+
+                # Format theme summaries for the discourse portrait prompt
+                theme_summaries_text = ""
+                if group_summaries:
+                    for i, group in enumerate(group_summaries, 1):
+                        summary_text = group.get("summary", "") if isinstance(group, dict) else str(group)
+                        theme_summaries_text += f"\n## Theme {i}\n{summary_text}\n"
+                elif overall_summary:
+                    theme_summaries_text = overall_summary
+
+                # Get corpus stats for context
+                corpus_stats = context.get("corpus_stats", {})
+                global_filters = context.get("global_filters", {})
+
+                task_id = "corpus_portrait"
+                tasks.append({
+                    "template_name": template,  # discourse_portrait
+                    "context": {
+                        "time_window_days": global_filters.get("time_window_days", 14),
+                        "total_episodes": corpus_stats.get("episode_count", corpus_stats.get("total_episodes", 0)),
+                        "total_channels": corpus_stats.get("unique_channels", corpus_stats.get("total_channels", 0)),
+                        "total_duration_hours": corpus_stats.get("total_duration_hours", 0),
+                        "projects": ", ".join(global_filters.get("projects", [])) if global_filters.get("projects") else "Health & Wellness",
+                        "theme_summaries": theme_summaries_text
+                    },
+                    "model": params.get("model", "grok-2-1212"),
+                    "backend": params.get("backend", "xai"),
+                    "temperature": params.get("temperature"),
+                    "max_tokens": params.get("max_tokens"),
+                    "metadata": {
+                        "task_id": task_id,
+                        "type": "corpus_portrait",
+                        "theme_count": len(group_summaries) if group_summaries else 1
+                    }
+                })
+
+                logger.info(f"Prepared corpus portrait task with {len(group_summaries) if group_summaries else 1} theme summaries")
 
         return tasks, segment_id_map
 
@@ -2123,22 +2324,34 @@ Source transcripts:
 
         elif step_type == "retrieve_segments":
             segments = context.get("segments", [])
+            # Don't return raw segments to avoid JSON serialization issues
+            # Segments stay in context for downstream steps
             return {
-                "segment_count": len(segments),
-                "segments": segments
+                "segment_count": len(segments)
             }
 
         elif step_type == "retrieve_all_segments":
             segments = context.get("segments", [])
+            # Don't return raw segments to avoid JSON serialization issues
+            # Segments stay in context for downstream steps
             return {
-                "segment_count": len(segments),
-                "segments": segments
+                "segment_count": len(segments)
             }
 
         elif step_type == "extract_themes":
             themes = context.get("themes", [])
+            # Serialize themes without raw segment objects
+            themes_serialized = []
+            for theme in themes:
+                themes_serialized.append({
+                    "theme_id": theme.theme_id,
+                    "theme_name": theme.theme_name,
+                    "segment_count": len(theme.segments),
+                    "keywords": theme.keywords,
+                    "metadata": theme.metadata
+                })
             return {
-                "themes": themes,
+                "themes": themes_serialized,
                 "theme_count": len(themes)
             }
 

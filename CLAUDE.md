@@ -210,6 +210,10 @@ The backend provides read-only query and analysis APIs for the frontend. Located
 
 **Important:** Backend should NEVER write to the database (except LLM cache).
 
+## Backend Logging
+
+Hybrid logging: workflow milestones → console + `logs/backend/workflow.log`, component debug → per-component files (no console). See `.claude/docs/backend-logging.md` for details.
+
 ## Pipeline Stages
 
 ```

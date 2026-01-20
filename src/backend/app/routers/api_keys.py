@@ -22,9 +22,9 @@ from sqlalchemy import create_engine, func, desc
 from sqlalchemy.orm import sessionmaker, Session
 
 from src.database.models import ApiKey, ApiKeyUsage
-from src.utils.logger import setup_worker_logger
 
-logger = setup_worker_logger("api_keys_router")
+from ..utils.backend_logger import get_logger
+logger = get_logger("api_keys_router")
 
 router = APIRouter(prefix="/api/keys", tags=["api-keys"])
 

@@ -9,9 +9,9 @@ Each dashboard has a config.yaml with search, LLM, audio, and privacy settings.
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
-import logging
 
-logger = logging.getLogger(__name__)
+from ..utils.backend_logger import get_logger
+logger = get_logger("dashboard_config")
 
 
 class DashboardConfig:

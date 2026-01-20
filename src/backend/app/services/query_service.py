@@ -6,20 +6,14 @@ Service for executing read-only segment queries with filtering and search.
 Replaces direct database access in dashboards.
 """
 
-import logging
 import time
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
-from pathlib import Path
-from src.utils.paths import get_project_root, get_config_path
-import sys
 
-# Setup logger
-sys.path.insert(0, str(get_project_root()))
-from src.utils.logger import setup_worker_logger
-logger = setup_worker_logger("backend.query_service")
+from ..utils.backend_logger import get_logger
+logger = get_logger("query_service")
 
 
 class QueryService:

@@ -7,18 +7,14 @@ using LLM analysis of representative segments.
 """
 
 import json
-import logging
 import time
 import requests
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
-import sys
-from pathlib import Path
-from src.utils.paths import get_project_root, get_config_path
-sys.path.insert(0, str(get_project_root()))
-from src.utils.logger import setup_worker_logger
-logger = setup_worker_logger("backend.topic_labeler")
+from ...utils.backend_logger import get_logger
+logger = get_logger("topic_labeler")
 
 
 @dataclass

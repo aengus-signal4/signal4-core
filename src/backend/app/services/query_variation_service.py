@@ -53,9 +53,9 @@ import psycopg2
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime
 
-from src.utils.logger import setup_worker_logger
+from ..utils.backend_logger import get_logger
 
-logger = setup_worker_logger("backend.query_variations")
+logger = get_logger("query_variations")
 
 
 class QueryVariationService:

@@ -21,7 +21,6 @@ Compared to UMAP + HDBSCAN:
 - 2000 segments: ~10s
 """
 
-import logging
 import time
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
@@ -30,7 +29,8 @@ from sklearn.decomposition import PCA
 from sklearn.cluster import MiniBatchKMeans, KMeans
 from sklearn.metrics import silhouette_score, silhouette_samples
 
-logger = logging.getLogger(__name__)
+from ...utils.backend_logger import get_logger
+logger = get_logger("fast_clustering")
 
 
 @dataclass

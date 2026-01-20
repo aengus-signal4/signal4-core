@@ -11,12 +11,8 @@ import logging
 from typing import Dict, List, Set, Optional, Tuple
 from dataclasses import dataclass
 
-import sys
-from pathlib import Path
-from src.utils.paths import get_project_root, get_config_path
-sys.path.insert(0, str(get_project_root()))
-from src.utils.logger import setup_worker_logger
-logger = setup_worker_logger("backend.citation_manager")
+from ...utils.backend_logger import get_logger
+logger = get_logger("citation_manager")
 
 
 @dataclass

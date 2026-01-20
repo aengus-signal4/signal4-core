@@ -11,12 +11,8 @@ import logging
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass
 
-import sys
-from pathlib import Path
-from src.utils.paths import get_project_root, get_config_path
-sys.path.insert(0, str(get_project_root()))
-from src.utils.logger import setup_worker_logger
-logger = setup_worker_logger("backend.theme_summarizer")
+from ...utils.backend_logger import get_logger
+logger = get_logger("theme_summarizer")
 
 from .citation_manager import CitationManager, Citation
 from ...models.db_models import EmbeddingSegment as SampledSegment

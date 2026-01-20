@@ -28,15 +28,10 @@ import time
 from pathlib import Path
 from src.utils.paths import get_project_root, get_config_path
 
-# Configure centralized backend logging using worker logger
-import sys
-sys.path.insert(0, str(get_project_root()))
-from src.utils.logger import setup_worker_logger
-logger = setup_worker_logger("backend")
+from src.backend.app.utils.backend_logger import get_logger
+logger = get_logger("main")
 
-logger.info("=" * 80)
 logger.info("Backend API initializing...")
-logger.info("=" * 80)
 
 # Global model instances to keep warm
 _embedding_models = {}

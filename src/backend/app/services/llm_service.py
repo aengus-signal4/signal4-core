@@ -23,12 +23,9 @@ from collections import Counter
 from pathlib import Path
 from src.utils.paths import get_project_root, get_config_path
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(get_project_root()))
-from src.utils.logger import setup_worker_logger
-logger = setup_worker_logger("backend.llm")
-usage_logger = setup_worker_logger("backend.usage")
+from ..utils.backend_logger import get_logger
+logger = get_logger("llm_service")
+usage_logger = get_logger("llm_usage")
 
 # Import activity logger
 try:

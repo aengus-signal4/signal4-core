@@ -11,7 +11,6 @@ Unified weighted selection approach with configurable biases:
 Predefined strategy templates available for common use cases.
 """
 
-import logging
 from typing import List, Optional, Dict, Callable, Union, Tuple
 from dataclasses import dataclass
 import numpy as np
@@ -21,7 +20,8 @@ from collections import defaultdict
 from ...models.db_models import EmbeddingSegment as Segment
 from .theme_extractor import Theme
 
-logger = logging.getLogger(__name__)
+from ...utils.backend_logger import get_logger
+logger = get_logger("segment_selector")
 
 
 @dataclass

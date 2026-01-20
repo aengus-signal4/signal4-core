@@ -55,12 +55,8 @@ import hashlib
 from typing import Optional, List, Dict, Any
 from .pg_cache_service import PgLLMCache
 
-import sys
-from pathlib import Path
-from src.utils.paths import get_project_root, get_config_path
-sys.path.insert(0, str(get_project_root()))
-from src.utils.logger import setup_worker_logger
-logger = setup_worker_logger("backend.workflow_cache")
+from ..utils.backend_logger import get_logger
+logger = get_logger("workflow_cache")
 
 
 class SemanticQueryCache:
@@ -468,10 +464,15 @@ class WorkflowResultCache:
 
 class LandingPageCache:
     """
-    Landing page corpus analysis cache with fixed 24-hour TTL.
+    Landing page / discourse summary cache with fixed 24-hour TTL.
 
     Caches complete landing page results (no query, just filters).
-    Cache key: time_window + projects + languages
+    Cache key: time_window + projects + languages + backend
+
+    Backend Priority:
+    - Frontier (xAI) responses are privileged over local LLM responses
+    - If requesting local but frontier exists, return frontier
+    - Local responses only cached if no frontier response exists
     """
 
     TTL_HOURS = 24  # 24-hour TTL for landing page cache
@@ -495,7 +496,8 @@ class LandingPageCache:
         self,
         time_window: int,
         projects: Optional[List[str]],
-        languages: Optional[List[str]]
+        languages: Optional[List[str]],
+        backend: str = "xai"
     ) -> str:
         """
         Build the query string used for cache key computation.
@@ -504,77 +506,126 @@ class LandingPageCache:
         """
         projects_str = ",".join(sorted(projects or []))
         languages_str = ",".join(sorted(languages or []))
-        return f"landing:{time_window}:{projects_str}:{languages_str}"
+        return f"landing:{time_window}:{projects_str}:{languages_str}:{backend}"
 
     def get_sync(
         self,
         time_window: int,
         projects: Optional[List[str]],
-        languages: Optional[List[str]]
+        languages: Optional[List[str]],
+        use_local_llm: bool = False
     ) -> Optional[Dict[str, Any]]:
         """
         Check cache for landing page result.
+
+        Priority: Always prefer frontier (xAI) responses over local.
+        If local is requested but frontier exists, return frontier.
 
         Args:
             time_window: Time window in days
             projects: Project filter list
             languages: Language filter list
+            use_local_llm: Whether local LLM was requested (still prefers frontier)
 
         Returns:
             Cached result dict or None if not found
         """
-        # Build the full query string for cache lookup
-        # PgLLMCache will hash this to create the cache key
-        cache_query = self._build_cache_query(time_window, projects, languages)
+        # Always check frontier (xAI) cache first - it's privileged
+        cache_query_frontier = self._build_cache_query(time_window, projects, languages, "xai")
         result = self.cache.get(
-            cache_query,
+            cache_query_frontier,
             query_embedding=None,
             cache_type='landing_page'
         )
 
         if result:
             age_seconds = result.get('_cache_age_seconds', 0)
-            age_minutes = age_seconds / 60
             age_hours = age_seconds / 3600
             logger.info(
-                f"[{self.dashboard_id}] LandingPageCache HIT "
+                f"[{self.dashboard_id}] LandingPageCache HIT (frontier/xai) "
                 f"(age={age_hours:.1f}h, ttl={self.TTL_HOURS}h)"
             )
-            # Add age to result for frontend display
             result['_cache_age_hours'] = age_hours
+            result['_cache_backend'] = 'xai'
+            return result
 
-        return result
+        # If local was requested and no frontier exists, check local cache
+        if use_local_llm:
+            cache_query_local = self._build_cache_query(time_window, projects, languages, "local")
+            result = self.cache.get(
+                cache_query_local,
+                query_embedding=None,
+                cache_type='landing_page'
+            )
+
+            if result:
+                age_seconds = result.get('_cache_age_seconds', 0)
+                age_hours = age_seconds / 3600
+                logger.info(
+                    f"[{self.dashboard_id}] LandingPageCache HIT (local) "
+                    f"(age={age_hours:.1f}h, ttl={self.TTL_HOURS}h)"
+                )
+                result['_cache_age_hours'] = age_hours
+                result['_cache_backend'] = 'local'
+                return result
+
+        return None
 
     def put(
         self,
         time_window: int,
         projects: Optional[List[str]],
         languages: Optional[List[str]],
-        data: Dict[str, Any]
+        data: Dict[str, Any],
+        use_local_llm: bool = False
     ) -> None:
         """
-        Cache landing page result with 20-hour TTL.
+        Cache landing page result with 24-hour TTL.
+
+        Local responses only cached if no frontier response exists.
+        Frontier responses always cached (and will be preferred on read).
 
         Args:
             time_window: Time window in days
             projects: Project filter list
             languages: Language filter list
             data: Result dict with themes, corpus_stats, summaries, etc.
+            use_local_llm: Whether this was generated with local LLM
         """
-        # Build the full query string for cache storage
-        # PgLLMCache will hash this to create the cache key
-        cache_query = self._build_cache_query(time_window, projects, languages)
+        backend = "local" if use_local_llm else "xai"
+
+        # If local, check if frontier already exists - don't overwrite
+        if use_local_llm:
+            cache_query_frontier = self._build_cache_query(time_window, projects, languages, "xai")
+            existing = self.cache.get(
+                cache_query_frontier,
+                query_embedding=None,
+                cache_type='landing_page'
+            )
+            if existing:
+                logger.info(
+                    f"[{self.dashboard_id}] LandingPageCache SKIP local write "
+                    f"(frontier response exists)"
+                )
+                return
+
+        # Build cache key with backend
+        cache_query = self._build_cache_query(time_window, projects, languages, backend)
+
+        # Add backend info to cached data
+        data_with_backend = {**data, '_generated_backend': backend}
 
         self.cache.put(
             cache_query,
             query_embedding=None,
-            response=data,
+            response=data_with_backend,
             cache_type='landing_page',
             ttl_hours=self.TTL_HOURS
         )
 
         logger.info(
-            f"[{self.dashboard_id}] LandingPageCache PUT (ttl={self.TTL_HOURS}h, {time_window}d window)"
+            f"[{self.dashboard_id}] LandingPageCache PUT ({backend}) "
+            f"(ttl={self.TTL_HOURS}h, {time_window}d window)"
         )
 
 

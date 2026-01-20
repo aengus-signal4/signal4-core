@@ -19,6 +19,7 @@ Architecture:
 """
 
 import json
+import time
 import numpy as np
 from datetime import datetime, timezone, timedelta
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -33,8 +34,13 @@ from .event_serializer import clean_event_for_json
 from .analysis_pipeline import AnalysisPipeline
 from .step_registry import build_pipeline_from_steps
 
-from src.utils.logger import setup_worker_logger
-logger = setup_worker_logger("backend.cached_workflow_executor")
+from ...utils.backend_logger import (
+    get_logger,
+    log_cache_hit,
+    log_cache_miss,
+    log_step_complete
+)
+logger = get_logger("cached_workflow_executor")
 
 
 class CachedWorkflowExecutor:
@@ -75,7 +81,8 @@ class CachedWorkflowExecutor:
         workflow: Optional[str],
         steps: List[Dict[str, Any]],
         global_filters: Dict[str, Any],
-        verbose: bool = False
+        verbose: bool = False,
+        use_local_llm: bool = False
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Execute workflow with caching, yielding SSE events.
@@ -86,12 +93,16 @@ class CachedWorkflowExecutor:
             steps: Pipeline steps to execute
             global_filters: Filters (time_window_days, projects, languages, channels)
             verbose: Whether to include verbose logging
+            use_local_llm: Whether to use local LLM instead of xAI API
 
         Yields:
             Event dicts for SSE streaming
         """
-        # Landing page workflow (no query)
-        if workflow == "landing_page_overview":
+        # Store use_local_llm for pipeline steps
+        self._use_local_llm = use_local_llm
+
+        # Landing page workflow (no query) - also handles discourse_summary
+        if workflow in ("landing_page_overview", "discourse_summary"):
             async for event in self._execute_landing_page(steps, global_filters, verbose):
                 yield event
             return
@@ -124,15 +135,13 @@ class CachedWorkflowExecutor:
         cached_result = landing_cache.get_sync(
             time_window=global_filters["time_window_days"],
             projects=global_filters.get("projects"),
-            languages=global_filters.get("languages")
+            languages=global_filters.get("languages"),
+            use_local_llm=self._use_local_llm
         )
 
         if cached_result:
             cache_age_hours = cached_result.get('_cache_age_hours', 0)
-            logger.info(
-                f"[{self.dashboard_id}] [CACHE] Landing page cached "
-                f"(age={cache_age_hours:.1f}h, ttl=24h)"
-            )
+            log_cache_hit(self.dashboard_id, "landing_page", f"age={cache_age_hours:.1f}h")
 
             yield {'type': 'cache_hit', 'level': 'landing_page', 'cache_age_hours': round(cache_age_hours, 1)}
 
@@ -143,15 +152,19 @@ class CachedWorkflowExecutor:
                 'cache_age_hours': round(cache_age_hours, 1)
             }
             yield clean_event_for_json(complete_event)
-
-            logger.info(f"[{self.dashboard_id}] Complete (landing page cached)")
             return
 
         # Cache miss - run full pipeline
+        log_cache_miss(self.dashboard_id)
+        # Pass use_local_llm through global_filters for LLM steps
+        filters_with_llm = {**global_filters}
+        if self._use_local_llm:
+            filters_with_llm['use_local_llm'] = True
+
         async for event in self._run_pipeline(
             query=None,
             steps=steps,
-            global_filters=global_filters,
+            global_filters=filters_with_llm,
             initial_context=None,
             verbose=verbose
         ):
@@ -202,9 +215,11 @@ class CachedWorkflowExecutor:
         if cache_results.get('expand_query'):
             initial_context, skip_expand_query = self._build_initial_context(cache_results['expand_query'])
             if skip_expand_query:
+                expand_age = cache_results['expand_query'].get('_cache_age_seconds', 0) / 60
+                log_cache_hit(self.dashboard_id, "partial", f"expand_query age={expand_age:.1f}m")
                 yield {'type': 'cache_hit', 'level': 'partial'}
         else:
-            logger.info(f"[{self.dashboard_id}] No cached results")
+            log_cache_miss(self.dashboard_id)
             yield {'type': 'cache_miss'}
 
         # Filter steps if we have cached expand_query
@@ -213,11 +228,16 @@ class CachedWorkflowExecutor:
             pipeline_steps = [s for s in steps if s.get("step") != "expand_query"]
             logger.debug(f"[{self.dashboard_id}] Skipping expand_query step (using cached data)")
 
+        # Pass use_local_llm through global_filters for LLM steps
+        filters_with_llm = {**global_filters}
+        if getattr(self, '_use_local_llm', False):
+            filters_with_llm['use_local_llm'] = True
+
         # Run pipeline
         async for event in self._run_pipeline(
             query=query,
             steps=pipeline_steps,
-            global_filters=global_filters,
+            global_filters=filters_with_llm,
             initial_context=initial_context,
             verbose=verbose
         ):
@@ -248,16 +268,17 @@ class CachedWorkflowExecutor:
         workflow_age = cache_results['workflow'].get('_cache_age_seconds', 0) / 60
         expand_age = cache_results['expand_query'].get('_cache_age_seconds', 0) / 60
 
-        logger.info(
-            f"[{self.dashboard_id}] [CACHE] Workflow (age={workflow_age:.1f}m) + "
-            f"expand_query (age={expand_age:.1f}m) both cached"
+        log_cache_hit(
+            self.dashboard_id,
+            "full",
+            f"workflow={workflow_age:.1f}m, expand_query={expand_age:.1f}m"
         )
 
         yield {'type': 'cache_hit', 'level': 'full'}
 
         # Quick summary: instant return
         if workflow == "quick_summary":
-            logger.info(f"[{self.dashboard_id}] [CACHE] Returning instant cached result for quick_summary")
+            logger.debug(f"Returning instant cached result for quick_summary")
             async for event in self._yield_cached_results(cache_results['workflow']):
                 yield event
             return
@@ -302,7 +323,6 @@ class CachedWorkflowExecutor:
         yield clean_event_for_json(summary_event)
 
         yield {'type': 'complete', 'message': 'Analysis complete (cached)'}
-        logger.info(f"[{self.dashboard_id}] Complete (instant cache hit)")
 
     async def _refresh_retrieval_with_cached_embeddings(
         self,
@@ -334,22 +354,22 @@ class CachedWorkflowExecutor:
             expanded_queries = cache_results['expand_query'].get('expanded_queries', [])
 
             if not expanded_queries:
-                logger.warning(f"[{self.dashboard_id}] No cached queries, returning cached results only")
+                logger.warning("No cached queries, returning cached results only")
                 async for event in self._yield_cached_results(cache_results['workflow']):
                     yield event
                 return
 
             try:
                 embeddings = await self.embedding_service.encode_queries(expanded_queries)
-                logger.info(f"[{self.dashboard_id}] Generated {len(embeddings)} embeddings from cached queries")
+                logger.debug(f"Generated {len(embeddings)} embeddings from cached queries")
             except Exception as e:
-                logger.error(f"[{self.dashboard_id}] Failed to generate embeddings: {e}", exc_info=True)
+                logger.error(f"Failed to generate embeddings: {e}", exc_info=True)
                 async for event in self._yield_cached_results(cache_results['workflow']):
                     yield event
                 return
         else:
             embeddings = [np.array(emb, dtype=np.float32) for emb in cached_embeddings_list]
-            logger.info(f"[{self.dashboard_id}] [1/3] Using {len(embeddings)} cached embeddings for retrieval")
+            logger.debug(f"Using {len(embeddings)} cached embeddings for retrieval")
 
         # Initialize search service
         search_service = PgVectorSearchService(
@@ -371,7 +391,7 @@ class CachedWorkflowExecutor:
             **search_filters
         )
 
-        logger.info(f"[{self.dashboard_id}] [2/3] Retrieved {len(unique_segments)} unique segments (fresh)")
+        logger.debug(f"Retrieved {len(unique_segments)} unique segments (fresh)")
 
         yield {'type': 'progress', 'message': f'Retrieved {len(unique_segments)} segments'}
 
@@ -402,9 +422,8 @@ class CachedWorkflowExecutor:
             time_window_days=global_filters["time_window_days"]
         )
 
-        logger.info(
-            f"[{self.dashboard_id}] [3/3] quantitative_analysis: "
-            f"{quantitative_metrics['total_segments']} segments, "
+        logger.debug(
+            f"quantitative_analysis: {quantitative_metrics['total_segments']} segments, "
             f"centrality={quantitative_metrics.get('discourse_centrality', {}).get('score', 0):.2f} (fresh)"
         )
 
@@ -451,7 +470,6 @@ class CachedWorkflowExecutor:
         yield clean_event_for_json(summary_event)
 
         yield {'type': 'complete', 'message': 'Analysis complete'}
-        logger.info(f"[{self.dashboard_id}] Complete (saved ~14s: 2s embed + 12s summary)")
 
     def _build_initial_context(
         self,
@@ -484,14 +502,14 @@ class CachedWorkflowExecutor:
                 np.array(emb, dtype=np.float32) for emb in cached_embeddings
             ]
             initial_context['query_embeddings_cached'] = cached_embeddings
-            logger.info(
-                f"[{self.dashboard_id}] [CACHE] Using cached expand_query "
-                f"(age={expand_age:.1f}m, {len(cached_queries)} queries, {len(cached_embeddings)} embeddings)"
+            logger.debug(
+                f"Using cached expand_query (age={expand_age:.1f}m, "
+                f"{len(cached_queries)} queries, {len(cached_embeddings)} embeddings)"
             )
         else:
-            logger.info(
-                f"[{self.dashboard_id}] [CACHE] Using cached expand_query "
-                f"(age={expand_age:.1f}m, {len(cached_queries)} queries, generating embeddings)"
+            logger.debug(
+                f"Using cached expand_query (age={expand_age:.1f}m, "
+                f"{len(cached_queries)} queries, generating embeddings)"
             )
 
         return initial_context, True
@@ -538,25 +556,33 @@ class CachedWorkflowExecutor:
         step_num = 0
         total_steps = len(steps)
         final_context = {}
+        step_start_time = time.time()
 
         if initial_context:
             final_context.update(initial_context)
 
         async for event in pipeline.execute(verbose=verbose, initial_context=initial_context):
-            if event.get("type") == "result":
+            if event.get("type") == "step_start":
+                # Track when step starts for timing
+                step_start_time = time.time()
+
+            elif event.get("type") == "result":
                 step_num += 1
                 step_name = event.get("step", "unknown")
                 data = event.get("data", {})
 
-                self._log_step_completion(step_num, total_steps, step_name, data)
+                # Calculate step duration
+                step_duration_ms = int((time.time() - step_start_time) * 1000)
+                step_start_time = time.time()  # Reset for next step
+
+                # Log to workflow log (console + file)
+                self._log_step_completion(step_num, total_steps, step_name, data, step_duration_ms)
                 final_context.update(data)
 
             yield clean_event_for_json(event)
 
         # Cache results after pipeline completion
         await self._cache_results(query, global_filters, final_context)
-
-        logger.info(f"[{self.dashboard_id}] Complete")
 
     async def _cache_results(
         self,
@@ -573,9 +599,10 @@ class CachedWorkflowExecutor:
             final_context: Final pipeline context
         """
         try:
-            # Landing page cache
+            # Landing page / discourse summary cache
             if not query and 'themes' in final_context:
                 landing_cache = LandingPageCache(self.dashboard_id)
+                use_local = global_filters.get('use_local_llm', False)
                 cache_data = {
                     'themes': final_context.get('themes', []),
                     'corpus_stats': final_context.get('corpus_stats', {}),
@@ -589,9 +616,11 @@ class CachedWorkflowExecutor:
                     time_window=global_filters["time_window_days"],
                     projects=global_filters.get("projects"),
                     languages=global_filters.get("languages"),
-                    data=cache_data
+                    data=cache_data,
+                    use_local_llm=use_local
                 )
-                logger.info(f"[{self.dashboard_id}] Cached landing page result (ttl=24h)")
+                backend_str = "local" if use_local else "frontier"
+                logger.debug(f"Cached landing page result ({backend_str}, ttl=24h)")
                 return
 
             # Expand query cache
@@ -605,8 +634,8 @@ class CachedWorkflowExecutor:
                         'query_embeddings': final_context.get('query_embeddings_cached', [])
                     }
                 )
-                logger.info(
-                    f"[{self.dashboard_id}] Cached expand_query result "
+                logger.debug(
+                    f"Cached expand_query result "
                     f"(with {len(final_context.get('query_embeddings_cached', []))} embeddings)"
                 )
 
@@ -633,10 +662,10 @@ class CachedWorkflowExecutor:
                     }
                 )
                 ttl = workflow_cache.get_ttl_for_time_window(global_filters['time_window_days'])
-                logger.info(f"[{self.dashboard_id}] Cached workflow result (ttl={ttl}h)")
+                logger.debug(f"Cached workflow result (ttl={ttl}h)")
 
         except Exception as cache_error:
-            logger.error(f"[{self.dashboard_id}] Failed to cache results: {cache_error}", exc_info=True)
+            logger.error(f"Failed to cache results: {cache_error}", exc_info=True)
 
     def _extract_segment_ids(self, segments: List[Any]) -> List[str]:
         """Extract segment IDs from segment list."""
@@ -651,49 +680,53 @@ class CachedWorkflowExecutor:
         step_num: int,
         total_steps: int,
         step_name: str,
-        data: Dict[str, Any]
+        data: Dict[str, Any],
+        duration_ms: int
     ) -> None:
-        """Log step completion with relevant metrics."""
+        """Log step completion to workflow log (console + file)."""
+        details = ""
+
         if step_name == "retrieve_segments_by_search":
             segment_count = len(data.get("segments", []))
-            logger.info(f"[{self.dashboard_id}] [{step_num}/{total_steps}] {step_name}: {segment_count} segments retrieved")
+            details = f"{segment_count} segments"
 
         elif step_name == "quantitative_analysis":
             metrics = data.get("quantitative_metrics") or {}
             seg_count = metrics.get("total_segments", 0)
             centrality = (metrics.get("discourse_centrality") or {}).get("score")
             if centrality is not None:
-                logger.info(f"[{self.dashboard_id}] [{step_num}/{total_steps}] {step_name}: {seg_count} segments, centrality={centrality:.2f}")
+                details = f"{seg_count} segments, centrality={centrality:.2f}"
             else:
-                logger.info(f"[{self.dashboard_id}] [{step_num}/{total_steps}] {step_name}: {seg_count} segments")
+                details = f"{seg_count} segments"
 
         elif step_name == "select_segments":
             selected_count = len(data.get("selected_segments", []))
-            logger.info(f"[{self.dashboard_id}] [{step_num}/{total_steps}] {step_name}: {selected_count} segments selected")
+            details = f"{selected_count} selected"
 
         elif step_name == "expand_query":
             expanded_count = len(data.get("expanded_queries", []))
-            logger.info(f"[{self.dashboard_id}] [{step_num}/{total_steps}] {step_name}: {expanded_count} variations")
+            details = f"{expanded_count} variations"
 
         elif step_name == "generate_summaries":
             summaries = data.get("summaries", {})
             summary_count = sum(len(v) if isinstance(v, list) else 1 for v in summaries.values())
-            logger.info(f"[{self.dashboard_id}] [{step_num}/{total_steps}] {step_name}: {summary_count} summaries generated")
+            details = f"{summary_count} summaries"
 
         elif step_name == "quick_cluster_check":
-            self._log_cluster_check(step_num, total_steps, step_name, data)
+            details = self._get_cluster_check_details(data)
 
-        else:
-            logger.info(f"[{self.dashboard_id}] [{step_num}/{total_steps}] {step_name}: complete")
+        # Log to workflow log (console + file)
+        log_step_complete(
+            self.dashboard_id,
+            step_num,
+            total_steps,
+            step_name,
+            duration_ms,
+            details
+        )
 
-    def _log_cluster_check(
-        self,
-        step_num: int,
-        total_steps: int,
-        step_name: str,
-        data: Dict[str, Any]
-    ) -> None:
-        """Log quick_cluster_check step with detailed validation info."""
+    def _get_cluster_check_details(self, data: Dict[str, Any]) -> str:
+        """Get details string for quick_cluster_check step."""
         validation = data.get("cluster_validation", {})
         num_clusters = len(data.get("themes", []))
         silhouette = validation.get("silhouette_score")
@@ -702,22 +735,21 @@ class CachedWorkflowExecutor:
         if validation.get("skipped"):
             reason = validation.get("reason", "unknown")
             if reason == "single_cluster_core_fringe":
-                logger.info(f"[{self.dashboard_id}] [{step_num}/{total_steps}] {step_name}: 1 cluster detected (core+fringe structure)")
+                return "1 cluster (core+fringe)"
             else:
                 sil_str = f", silhouette={silhouette:.3f}" if silhouette is not None else ""
-                logger.info(f"[{self.dashboard_id}] [{step_num}/{total_steps}] {step_name}: skipped ({reason}{sil_str})")
+                return f"skipped ({reason}{sil_str})"
 
         elif data.get("has_subclusters"):
             sil_str = f", silhouette={silhouette:.3f}" if silhouette is not None else ""
-            method_str = " (k-means fallback)" if fallback_used else ""
-            logger.info(f"[{self.dashboard_id}] [{step_num}/{total_steps}] {step_name}: {num_clusters} clusters detected{sil_str}{method_str}")
+            method_str = " k-means" if fallback_used else ""
+            return f"{num_clusters} clusters{method_str}{sil_str}"
 
         else:
             if num_clusters == 0:
-                sil_str = f", silhouette={silhouette:.3f}" if silhouette is not None else ""
-                fallback_str = " (k-means fallback failed)" if fallback_used else " (all noise)"
-                logger.info(f"[{self.dashboard_id}] [{step_num}/{total_steps}] {step_name}: no clusters found{fallback_str}{sil_str}")
+                fallback_str = "k-means failed" if fallback_used else "all noise"
+                return f"no clusters ({fallback_str})"
             else:
                 min_required = validation.get("min_silhouette_score", 0.15)
                 sil_str = f"silhouette={silhouette:.3f} < {min_required:.2f}" if silhouette is not None else "validation failed"
-                logger.info(f"[{self.dashboard_id}] [{step_num}/{total_steps}] {step_name}: {num_clusters} clusters rejected ({sil_str})")
+                return f"{num_clusters} rejected ({sil_str})"

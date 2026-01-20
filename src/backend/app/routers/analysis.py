@@ -33,7 +33,12 @@ from ..database.connection import SessionLocal
 import json
 import traceback
 
-from ..utils.backend_logger import get_logger
+from ..utils.backend_logger import (
+    get_logger,
+    log_request_start,
+    log_request_complete,
+    log_error
+)
 logger = get_logger("analysis_router")
 
 router = APIRouter(prefix="/api/analysis", tags=["analysis", "workflows"])
@@ -124,46 +129,43 @@ async def analyze_stream(request: AnalysisRequest, http_request: Request):
 
     async def event_generator():
         db_session = None
+        cached_result = False
         try:
-            logger.info(f"[{request.dashboard_id}] === Starting analysis request ===")
-            logger.info(f"[{request.dashboard_id}] workflow={request.workflow}, use_local_llm={request.use_local_llm}, time_window={request.time_window_days}d")
+            # Log request start to workflow log (console + file)
+            log_request_start(
+                request.dashboard_id,
+                request.workflow or "custom",
+                request.query
+            )
+
+            # Debug details go to component log only (file)
+            logger.debug(f"use_local_llm={request.use_local_llm}, time_window={request.time_window_days}d")
 
             # Validate request: must have either workflow or pipeline
             if not request.workflow and not request.pipeline:
-                logger.error(f"[{request.dashboard_id}] No workflow or pipeline specified")
+                log_error(request.dashboard_id, "No workflow or pipeline specified")
                 yield f"data: {json.dumps({'type': 'error', 'error': 'Must specify either workflow or pipeline'})}\n\n"
                 return
 
             # Load dashboard config
-            logger.info(f"[{request.dashboard_id}] Loading dashboard config...")
             config = load_dashboard_config(request.dashboard_id)
-            logger.info(f"[{request.dashboard_id}] Config loaded: project={config.project}, allowed_projects={config.allowed_projects}")
+            logger.debug(f"Config loaded: project={config.project}, allowed_projects={config.allowed_projects}")
 
-            logger.info(f"[{request.dashboard_id}] Initializing LLM service...")
             llm_service = LLMService(config, request.dashboard_id)
 
             # Initialize EmbeddingService
-            logger.info(f"[{request.dashboard_id}] Initializing embedding service...")
             from ..services.embedding_service import EmbeddingService
             embedding_service = EmbeddingService(config, request.dashboard_id)
 
-            query_preview = f"'{request.query[:60]}...'" if request.query else "(no query - discovery mode)"
-            logger.info(
-                f"[{request.dashboard_id}] Request: {query_preview} "
-                f"[workflow={request.workflow or 'custom'}]"
-            )
-
             # Get pipeline steps
-            logger.info(f"[{request.dashboard_id}] Getting workflow steps...")
             if request.workflow:
                 try:
                     steps = get_workflow(request.workflow)
-                    logger.info(f"[{request.dashboard_id}] Workflow '{request.workflow}' has {len(steps)} steps")
+                    logger.debug(f"Workflow '{request.workflow}' has {len(steps)} steps")
                     if request.config_overrides:
                         steps = apply_config_overrides(steps, request.config_overrides)
-                        logger.info(f"[{request.dashboard_id}] Applied config overrides")
                 except ValueError as e:
-                    logger.error(f"[{request.dashboard_id}] Workflow error: {e}")
+                    log_error(request.dashboard_id, str(e))
                     yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
                     return
             else:
@@ -171,20 +173,18 @@ async def analyze_stream(request: AnalysisRequest, http_request: Request):
                     {"step": s.step, "config": s.config}
                     for s in request.pipeline
                 ]
-                logger.info(f"[{request.dashboard_id}] Custom pipeline with {len(steps)} steps")
+                logger.debug(f"Custom pipeline with {len(steps)} steps")
 
             # Build global filters
             global_filters = _build_global_filters(request, config, workflow=request.workflow)
-            logger.info(f"[{request.dashboard_id}] Global filters: projects={global_filters.get('projects')}, languages={global_filters.get('languages')}, time_window={global_filters.get('time_window_days')}d")
+            logger.debug(f"Global filters: projects={global_filters.get('projects')}, time_window={global_filters.get('time_window_days')}d")
 
             # Create database session
-            logger.info(f"[{request.dashboard_id}] Creating database session...")
             db_session = SessionLocal()
 
             # Execute workflow with caching
             from ..services.rag.cached_workflow_executor import CachedWorkflowExecutor
 
-            logger.info(f"[{request.dashboard_id}] Creating CachedWorkflowExecutor...")
             executor = CachedWorkflowExecutor(
                 dashboard_id=request.dashboard_id,
                 config=config,
@@ -193,7 +193,6 @@ async def analyze_stream(request: AnalysisRequest, http_request: Request):
                 db_session=db_session
             )
 
-            logger.info(f"[{request.dashboard_id}] Starting workflow execution...")
             async for event in executor.execute(
                 query=request.query,
                 workflow=request.workflow,
@@ -202,17 +201,19 @@ async def analyze_stream(request: AnalysisRequest, http_request: Request):
                 verbose=request.verbose,
                 use_local_llm=request.use_local_llm
             ):
-                if event.get('type') == 'step_complete':
-                    logger.info(f"[{request.dashboard_id}] Step complete: {event.get('step')}")
-                elif event.get('type') == 'complete':
-                    logger.info(f"[{request.dashboard_id}] === Workflow complete ===")
+                # Track if result came from cache
+                if event.get('type') == 'cache_hit':
+                    cached_result = True
                 yield f"data: {json.dumps(event)}\n\n"
+
+            # Log request completion
+            log_request_complete(request.dashboard_id, cached=cached_result)
 
         except Exception as e:
             error_detail = str(e)
             tb = traceback.format_exc()
-            logger.error(f"[{request.dashboard_id}] Analysis error: {error_detail}")
-            logger.error(f"[{request.dashboard_id}] Traceback:\n{tb}")
+            log_error(request.dashboard_id, error_detail)
+            logger.error(f"Traceback:\n{tb}")
             # Include actual error in response for debugging
             yield f"data: {json.dumps({'type': 'error', 'error': error_detail, 'traceback': tb})}\n\n"
 
