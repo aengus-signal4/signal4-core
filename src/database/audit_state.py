@@ -6,6 +6,10 @@ import argparse
 import logging
 import yaml
 import asyncio
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv(get_project_root() / '.env')
 from typing import Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -599,20 +603,28 @@ class StateAuditor:
             stitch_exists = self.check_stitch_files(content_id)
             self.logger.info(f"Stitched transcript: {'✅' if stitch_exists else '❌'}")
             
-            # Get database state
+            # Get database state and check duration coverage
+            duration_check = None
             with get_session() as session:
                 query = text("""
-                    SELECT 
-                        is_downloaded,
-                        is_converted,
-                        is_transcribed,
-                        is_diarized,
-                        is_stitched
-                    FROM content
-                    WHERE content_id = :content_id
+                    SELECT
+                        c.id,
+                        c.duration as expected_duration,
+                        c.is_downloaded,
+                        c.is_converted,
+                        c.is_transcribed,
+                        c.is_diarized,
+                        c.is_stitched,
+                        COUNT(cc.id) as chunk_count,
+                        COALESCE(MAX(cc.end_time), 0) as max_chunk_end
+                    FROM content c
+                    LEFT JOIN content_chunks cc ON c.id = cc.content_id
+                    WHERE c.content_id = :content_id
+                    GROUP BY c.id, c.duration, c.is_downloaded, c.is_converted,
+                             c.is_transcribed, c.is_diarized, c.is_stitched
                 """)
                 result = session.execute(query, {'content_id': content_id}).fetchone()
-                
+
                 if result:
                     self.logger.info("\n📊 Database State:")
                     self.logger.info(f"is_downloaded: {'✅' if result.is_downloaded else '❌'}")
@@ -620,7 +632,32 @@ class StateAuditor:
                     self.logger.info(f"is_transcribed: {'✅' if result.is_transcribed else '❌'}")
                     self.logger.info(f"is_diarized: {'✅' if result.is_diarized else '❌'}")
                     self.logger.info(f"is_stitched: {'✅' if result.is_stitched else '❌'}")
-            
+
+                    # Duration coverage check
+                    if result.expected_duration and result.expected_duration > 0 and result.chunk_count > 0:
+                        coverage_pct = (result.max_chunk_end / result.expected_duration) * 100
+                        self.logger.info(f"\n📏 Duration Coverage:")
+                        self.logger.info(f"Expected duration: {result.expected_duration:.1f}s")
+                        self.logger.info(f"Chunk coverage: {result.max_chunk_end:.1f}s ({result.chunk_count} chunks)")
+                        self.logger.info(f"Coverage: {coverage_pct:.1f}%")
+
+                        if coverage_pct < 90:
+                            self.logger.warning(f"⚠️  TRUNCATED AUDIO: Only {coverage_pct:.1f}% of expected duration covered!")
+                            duration_check = {
+                                'expected': result.expected_duration,
+                                'actual': result.max_chunk_end,
+                                'coverage_pct': coverage_pct,
+                                'truncated': True
+                            }
+                        else:
+                            self.logger.info("✅ Duration coverage OK")
+                            duration_check = {
+                                'expected': result.expected_duration,
+                                'actual': result.max_chunk_end,
+                                'coverage_pct': coverage_pct,
+                                'truncated': False
+                            }
+
             return {
                 'status': 'success',
                 'content_id': content_id,
@@ -628,7 +665,8 @@ class StateAuditor:
                 'main_audio': main_audio,
                 'chunks_exist': chunks_exist,
                 'diarization_exists': diarization_exists,
-                'stitch_exists': stitch_exists
+                'stitch_exists': stitch_exists,
+                'duration_check': duration_check
             }
             
         except Exception as e:
@@ -642,11 +680,158 @@ class StateAuditor:
         """Initialize the auditor with async operations"""
         await self.build_content_map()
 
+    async def audit_truncated_content(self, coverage_threshold: float = 0.9, reset: bool = False) -> Dict:
+        """
+        Find and optionally reset content with truncated audio extraction.
+
+        Args:
+            coverage_threshold: Minimum ratio of chunk coverage to expected duration (default 0.9 = 90%)
+            reset: If True, reset truncated items for reprocessing
+
+        Returns:
+            Dict with truncated content info and reset counts
+        """
+        try:
+            self.logger.info(f"\n🔍 Auditing for truncated audio (coverage < {coverage_threshold*100:.0f}%)")
+
+            with get_session() as session:
+                # Find content where chunk coverage is less than threshold of expected duration
+                query = text("""
+                    WITH chunk_coverage AS (
+                        SELECT
+                            c.id,
+                            c.content_id,
+                            c.title,
+                            c.duration as expected_duration,
+                            c.platform,
+                            c.is_transcribed,
+                            COUNT(cc.id) as chunk_count,
+                            COALESCE(MAX(cc.end_time), 0) as max_chunk_end
+                        FROM content c
+                        LEFT JOIN content_chunks cc ON c.id = cc.content_id
+                        WHERE c.is_converted = true
+                          AND c.duration > 60
+                        GROUP BY c.id, c.content_id, c.title, c.duration, c.platform, c.is_transcribed
+                        HAVING COUNT(cc.id) > 0
+                    )
+                    SELECT
+                        id,
+                        content_id,
+                        title,
+                        platform,
+                        expected_duration,
+                        max_chunk_end,
+                        chunk_count,
+                        (max_chunk_end / expected_duration) as coverage_ratio
+                    FROM chunk_coverage
+                    WHERE max_chunk_end / expected_duration < :threshold
+                    ORDER BY coverage_ratio ASC
+                """)
+
+                results = session.execute(query, {'threshold': coverage_threshold}).fetchall()
+
+                if not results:
+                    self.logger.info("✅ No truncated content found!")
+                    return {'status': 'success', 'truncated_count': 0, 'reset_count': 0}
+
+                self.logger.info(f"\n⚠️  Found {len(results)} content items with truncated audio:\n")
+
+                # Group by coverage bucket for summary
+                buckets = {'< 10%': [], '10-50%': [], '50-90%': []}
+                for row in results:
+                    pct = row.coverage_ratio * 100
+                    if pct < 10:
+                        buckets['< 10%'].append(row)
+                    elif pct < 50:
+                        buckets['10-50%'].append(row)
+                    else:
+                        buckets['50-90%'].append(row)
+
+                for bucket, items in buckets.items():
+                    if items:
+                        self.logger.info(f"  {bucket} coverage: {len(items)} items")
+
+                # Show some examples
+                self.logger.info(f"\nSample truncated items:")
+                for row in results[:10]:
+                    pct = row.coverage_ratio * 100
+                    self.logger.info(
+                        f"  {row.content_id} ({row.platform}): "
+                        f"{row.max_chunk_end:.0f}s / {row.expected_duration:.0f}s ({pct:.1f}%) "
+                        f"- {row.title[:50]}"
+                    )
+
+                if len(results) > 10:
+                    self.logger.info(f"  ... and {len(results) - 10} more")
+
+                reset_count = 0
+                if reset:
+                    self.logger.info(f"\n🔄 Resetting {len(results)} truncated items for reprocessing...")
+
+                    for row in results:
+                        # Delete theme classifications first (FK constraint)
+                        delete_theme_classifications = text("""
+                            DELETE FROM theme_classifications
+                            WHERE segment_id IN (
+                                SELECT id FROM embedding_segments WHERE content_id = :content_id
+                            )
+                        """)
+                        session.execute(delete_theme_classifications, {'content_id': row.id})
+
+                        # Delete existing embedding segments
+                        delete_segments = text("""
+                            DELETE FROM embedding_segments WHERE content_id = :content_id
+                        """)
+                        session.execute(delete_segments, {'content_id': row.id})
+
+                        # Delete existing sentences
+                        delete_sentences = text("""
+                            DELETE FROM sentences WHERE content_id = :content_id
+                        """)
+                        session.execute(delete_sentences, {'content_id': row.id})
+
+                        # Delete existing chunks
+                        delete_chunks = text("""
+                            DELETE FROM content_chunks WHERE content_id = :content_id
+                        """)
+                        session.execute(delete_chunks, {'content_id': row.id})
+
+                        # Reset content flags
+                        reset_content = text("""
+                            UPDATE content
+                            SET is_converted = false,
+                                is_transcribed = false,
+                                is_diarized = false,
+                                is_stitched = false,
+                                processing_state = 0,
+                                last_updated = NOW()
+                            WHERE id = :content_id
+                        """)
+                        session.execute(reset_content, {'content_id': row.id})
+                        reset_count += 1
+
+                        if reset_count % 100 == 0:
+                            self.logger.info(f"  Reset {reset_count}/{len(results)} items...")
+                            session.commit()
+
+                    session.commit()
+                    self.logger.info(f"✅ Reset {reset_count} items for reprocessing")
+
+                return {
+                    'status': 'success',
+                    'truncated_count': len(results),
+                    'reset_count': reset_count,
+                    'by_bucket': {k: len(v) for k, v in buckets.items()}
+                }
+
+        except Exception as e:
+            self.logger.error(f"Error auditing truncated content: {str(e)}")
+            return {'status': 'error', 'error': str(e)}
+
 def load_config() -> Dict:
-    """Load configuration from yaml file"""
-    config_path = get_config_path()
-    with open(config_path) as f:
-        return yaml.safe_load(f)
+    """Load configuration from yaml file with env var substitution"""
+    from src.utils.config import load_config as load_config_with_env
+    return load_config_with_env()
 
 async def main():
     """Main entry point for the script"""
@@ -656,12 +841,37 @@ async def main():
     parser.add_argument('--end-date', help='End date for audit (YYYY-MM-DD)')
     parser.add_argument('--fix', action='store_true', help='Fix inconsistencies found during audit')
     parser.add_argument('--content-id', help='Audit a single content item')
+    parser.add_argument('--audit-truncated', action='store_true',
+                       help='Find content with truncated audio extraction (coverage < 90%%)')
+    parser.add_argument('--reset-truncated', action='store_true',
+                       help='Reset truncated items for reprocessing (use with --audit-truncated)')
+    parser.add_argument('--coverage-threshold', type=float, default=0.9,
+                       help='Coverage threshold for truncation detection (default: 0.9 = 90%%)')
     args = parser.parse_args()
-    
+
+    # Setup console logging for visibility
+    import logging
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(logging.Formatter('%(message)s'))
+    logging.getLogger().addHandler(console_handler)
+    logging.getLogger().setLevel(logging.INFO)
+
     config = load_config()
     auditor = StateAuditor(config)
-    
+    # Ensure auditor logger outputs to console
+    auditor.logger.addHandler(console_handler)
+
     try:
+        if args.audit_truncated:
+            # Audit for truncated audio
+            result = await auditor.audit_truncated_content(
+                coverage_threshold=args.coverage_threshold,
+                reset=args.reset_truncated
+            )
+            print(f"\nResult: {result}")
+            return
+
         if args.content_id:
             # Single content mode - only audit that content item
             result = await auditor.audit_single_content(args.content_id)

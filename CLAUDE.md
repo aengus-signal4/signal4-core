@@ -222,6 +222,14 @@ download -> convert -> transcribe -> diarize -> stitch -> segment -> cleanup
 
 Each stage creates a task in the queue. Workers pick up tasks based on their configured capabilities.
 
+### Stitch Sub-Stages (Stage 12-14)
+
+The stitch pipeline has 14 sub-stages in `src/processing_steps/stitch_steps/`:
+
+- **Stage 12 (Output)**: Generates `Sentence` records with word-level timestamps. Saves to database. Speaker turns are generated for debugging only (not saved to DB).
+- **Stage 13 (Emotion)**: Enriches sentences with emotion detection (emotion, arousal, valence, dominance).
+- **Stage 14 (Segment)**: Creates `EmbeddingSegment` records from sentences, populates `source_sentence_ids`.
+
 ## Configuration
 
 See `config/config.yaml` for:
@@ -252,9 +260,27 @@ This repo owns the schema. Key models in `src/database/models.py`:
 - `Content` - Media items (videos, podcasts)
 - `ContentChunk` - Audio chunks for processing
 - `Speaker` - Identified speakers
-- `SpeakerTranscription` - Speaker-attributed text
+- `Sentence` - Atomic transcript unit with sentence-level granularity (primary)
+- `SpeakerTranscription` - Speaker turns (deprecated, kept for legacy content)
 - `EmbeddingSegment` - Text segments with embeddings
 - `TaskQueue` - Processing task queue
+
+### Transcript Data Model
+
+**Sentences** are the primary atomic unit for transcript data. Each sentence has:
+- `sentence_index` - Global position within content (0, 1, 2...)
+- `turn_index` - Which speaker turn it belongs to
+- `sentence_in_turn` - Position within the turn (0, 1, 2...)
+- `text`, `start_time`, `end_time` - Content and timing
+- `emotion`, `emotion_confidence`, `arousal`, `valence`, `dominance` - Emotion data (Stage 13)
+
+Speaker turns can be reconstructed by grouping sentences on `(content_id, turn_index)`.
+
+**SpeakerTranscription** (deprecated) - The old speaker turn model. No longer populated for new content. ~890 legacy items have speaker turns but no sentences.
+
+**EmbeddingSegment** references:
+- `source_sentence_ids` - Array of sentence IDs (new, primary)
+- `source_transcription_ids` - Array of speaker turn IDs (deprecated, empty for new content)
 
 When changing schema:
 1. Edit `src/database/models.py`
