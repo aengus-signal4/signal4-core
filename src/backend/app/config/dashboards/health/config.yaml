@@ -41,6 +41,7 @@ filters:
 
 privacy:
   allowed_projects: [Health, Big_Channels]
+  discourse_projects: [Health]
   allow_downloads: true
   show_speaker_names: true
   audit_searches: false

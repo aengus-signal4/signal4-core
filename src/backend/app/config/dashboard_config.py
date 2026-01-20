@@ -120,6 +120,11 @@ class DashboardConfig:
         return self.privacy.get('allowed_projects', [self.project])
 
     @property
+    def discourse_projects(self) -> list:
+        """Projects for discourse_summary workflow (defaults to allowed_projects)"""
+        return self.privacy.get('discourse_projects', self.allowed_projects)
+
+    @property
     def allow_downloads(self) -> bool:
         return self.privacy.get('allow_downloads', True)
 
