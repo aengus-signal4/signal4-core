@@ -1,5 +1,12 @@
 """
 SQL Executor - Executes PostgreSQL functions
+
+SQL function definitions are documented in:
+    src/database/sql/cache_refresh_functions.sql
+
+Currently used functions:
+    - refresh_embedding_cache_7d(): Hourly cache refresh (7-day window)
+    - refresh_embedding_cache_30d(): 4x daily cache refresh (30-day window)
 """
 import asyncio
 import logging
