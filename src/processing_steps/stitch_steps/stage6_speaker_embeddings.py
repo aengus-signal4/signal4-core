@@ -53,7 +53,6 @@ setup_env()
 
 import logging
 import time
-import aiohttp
 import numpy as np
 import pandas as pd
 from typing import Dict, Any, Optional, List, Tuple

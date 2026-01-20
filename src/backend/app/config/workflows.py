@@ -390,6 +390,118 @@ WORKFLOWS: Dict[str, List[Dict[str, Any]]] = {
         }
     ],
 
+    "discourse_summary": [
+        {
+            "step": "retrieve_all_segments",
+            "config": {
+                "time_window_days": 14,
+                "must_be_embedded": True,
+                "must_be_stitched": True
+            }
+        },
+        {
+            "step": "corpus_analysis",
+            "config": {
+                "include_duration": True,
+                "include_episode_count": True
+            }
+        },
+        {
+            "step": "extract_themes",
+            "config": {
+                "method": "hdbscan",
+                "min_cluster_size": 50,
+                "max_themes": 10,
+                "min_theme_percentage": 4.0,
+                "use_faiss": True
+            }
+        },
+        {
+            "step": "select_segments",
+            "config": {
+                "strategy": "diversity",
+                "n": 15
+            }
+        },
+        {
+            "step": "generate_summary",
+            "config": {
+                "template": "theme_summary_with_metrics",
+                "level": "theme",
+                "max_concurrent": 10,
+                "max_tokens": 500
+            }
+        },
+        {
+            "step": "generate_summary",
+            "config": {
+                "template": "discourse_portrait",
+                "level": "corpus",
+                "max_tokens": 1000,
+                "include_all_theme_summaries": True
+            }
+        }
+    ],
+
+    # Local LLM variant of discourse_summary (uses tier_2 MLX model instead of Grok)
+    "discourse_summary_local": [
+        {
+            "step": "retrieve_all_segments",
+            "config": {
+                "time_window_days": 14,
+                "must_be_embedded": True,
+                "must_be_stitched": True
+            }
+        },
+        {
+            "step": "corpus_analysis",
+            "config": {
+                "include_duration": True,
+                "include_episode_count": True
+            }
+        },
+        {
+            "step": "extract_themes",
+            "config": {
+                "method": "hdbscan",
+                "min_cluster_size": 50,
+                "max_themes": 10,
+                "min_theme_percentage": 4.0,
+                "use_faiss": True
+            }
+        },
+        {
+            "step": "select_segments",
+            "config": {
+                "strategy": "diversity",
+                "n": 15
+            }
+        },
+        {
+            "step": "generate_summary",
+            "config": {
+                "template": "theme_summary_with_metrics",
+                "level": "theme",
+                "max_concurrent": 10,
+                "max_tokens": 500,
+                "model": "tier_2",
+                "backend": "local"
+            }
+        },
+        {
+            "step": "generate_summary",
+            "config": {
+                "template": "discourse_portrait",
+                "level": "corpus",
+                "max_tokens": 1000,
+                "include_all_theme_summaries": True,
+                "model": "tier_2",
+                "backend": "local"
+            }
+        }
+    ],
+
+    # Alias for backward compatibility
     "landing_page_overview": [
         {
             "step": "retrieve_all_segments",
@@ -400,6 +512,13 @@ WORKFLOWS: Dict[str, List[Dict[str, Any]]] = {
             }
         },
         {
+            "step": "corpus_analysis",
+            "config": {
+                "include_duration": True,
+                "include_episode_count": True
+            }
+        },
+        {
             "step": "extract_themes",
             "config": {
                 "method": "hdbscan",
@@ -407,13 +526,6 @@ WORKFLOWS: Dict[str, List[Dict[str, Any]]] = {
                 "max_themes": 8,
                 "min_theme_percentage": 5.0,
                 "use_faiss": True
-            }
-        },
-        {
-            "step": "corpus_analysis",
-            "config": {
-                "include_duration": True,
-                "include_episode_count": True
             }
         },
         {
@@ -535,6 +647,8 @@ def list_workflows() -> Dict[str, str]:
         "hierarchical_summary": "Hierarchical: retrieve → cluster themes → summarize themes → meta-summary",
         "hierarchical_with_subthemes": "Hierarchical with sub-themes: retrieve → themes → sub-themes → summaries at all levels",
         "deep_analysis": "Deep analysis: stance variation → retrieve → themes → quantitative (with baseline) → summaries",
+        "discourse_summary": "Discourse summary: retrieve all → corpus stats → cluster into 6-10 themes → select best segments → parallel theme summaries → overall discourse portrait",
+        "discourse_summary_local": "Discourse summary (LOCAL LLM): Same as discourse_summary but uses local tier_2 MLX model (30B Qwen3) instead of Grok API",
         "landing_page_overview": "Landing page: retrieve all → discover major themes (FAISS + HDBSCAN) → corpus stats → parallel theme analysis with sub-themes → report-style summaries"
     }
 

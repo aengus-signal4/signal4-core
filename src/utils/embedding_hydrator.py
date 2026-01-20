@@ -1443,5 +1443,14 @@ IMPORTANT:
 
     logger.info(f"Hydration result: {result}")
 
+    # Print machine-readable summary for orchestrator
+    import json
+    summary = {
+        'primary_embeddings_generated': result.get('primary_generated', 0),
+        'alternative_embeddings_generated': result.get('alternative_generated', 0),
+        'total_segments_processed': result.get('total_segments', 0)
+    }
+    print(f"TASK_SUMMARY: {json.dumps(summary)}")
+
     # Exit with appropriate code
     sys.exit(0 if result.get('status') == 'success' else 1)

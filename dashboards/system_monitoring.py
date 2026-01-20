@@ -1487,8 +1487,109 @@ def render_quick_status_tab():
 # Services Tab Render Functions
 # =============================================================================
 
+def render_scheduled_tasks_summary():
+    """Render a summary of scheduled tasks at the top of Services tab"""
+    st.subheader("Scheduled Tasks")
+
+    tasks_data = fetch_api("/api/scheduled_tasks/status")
+
+    if "error" in tasks_data:
+        st.error(f"Failed to fetch scheduled tasks: {tasks_data['error']}")
+        return
+
+    tasks = tasks_data.get('tasks', {})
+    if not tasks:
+        st.info("No scheduled tasks configured")
+        return
+
+    # Build task status rows
+    rows = []
+    for task_id, task in tasks.items():
+        last_run = task.get('last_run', {})
+        last_time = last_run.get('time')
+        result = last_run.get('result')
+        duration = last_run.get('duration_seconds')
+        summary = last_run.get('summary')
+        error = last_run.get('error')
+
+        # Format last run time
+        if last_time:
+            try:
+                dt = datetime.fromisoformat(last_time.replace('Z', '+00:00'))
+                time_ago = datetime.now(timezone.utc) - dt
+                if time_ago.total_seconds() < 3600:
+                    time_str = f"{int(time_ago.total_seconds() / 60)}m ago"
+                elif time_ago.total_seconds() < 86400:
+                    time_str = f"{int(time_ago.total_seconds() / 3600)}h ago"
+                else:
+                    time_str = f"{int(time_ago.total_seconds() / 86400)}d ago"
+            except:
+                time_str = "Unknown"
+        else:
+            time_str = "Never"
+
+        # Format duration
+        if duration:
+            if duration < 60:
+                dur_str = f"{duration:.0f}s"
+            else:
+                dur_str = f"{duration/60:.1f}m"
+        else:
+            dur_str = "-"
+
+        # Status indicator
+        if task.get('is_running'):
+            status = "Running"
+        elif result == 'success':
+            status = "Success"
+        elif result == 'failed':
+            status = "Failed"
+        elif result == 'error':
+            status = "Error"
+        else:
+            status = "Pending"
+
+        # Build summary string from the summary dict
+        summary_str = ""
+        if summary:
+            # Extract key metrics based on task type
+            if 'total_tasks_created' in summary:
+                summary_str = f"{summary['total_tasks_created']} tasks created"
+            elif 'total_segments_processed' in summary:
+                summary_str = f"{summary['total_segments_processed']} segments"
+            elif 'phase1_speakers_identified' in summary:
+                summary_str = f"{summary.get('phase1_speakers_identified', 0)} speakers"
+            elif 'phase2_evidence_certain' in summary:
+                summary_str = f"{summary.get('phase2_evidence_certain', 0)} with evidence"
+            else:
+                # Generic: show first numeric value
+                for k, v in summary.items():
+                    if isinstance(v, (int, float)) and v > 0:
+                        summary_str = f"{v} {k.replace('_', ' ')}"
+                        break
+        elif error:
+            summary_str = f"Error: {error[:50]}..." if len(str(error)) > 50 else f"Error: {error}"
+
+        rows.append({
+            'Task': task.get('name', task_id),
+            'Status': status,
+            'Last Run': time_str,
+            'Duration': dur_str,
+            'Summary': summary_str or "-"
+        })
+
+    # Sort: running first, then by last run time
+    df = pd.DataFrame(rows)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+
 def render_services_tab():
     """Render the Services tab - system health and service status"""
+
+    # Scheduled Tasks Summary at top
+    render_scheduled_tasks_summary()
 
     # System Health Section
     st.subheader("System Health")
@@ -1589,65 +1690,6 @@ def render_services_tab():
 
     model_df = pd.DataFrame(model_server_data)
     st.dataframe(model_df, use_container_width=True, hide_index=True)
-
-    st.divider()
-
-    # Scheduled Services (Background Jobs)
-    st.subheader("Scheduled Services")
-
-    scheduled_tasks_data = fetch_api("/api/scheduled_tasks")
-
-    if "error" in scheduled_tasks_data:
-        st.warning(f"Unable to fetch scheduled tasks: {scheduled_tasks_data.get('error')}")
-    else:
-        tasks = scheduled_tasks_data.get('tasks', {})
-
-        if tasks:
-            service_rows = []
-            for task_id, task_info in sorted(tasks.items(), key=lambda x: x[1].get('name', x[0]) if x[1] else x[0]):
-                if not task_info:
-                    continue
-
-                last_run = task_info.get('last_run', {})
-                schedule = task_info.get('schedule', {})
-                schedule_config = schedule.get('config', {})
-
-                # Determine status
-                if task_info.get('is_running'):
-                    status = ':large_green_circle: Running'
-                elif not task_info.get('enabled'):
-                    status = ':white_circle: Disabled'
-                elif last_run.get('result') == 'success':
-                    status = ':white_check_mark: Idle'
-                elif last_run.get('result') in ['failed', 'error']:
-                    status = ':x: Failed'
-                else:
-                    status = ':hourglass: Pending'
-
-                # Format last run time
-                last_run_time = last_run.get('time')
-                last_run_display = format_time_ago(last_run_time) if last_run_time else "Never"
-
-                # Format next run
-                next_run = task_info.get('next_run_time')
-                if next_run and task_info.get('enabled'):
-                    next_run_display = format_time_until(next_run)
-                else:
-                    next_run_display = "N/A"
-
-                service_rows.append({
-                    'Service': task_info.get('name', task_id),
-                    'Schedule': format_schedule_description(schedule_config),
-                    'Status': status,
-                    'Last Run': last_run_display,
-                    'Next Run': next_run_display,
-                })
-
-            if service_rows:
-                services_df = pd.DataFrame(service_rows)
-                st.dataframe(services_df, use_container_width=True, hide_index=True)
-        else:
-            st.info("No scheduled services configured")
 
     st.divider()
 

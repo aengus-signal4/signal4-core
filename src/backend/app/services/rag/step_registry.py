@@ -315,7 +315,13 @@ STEP_REGISTRY: Dict[str, StepMetadata] = {
             "model": {
                 "type": "string",
                 "default": "grok-4-fast-non-reasoning-latest",
-                "description": "LLM model to use"
+                "description": "LLM model to use. For xAI: 'grok-2-1212', 'grok-4-fast-non-reasoning-latest'. For local: 'tier_1' (80B), 'tier_2' (30B), 'tier_3' (4B)"
+            },
+            "backend": {
+                "type": "string",
+                "enum": ["xai", "local"],
+                "default": "xai",
+                "description": "LLM backend: 'xai' for Grok API, 'local' for local MLX model servers"
             },
             "temperature": {
                 "type": "float",
@@ -577,6 +583,10 @@ def build_pipeline_from_steps(
         if step_name in ["retrieve_segments", "quantitative_analysis", "retrieve_segments_by_search",
                          "retrieve_all_segments", "rerank_segments"]:
             config = {**config, **global_filters}
+
+        # Pass use_local_llm to LLM generation steps (summaries and query expansion)
+        if step_name in ["generate_summary", "generate_summaries", "expand_query"] and global_filters.get("use_local_llm"):
+            config = {**config, "backend": "local"}
 
         # Get method from pipeline
         method = getattr(pipeline, method_name)

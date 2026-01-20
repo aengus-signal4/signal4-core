@@ -177,6 +177,9 @@ class AnalysisRequest(BaseModel):
     # Streaming options
     verbose: bool = Field(False, description="If True, emit progress and partial events. If False, only emit result and complete events.")
 
+    # LLM backend selection
+    use_local_llm: bool = Field(False, description="If True, use local LLM balancer instead of xAI API")
+
 
 # ============================================================================
 # Query API Models (Read-Only Segment Query)

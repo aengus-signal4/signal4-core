@@ -105,8 +105,28 @@ class TaskSummary:
         if len(self.projects) > 1:
             logger.info("=" * len(header))
             logger.info(f"{'TOTAL':<{project_width}} | {'(all projects)':<{type_width}} | {total_tasks:>{count_width}}")
-        
+
         logger.info("=" * 60)
+
+    def to_dict(self) -> Dict:
+        """Return a JSON-serializable summary dictionary"""
+        total_tasks = 0
+        tasks_by_type: Dict[str, int] = defaultdict(int)
+        tasks_by_project: Dict[str, int] = {}
+
+        for project, task_types in self.projects.items():
+            project_total = sum(task_types.values())
+            tasks_by_project[project] = project_total
+            total_tasks += project_total
+            for task_type, count in task_types.items():
+                tasks_by_type[task_type] += count
+
+        return {
+            'total_tasks_created': total_tasks,
+            'tasks_by_type': dict(tasks_by_type),
+            'tasks_by_project': tasks_by_project,
+            'projects_processed': len(self.projects)
+        }
 
 class TaskCreator:
     """Creates and manages tasks for content processing."""
@@ -2232,9 +2252,12 @@ async def main():
 
     # Print final summary
     task_summary.print_summary()
-    
+
     # Final cleanup of any duplicate tasks
     await remove_duplicate_tasks()
+
+    # Print machine-readable summary for orchestrator
+    print(f"TASK_SUMMARY: {json.dumps(task_summary.to_dict())}")
 
 if __name__ == '__main__':
     asyncio.run(main()) 

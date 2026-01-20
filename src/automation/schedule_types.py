@@ -31,6 +31,9 @@ class ScheduleState:
     is_running: bool = False
     # For time_of_day with days_interval
     last_run_date: Optional[str] = None  # YYYY-MM-DD format
+    # Execution output (captured from stdout/stderr)
+    last_error: Optional[str] = None  # Error message if failed
+    last_summary: Optional[Dict[str, Any]] = None  # Parsed JSON summary from script output
 
 
 class BaseSchedule:

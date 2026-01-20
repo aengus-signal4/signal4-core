@@ -120,10 +120,7 @@ The backend exposes **3 core endpoints** for all functionality:
 # Basic media retrieval
 GET /api/media/content/{content_id}?start_time=10&end_time=30
 
-# With transcription (batch mode)
-GET /api/media/content/{content_id}?start_time=10&end_time=30&transcribe=true
-
-# Streaming mode (SSE)
+# With transcription (streaming SSE)
 GET /api/media/content/{content_id}?start_time=10&end_time=30&transcribe=true&stream=true
 ```
 
@@ -133,7 +130,7 @@ GET /api/media/content/{content_id}?start_time=10&end_time=30&transcribe=true&st
 - Optional AssemblyAI transcription with speaker labels
 - Translation support (English + French)
 - In-memory caching (500MB, 5min TTL)
-- Two modes: Batch (JSON) or Streaming (SSE)
+- SSE streaming for transcription results
 
 **Parameters:**
 - `media_type`: `auto` (default), `video`, `audio`
@@ -163,14 +160,6 @@ POST /api/analysis/stream
   "dashboard_id": "cprmv-practitioner",
   "workflow": "simple_rag",
   "verbose": true
-}
-
-# Batch mode
-POST /api/analysis
-{
-  "query": "Pierre Poilievre",
-  "dashboard_id": "cprmv-practitioner",
-  "workflow": "simple_rag"
 }
 
 # Custom pipeline

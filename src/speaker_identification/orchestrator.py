@@ -701,10 +701,38 @@ Examples:
     try:
         if args.channel_id:
             # Single channel mode
-            await orchestrator.run(channel_id=args.channel_id)
+            stats = await orchestrator.run(channel_id=args.channel_id)
         else:
             # Pass projects list - orchestrator handles Phase 1 globally, Phase 2+ per-project
-            await orchestrator.run(projects=projects_to_process)
+            stats = await orchestrator.run(projects=projects_to_process)
+
+        # Print machine-readable summary for orchestrator
+        import json
+        summary = {
+            'phases_run': args.phases,
+            'total_time_minutes': round(stats.get('total_time', 0) / 60, 1)
+        }
+        # Add phase-specific stats
+        if 1 in args.phases:
+            p1 = stats.get('phase1', {})
+            summary['phase1_episodes_processed'] = p1.get('episodes_processed', 0)
+            summary['phase1_speakers_identified'] = p1.get('speakers_identified', 0)
+        if 2 in args.phases:
+            p2 = stats.get('phase2', {})
+            summary['phase2_evidence_certain'] = p2.get('evidence_found_certain', 0)
+            summary['phase2_evidence_none'] = p2.get('evidence_none', 0)
+        if 3 in args.phases:
+            p3 = stats.get('phase3', {})
+            summary['phase3_clusters_created'] = p3.get('clusters_created', 0)
+            summary['phase3_speakers_assigned'] = p3.get('speakers_assigned', 0)
+        if 4 in args.phases:
+            p4 = stats.get('phase4', {})
+            summary['phase4_merges_confirmed'] = p4.get('llm_confirmed_same', 0)
+            summary['phase4_merges_executed'] = p4.get('merges_executed', 0)
+        if 5 in args.phases:
+            p5 = stats.get('phase5', {})
+            summary['phase5_identities_hydrated'] = p5.get('identities_hydrated', 0)
+        print(f"TASK_SUMMARY: {json.dumps(summary)}")
 
     except KeyboardInterrupt:
         logger.info("\nInterrupted by user")

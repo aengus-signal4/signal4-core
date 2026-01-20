@@ -30,10 +30,11 @@ def setup_orchestrator_logging(log_dir: Optional[Path] = None) -> Tuple[logging.
     error_formatter = logging.Formatter('%(asctime)s %(message)s')
     error_file_handler.setFormatter(error_formatter)
     error_logger.addHandler(error_file_handler)
-    # Add console handler for errors
+    # Add console handler for errors (with immediate flush)
     error_console_handler = logging.StreamHandler()
     error_console_handler.setLevel(logging.ERROR)
     error_console_handler.setFormatter(console_formatter)
+    error_console_handler.stream.reconfigure(line_buffering=True)  # Flush after each line
     error_logger.addHandler(error_console_handler)
 
     # Completion logger - file + console
@@ -46,10 +47,11 @@ def setup_orchestrator_logging(log_dir: Optional[Path] = None) -> Tuple[logging.
     completion_formatter = logging.Formatter('%(asctime)s [%(message)s')
     completion_file_handler.setFormatter(completion_formatter)
     completion_logger.addHandler(completion_file_handler)
-    # Add console handler for completions
+    # Add console handler for completions (with immediate flush)
     completion_console_handler = logging.StreamHandler()
     completion_console_handler.setLevel(logging.INFO)
     completion_console_handler.setFormatter(console_formatter)
+    completion_console_handler.stream.reconfigure(line_buffering=True)  # Flush after each line
     completion_logger.addHandler(completion_console_handler)
 
     # Hourly run logger (file only - not needed on console)
@@ -104,24 +106,26 @@ class TaskLogger:
         self.error_logger = error_logger
         self.main_logger = main_logger
     
-    def log_completion(self, worker_id: str, task_type: str, content_id: str, 
+    def log_completion(self, worker_id: str, task_type: str, content_id: str,
                       chunk_index: Optional[int] = None, time_taken: float = 0.0):
-        """Log task completion to dedicated file"""
+        """Log task completion to dedicated file and console"""
         try:
             chunk_str = f" (chunk {chunk_index})" if chunk_index is not None else ""
             message = f"[{worker_id}] [{task_type}] Task completed: {content_id}{chunk_str} ({time_taken:.1f}s)"
+            # Only log to completion_logger (has both file and console handlers)
+            # Don't also log to main_logger to avoid duplicate console output
             self.completion_logger.info(message)
-            self.main_logger.info(message)
         except Exception as e:
             self.main_logger.error(f"Error logging task completion: {str(e)}", exc_info=True)
     
     def log_error(self, worker_id: str, task_type: str, content_id: str, error_details: str,
                   chunk_index: Optional[int] = None, time_taken: float = 0.0):
-        """Log task error to dedicated file"""
+        """Log task error to dedicated file and console"""
         try:
             chunk_str = f" (chunk {chunk_index})" if chunk_index is not None else ""
             message = f"[{worker_id}] [{task_type}] Task error: {content_id}{chunk_str} Error: {error_details} ({time_taken:.1f}s)"
+            # Only log to error_logger (has both file and console handlers)
+            # Don't also log to main_logger to avoid duplicate console output
             self.error_logger.error(message)
-            self.main_logger.error(message)
         except Exception as e:
             self.main_logger.error(f"Error logging task error to file: {str(e)}", exc_info=True)

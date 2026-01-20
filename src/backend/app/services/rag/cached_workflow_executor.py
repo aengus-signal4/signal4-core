@@ -424,7 +424,7 @@ class CachedWorkflowExecutor:
 
         logger.debug(
             f"quantitative_analysis: {quantitative_metrics['total_segments']} segments, "
-            f"centrality={quantitative_metrics.get('discourse_centrality', {}).get('score', 0):.2f} (fresh)"
+            f"centrality={quantitative_metrics.get('discourse_centrality', {}).get('level', 0)}/5 (fresh)"
         )
 
         yield {'type': 'progress', 'message': 'Quantitative analysis complete'}
@@ -693,9 +693,9 @@ class CachedWorkflowExecutor:
         elif step_name == "quantitative_analysis":
             metrics = data.get("quantitative_metrics") or {}
             seg_count = metrics.get("total_segments", 0)
-            centrality = (metrics.get("discourse_centrality") or {}).get("score")
-            if centrality is not None:
-                details = f"{seg_count} segments, centrality={centrality:.2f}"
+            centrality = metrics.get("discourse_centrality") or {}
+            if centrality.get("level") is not None:
+                details = f"{seg_count} segments, centrality={centrality['level']}/5"
             else:
                 details = f"{seg_count} segments"
 

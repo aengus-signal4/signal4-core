@@ -1215,7 +1215,10 @@ class AnalysisPipeline:
 
                 # If no filters in context, get from dashboard config
                 if "projects" not in baseline_filters and self.config:
-                    if hasattr(self.config, 'project'):
+                    # Use allowed_projects (what searches can access) for baseline
+                    if hasattr(self.config, 'allowed_projects') and self.config.allowed_projects:
+                        baseline_filters["projects"] = self.config.allowed_projects
+                    elif hasattr(self.config, 'project') and self.config.project:
                         baseline_filters["projects"] = [self.config.project]
                 if "languages" not in baseline_filters and self.config and hasattr(self.config, 'languages'):
                     baseline_filters["languages"] = self.config.languages
@@ -1264,7 +1267,7 @@ class AnalysisPipeline:
             if metrics.get('discourse_centrality'):
                 logger.info(
                     f"Quantitative analysis complete: {metrics['total_segments']} segments, "
-                    f"centrality={metrics['discourse_centrality']['score']:.2f}"
+                    f"centrality={metrics['discourse_centrality']['level']}/5"
                 )
             else:
                 logger.info(
@@ -2460,7 +2463,7 @@ async def compute_fresh_quantitative_analysis(
 
     logger.info(
         f"Computed fresh quantitative analysis: {metrics['total_segments']} segments, "
-        f"centrality={metrics.get('discourse_centrality', {}).get('score', 0):.2f}"
+        f"centrality={metrics.get('discourse_centrality', {}).get('level', 0)}/5"
     )
 
     return metrics

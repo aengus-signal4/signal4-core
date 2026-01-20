@@ -166,6 +166,8 @@ class ScheduledTaskManager:
                         task.state.last_run_result = task_state.get('last_run_result')
                         task.state.last_duration_seconds = task_state.get('last_duration_seconds')
                         task.state.last_run_date = task_state.get('last_run_date')
+                        task.state.last_error = task_state.get('last_error')
+                        task.state.last_summary = task_state.get('last_summary')
 
                 logger.info(f"Loaded state for {len(tasks_state)} tasks")
 
@@ -188,7 +190,9 @@ class ScheduledTaskManager:
                     'last_run_time': task.state.last_run_time.isoformat() if task.state.last_run_time else None,
                     'last_run_result': task.state.last_run_result,
                     'last_duration_seconds': task.state.last_duration_seconds,
-                    'last_run_date': task.state.last_run_date
+                    'last_run_date': task.state.last_run_date,
+                    'last_error': task.state.last_error,
+                    'last_summary': task.state.last_summary
                 }
 
             with open(self.state_file, 'w') as f:
@@ -279,6 +283,26 @@ class ScheduledTaskManager:
                 logger.error(f"Error in scheduler loop: {e}", exc_info=True)
                 await asyncio.sleep(60)
 
+    def _parse_task_summary(self, stdout: str) -> Optional[Dict[str, Any]]:
+        """Parse TASK_SUMMARY JSON from script output.
+
+        Scripts should print a line like:
+        TASK_SUMMARY: {"items_processed": 100, "duration_minutes": 5.2, ...}
+        """
+        if not stdout:
+            return None
+
+        for line in stdout.split('\n'):
+            line = line.strip()
+            if line.startswith('TASK_SUMMARY:'):
+                try:
+                    json_str = line[len('TASK_SUMMARY:'):].strip()
+                    return json.loads(json_str)
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse TASK_SUMMARY: {e}")
+                    return None
+        return None
+
     async def _execute_task(self, task_id: str):
         """Execute a single task"""
         task = self.tasks.get(task_id)
@@ -308,8 +332,16 @@ class ScheduledTaskManager:
             task.state.last_duration_seconds = result.duration_seconds
             task.state.last_run_date = result.end_time.strftime('%Y-%m-%d')
 
+            # Capture error message
+            task.state.last_error = result.error if not result.success else None
+
+            # Parse summary from stdout
+            stdout = result.output.get('stdout', '') if result.output else ''
+            task.state.last_summary = self._parse_task_summary(stdout)
+
             if result.success:
-                logger.info(f"COMPLETED TASK {task_id}: success in {result.duration_seconds:.1f}s")
+                summary_info = f" - {task.state.last_summary}" if task.state.last_summary else ""
+                logger.info(f"COMPLETED TASK {task_id}: success in {result.duration_seconds:.1f}s{summary_info}")
             else:
                 logger.error(f"COMPLETED TASK {task_id}: failed - {result.error}")
 
@@ -320,6 +352,8 @@ class ScheduledTaskManager:
             logger.error(f"COMPLETED TASK {task_id}: error - {e}", exc_info=True)
             task.state.last_run_time = datetime.now(timezone.utc)
             task.state.last_run_result = 'error'
+            task.state.last_error = str(e)
+            task.state.last_summary = None
             self._save_state()
 
         finally:
@@ -394,7 +428,9 @@ class ScheduledTaskManager:
             'last_run': {
                 'time': task.state.last_run_time.isoformat() if task.state.last_run_time else None,
                 'result': task.state.last_run_result,
-                'duration_seconds': task.state.last_duration_seconds
+                'duration_seconds': task.state.last_duration_seconds,
+                'error': task.state.last_error,
+                'summary': task.state.last_summary
             },
             'next_run_time': next_run.isoformat() if next_run else None,
             'timeout_seconds': task.timeout_seconds

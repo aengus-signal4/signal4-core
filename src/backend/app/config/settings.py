@@ -34,6 +34,10 @@ DATABASE_URL = _get_database_url()
 XAI_API_KEY = os.getenv('XAI_API_KEY', '')
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY', '')
 
+# Local LLM Backend (LLM Balancer)
+# URL for the local LLM balancer that routes to MLX model servers
+LLM_BACKEND_URL = os.getenv('LLM_BACKEND_URL', 'http://10.0.0.4:8002')
+
 # Server
 HOST = os.getenv('HOST', '0.0.0.0')
 PORT = int(os.getenv('PORT', '8002'))

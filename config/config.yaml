@@ -507,7 +507,7 @@ processing:
       eth: 10.0.0.209
       wifi: 10.0.0.99
       enabled: true
-      task_types: ["transcribe:1","diarize:1","convert:1"]
+      task_types: ["stitch:1","transcribe:1","convert:1"]
       max_concurrent_tasks: 1
       type: "worker"
       services:
@@ -519,7 +519,7 @@ processing:
       eth: 10.0.0.4
       wifi: 10.0.0.215
       enabled: true
-      task_types: ["download_rumble:1","download_podcast:1","download_youtube:1","transcribe:1"] # "cleanup:1",
+      task_types: ["download_rumble:1","download_podcast:1","download_youtube:1","diarize:1"] # "cleanup:1",
       max_concurrent_tasks: 1
       type: "head"
       services:
@@ -808,7 +808,7 @@ scheduled_tasks:
         type: cli
         command: "python"
         args: ["-m", "src.automation.task_creation_manager", "--steps", "index_podcast", "download_podcast"]
-      timeout_seconds: 3600
+      timeout_seconds: 21600  # 6 hours
 
     youtube_index_download:
       name: "YouTube Index & Download"
@@ -863,23 +863,7 @@ scheduled_tasks:
         type: cli
         command: "python"
         args: ["-m", "src.speaker_identification.orchestrator", "--phases", "2", "--all-active", "--apply", "--batch-size", "10000"]
-      timeout_seconds: 7200
-
-    # === Monthly Tasks ===
-
-    podcast_collection:
-      name: "Podcast Chart Collection"
-      description: "Collect monthly podcast charts, enrich new podcasts, and send summary email"
-      enabled: true
-      schedule:
-        type: time_of_day
-        hours: [2]  # Run at 2 AM on first of month
-        days_interval: 30  # Approximately monthly (will run first matching day)
-      executor:
-        type: cli
-        command: "python"
-        args: ["-m", "src.ingestion.podcast_pipeline", "--phase", "all", "--email", "aengus@signal4.ca"]
-      timeout_seconds: 21600
+      timeout_seconds: 259200  # 72 hours - can take a long time
 
     # === Backend Cache & Clustering (replaces pg_cron) ===
 

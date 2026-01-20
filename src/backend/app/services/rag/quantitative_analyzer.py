@@ -223,7 +223,7 @@ class QuantitativeAnalyzer:
             logger.info(
                 f"Analysis complete: {total_segments} segments, "
                 f"{unique_videos} videos, {unique_channels} channels, "
-                f"centrality={discourse_centrality['score']:.2f}"
+                f"centrality={discourse_centrality['level']}/5 ({discourse_centrality['label']})"
             )
         else:
             logger.info(
@@ -425,75 +425,58 @@ class QuantitativeAnalyzer:
         """
         Calculate discourse centrality - how central is this topic to the discourse.
 
-        Requires baseline_segments to be provided (either list of segments or dict with stats).
-
-        Combines:
-        - Coverage: % of channels/videos discussing this topic
-        - Volume: Absolute number of segments
-
-        Returns score 0-1 and 5-level interpretation.
+        Returns a simple 0-5 level scale based on channel coverage:
+        - 5: Very common (>50% of channels)
+        - 4: Common (30-50% of channels)
+        - 3: Moderate (15-30% of channels)
+        - 2: Uncommon (5-15% of channels)
+        - 1: Rare (1-5% of channels)
+        - 0: Very rare (<1% of channels)
         """
         # Check if baseline_segments is already aggregated stats (dict)
         if isinstance(baseline_segments, dict):
-            # Fast path: use pre-aggregated stats
-            baseline_total = baseline_segments.get('total_segments', 0)
-            baseline_videos = baseline_segments.get('unique_videos', 0)
             baseline_channels = baseline_segments.get('unique_channels', 0)
-            logger.info(f"Using pre-aggregated baseline stats: {baseline_total} segments, {baseline_videos} videos, {baseline_channels} channels")
         else:
             # Legacy path: iterate through segment objects (slow)
-            logger.warning("Using legacy segment iteration for baseline stats - consider passing aggregated stats dict instead")
-            baseline_videos = len(set(
-                getattr(seg, 'content_id_string', None) or getattr(seg.content, 'content_id', None)
-                for seg in baseline_segments
-                if hasattr(seg, 'content') or hasattr(seg, 'content_id_string')
-            ))
-
+            logger.warning("Using legacy segment iteration for baseline stats")
             baseline_channels = len(set(
                 getattr(seg.content, 'channel_name', None) or getattr(seg, 'channel_name', 'Unknown')
                 for seg in baseline_segments
             ))
-            baseline_total = len(baseline_segments)
 
-        # Coverage metrics
-        video_coverage = unique_videos / max(baseline_videos, 1)
-        channel_coverage = unique_channels / max(baseline_channels, 1)
-        segment_coverage = len(segments) / max(baseline_total, 1)
-
-        # Combined score (weighted average)
-        # Channel coverage is most important (shows breadth)
-        # Video coverage shows depth
-        # Segment coverage shows volume
-        score = (
-            0.5 * channel_coverage +
-            0.3 * video_coverage +
-            0.2 * segment_coverage
-        )
-        score = min(score, 1.0)  # Cap at 1.0
-
-        # Interpret score (5-level scale)
-        if score >= 0.6:
-            interpretation = 'Dominant - very widely discussed across the discourse'
-        elif score >= 0.4:
-            interpretation = 'Central - significant presence across many sources'
-        elif score >= 0.2:
-            interpretation = 'Moderate - notable discussion in several sources'
-        elif score >= 0.1:
-            interpretation = 'Peripheral - limited discussion in few sources'
+        # Calculate channel coverage percentage (capped at 100%)
+        if baseline_channels > 0:
+            channel_coverage_pct = min((unique_channels / baseline_channels) * 100, 100.0)
         else:
-            interpretation = 'Marginal - rarely discussed'
+            channel_coverage_pct = 0
+
+        logger.info(
+            f"Discourse centrality: {unique_channels}/{baseline_channels} channels = {channel_coverage_pct:.1f}%"
+        )
+
+        # Map to 0-5 level based on channel coverage
+        if channel_coverage_pct >= 50:
+            level = 5
+            label = 'Very common'
+        elif channel_coverage_pct >= 30:
+            level = 4
+            label = 'Common'
+        elif channel_coverage_pct >= 15:
+            level = 3
+            label = 'Moderate'
+        elif channel_coverage_pct >= 5:
+            level = 2
+            label = 'Uncommon'
+        elif channel_coverage_pct >= 1:
+            level = 1
+            label = 'Rare'
+        else:
+            level = 0
+            label = 'Very rare'
 
         return {
-            'score': round(score, 3),
-            'interpretation': interpretation,
-            'channel_coverage': round(channel_coverage, 3),
-            'video_coverage': round(video_coverage, 3),
-            'segment_coverage': round(segment_coverage, 3),
-            'baseline_stats': {
-                'total_segments': baseline_total,
-                'unique_videos': baseline_videos,
-                'unique_channels': baseline_channels
-            }
+            'level': level,
+            'label': label
         }
 
     def _get_channel_metadata(self, channel_name: str) -> Dict[str, Any]:

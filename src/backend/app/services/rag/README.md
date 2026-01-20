@@ -97,7 +97,7 @@ All steps are registered in [step_registry.py](step_registry.py) and can be comp
   - `total_segments`, `unique_videos`, `unique_channels`
   - `channel_distribution`, `video_distribution`, `temporal_distribution`
   - `concentration_metrics` (HHI, top-N percentages)
-  - `discourse_centrality` (score, interpretation, coverage, baseline stats)
+  - `discourse_centrality` (level 0-5, label)
 
 ### Segment Selection
 **`select_segments`** - Select diverse subset of segments
