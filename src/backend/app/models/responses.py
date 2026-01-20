@@ -356,6 +356,23 @@ class SpeakerDetailsResponse(BaseModel):
     processing_time_ms: float
 
 
+class ChartPosition(BaseModel):
+    """A single chart position"""
+    platform: str  # e.g., "apple"
+    country: str  # e.g., "ca", "us"
+    category: str  # e.g., "all-podcasts", "news"
+    rank: int  # Position on chart (1-200)
+
+
+class ChannelRanking(BaseModel):
+    """Channel importance/ranking information"""
+    importance_score: Optional[float] = None  # Raw score from database
+    importance_rank: Optional[int] = None  # Rank among all channels (1 = highest)
+    tier: Optional[str] = None  # "top-10", "top-50", "top-100", "top-200", or None
+    chart_positions: List[ChartPosition] = Field(default_factory=list)  # Recent chart positions
+    chart_month: Optional[str] = None  # Month of chart data (e.g., "2026-01")
+
+
 class ChannelDetailsResponse(BaseModel):
     """Full channel details response"""
     success: bool = True
@@ -372,6 +389,9 @@ class ChannelDetailsResponse(BaseModel):
     episode_count: int = 0
     date_range: Optional[DateRange] = None
     publishing_frequency: Optional[str] = None
+
+    # Importance/Ranking
+    ranking: Optional[ChannelRanking] = None
 
     # Regular speakers
     regular_speakers: List[SpeakerPreview] = Field(default_factory=list)

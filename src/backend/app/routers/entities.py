@@ -24,6 +24,8 @@ from ..models.responses import (
     ChannelPreview,
     ChannelWithCount,
     DateRange,
+    ChartPosition,
+    ChannelRanking,
 )
 
 from src.database.session import get_session
@@ -33,6 +35,7 @@ from src.database.models import (
     Speaker,
     SpeakerIdentity,
     EmbeddingSegment,
+    PodcastChart,
 )
 
 router = APIRouter(prefix="/api/entities", tags=["entities"])
@@ -261,6 +264,59 @@ async def get_channel_details(
                 elif isinstance(channel.tags, dict):
                     tags = list(channel.tags.keys())
 
+            # Get channel ranking/importance (fast queries)
+            ranking = None
+            if channel.importance_score is not None:
+                # Get rank among all channels (count those with higher score + 1)
+                importance_rank = session.query(func.count(Channel.id))\
+                    .filter(Channel.importance_score > channel.importance_score)\
+                    .scalar() + 1
+
+                # Determine tier
+                tier = None
+                if importance_rank <= 10:
+                    tier = "top-10"
+                elif importance_rank <= 50:
+                    tier = "top-50"
+                elif importance_rank <= 100:
+                    tier = "top-100"
+                elif importance_rank <= 200:
+                    tier = "top-200"
+
+                # Get recent chart positions (most recent month only)
+                chart_positions = []
+                chart_month = None
+                latest_month = session.query(func.max(PodcastChart.month))\
+                    .filter(PodcastChart.channel_id == channel_id)\
+                    .scalar()
+
+                if latest_month:
+                    chart_month = latest_month
+                    charts = session.query(PodcastChart)\
+                        .filter(PodcastChart.channel_id == channel_id)\
+                        .filter(PodcastChart.month == latest_month)\
+                        .order_by(PodcastChart.rank)\
+                        .limit(10)\
+                        .all()
+
+                    chart_positions = [
+                        ChartPosition(
+                            platform=c.platform,
+                            country=c.country,
+                            category=c.category,
+                            rank=c.rank
+                        )
+                        for c in charts
+                    ]
+
+                ranking = ChannelRanking(
+                    importance_score=channel.importance_score,
+                    importance_rank=importance_rank,
+                    tier=tier,
+                    chart_positions=chart_positions,
+                    chart_month=chart_month,
+                )
+
             processing_time = (time.time() - start_time) * 1000
 
             return ChannelDetailsResponse(
@@ -276,6 +332,7 @@ async def get_channel_details(
                 episode_count=episode_count,
                 date_range=date_range,
                 publishing_frequency=None,  # TODO: Calculate from episode dates
+                ranking=ranking,
                 regular_speakers=regular_speakers,
                 recent_episodes=recent_episodes,
                 tags=tags,
@@ -360,6 +417,11 @@ async def get_speaker_details(
 
             # If we have an identity, get aggregated stats
             if identity:
+                # Create subquery for speaker's content_ids (reused by multiple queries)
+                speaker_content_subq = session.query(Speaker.content_id)\
+                    .filter(Speaker.speaker_identity_id == identity.id)\
+                    .subquery()
+
                 # Get stats across all speakers with this identity
                 stats = session.query(
                     func.sum(Speaker.duration).label('total_duration'),
@@ -367,10 +429,9 @@ async def get_speaker_details(
                     func.count(distinct(Speaker.content_id)).label('total_episodes')
                 ).filter(Speaker.speaker_identity_id == identity.id).first()
 
-                # Get recent episodes
+                # Get recent episodes - use subquery pattern for efficiency
                 recent_query = session.query(Content)\
-                    .join(Speaker, Speaker.content_id == Content.content_id)\
-                    .filter(Speaker.speaker_identity_id == identity.id)\
+                    .filter(Content.content_id.in_(session.query(speaker_content_subq.c.content_id)))\
                     .filter(Content.is_embedded == True)\
                     .order_by(desc(Content.publish_date))\
                     .limit(5)\
@@ -390,17 +451,16 @@ async def get_speaker_details(
                     for ep in recent_query
                 ]
 
-                # Get top channels
+                # Get top channels - use subquery pattern for efficiency
                 top_channels_query = session.query(
                     Channel.id,
                     Channel.channel_key,
                     Channel.display_name,
                     Channel.platform,
-                    func.count(distinct(Speaker.content_id)).label('appearance_count')
-                ).select_from(Speaker)\
-                 .join(Content, Speaker.content_id == Content.content_id)\
+                    func.count(Content.id).label('appearance_count')
+                ).select_from(Content)\
                  .join(Channel, Content.channel_id == Channel.id)\
-                 .filter(Speaker.speaker_identity_id == identity.id)\
+                 .filter(Content.content_id.in_(session.query(speaker_content_subq.c.content_id)))\
                  .group_by(Channel.id, Channel.channel_key, Channel.display_name, Channel.platform)\
                  .order_by(desc('appearance_count'))\
                  .limit(5)\
@@ -418,18 +478,14 @@ async def get_speaker_details(
                 ]
 
                 # Get related speakers (co-appear in same episodes)
+                # Use subquery pattern and reuse speaker_content_subq
                 related_query = session.query(
                     SpeakerIdentity.id,
                     SpeakerIdentity.primary_name,
                     func.count(distinct(Speaker.content_id)).label('co_appearances')
                 ).select_from(Speaker)\
                  .join(SpeakerIdentity, Speaker.speaker_identity_id == SpeakerIdentity.id)\
-                 .filter(
-                    Speaker.content_id.in_(
-                        session.query(Speaker.content_id)
-                        .filter(Speaker.speaker_identity_id == identity.id)
-                    )
-                 )\
+                 .filter(Speaker.content_id.in_(session.query(speaker_content_subq.c.content_id)))\
                  .filter(SpeakerIdentity.id != identity.id)\
                  .filter(SpeakerIdentity.primary_name.isnot(None))\
                  .group_by(SpeakerIdentity.id, SpeakerIdentity.primary_name)\
