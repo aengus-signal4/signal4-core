@@ -1,0 +1,9 @@
+# Converted MLX model (large, generate locally)
+mlx_qwen3_omni_4bit/
+
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc

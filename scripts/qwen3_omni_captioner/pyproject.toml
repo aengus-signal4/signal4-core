@@ -1,0 +1,19 @@
+[project]
+name = "qwen3-omni-captioner"
+version = "0.1.0"
+description = "Isolated environment for Qwen3-Omni audio captioning on MLX"
+requires-python = ">=3.11"
+dependencies = [
+    "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm.git",
+    "torchaudio",
+    "soundfile",
+    "torchvision",
+    "psycopg2-binary",
+    "boto3",
+    "python-dotenv",
+    "streamlit",
+]
+
+[tool.uv]
+# Allow pre-release versions for transformers
+prerelease = "allow"

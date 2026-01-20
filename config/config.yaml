@@ -865,6 +865,22 @@ scheduled_tasks:
         args: ["-m", "src.speaker_identification.orchestrator", "--phases", "2", "--all-active", "--apply", "--batch-size", "10000"]
       timeout_seconds: 259200  # 72 hours - can take a long time
 
+    # === Tone Analysis (Qwen3-Omni) ===
+
+    tone_hydration:
+      name: "Tone Hydration"
+      description: "Analyze sentence tones using Qwen3-Omni"
+      enabled: true
+      schedule:
+        type: run_then_wait
+        wait_seconds: 600  # Wait 10 minutes after completion
+      executor:
+        type: cli
+        command: "python"
+        args: ["scripts/qwen3_omni_captioner/hydrate_tones.py", "--project", "Canadian", "--project", "CPRMV", "--limit", "100"]
+        working_dir: "/Users/signal4/signal4/core"
+      timeout_seconds: 14400  # 4 hours max
+
     # === Backend Cache & Clustering (replaces pg_cron) ===
 
     cache_refresh_30d:
