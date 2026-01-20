@@ -26,8 +26,8 @@ class ServiceStartupManager:
         self.logger = logger
 
         # Service configuration
-        self.python_path = config.get('processing', {}).get('head_python_path',
-                                                             '/opt/homebrew/Caskroom/miniforge/base/envs/content-processing/bin/python')
+        # Use uv for running Python scripts to ensure correct environment
+        self.uv_path = config.get('processing', {}).get('uv_path', '/Users/signal4/.local/bin/uv')
         self.base_path = Path(config.get('storage', {}).get('local', {}).get('base_path',
                                                                               '/Users/signal4/signal4/core'))
 
@@ -123,9 +123,9 @@ class ServiceStartupManager:
                 self.logger.warning(f"LLM server already running on port {self.llm_port}")
                 return
 
-            # Start LLM server
+            # Start LLM server using uv run for proper environment
             cmd = [
-                str(self.python_path),
+                str(self.uv_path), 'run', 'python',
                 str(self.llm_script),
                 '--port', str(self.llm_port)
             ]
@@ -161,9 +161,9 @@ class ServiceStartupManager:
                 self.logger.warning(f"Backend API already running on port {self.backend_port}")
                 return
 
-            # Start Backend API using uvicorn
+            # Start Backend API using uv run uvicorn
             cmd = [
-                str(self.python_path),
+                str(self.uv_path), 'run', 'python',
                 '-m', 'uvicorn',
                 self.backend_module,
                 '--host', '0.0.0.0',
@@ -206,9 +206,9 @@ class ServiceStartupManager:
                 self.logger.warning(f"Audio server script not found: {self.audio_server_script}")
                 return
 
-            # Start Audio server
+            # Start Audio server using uv run
             cmd = [
-                str(self.python_path),
+                str(self.uv_path), 'run', 'python',
                 str(self.audio_server_script)
             ]
 
@@ -342,9 +342,9 @@ class ServiceStartupManager:
                 'HOST': '0.0.0.0'
             })
 
-            # Start model server
+            # Start model server using uv run
             cmd = [
-                str(self.python_path),
+                str(self.uv_path), 'run', 'python',
                 str(self.model_server_script),
                 '--port', str(port),
                 '--host', '0.0.0.0'

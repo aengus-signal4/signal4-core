@@ -14,6 +14,35 @@ from .base import BaseExecutor, ExecutionResult
 logger = logging.getLogger(__name__)
 
 
+async def check_screen_exists(screen_name: str) -> bool:
+    """
+    Check if a screen session with the given name exists and is running.
+
+    Returns True if screen session exists (regardless of state), False otherwise.
+    """
+    try:
+        process = await asyncio.create_subprocess_exec(
+            'screen', '-ls',
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await process.communicate()
+        output = stdout.decode('utf-8', errors='replace')
+
+        # screen -ls output format: "12345.screen_name\t(Detached)" or "(Attached)"
+        # Look for the screen name in the output
+        for line in output.split('\n'):
+            if f'.{screen_name}' in line or f'\t{screen_name}\t' in line:
+                logger.debug(f"Found existing screen session: {line.strip()}")
+                return True
+
+        return False
+    except Exception as e:
+        logger.warning(f"Error checking screen sessions: {e}")
+        # On error, assume no session exists to avoid blocking
+        return False
+
+
 class CLIExecutor(BaseExecutor):
     """
     Executes CLI commands using asyncio subprocess or screen sessions.
@@ -180,14 +209,33 @@ class CLIExecutor(BaseExecutor):
         timeout_seconds: int,
         start_time: datetime
     ) -> ExecutionResult:
-        """Execute command in a screen session and monitor until completion"""
-        # Kill any existing screen with the same name
-        kill_cmd = ['screen', '-S', screen_name, '-X', 'quit']
-        try:
-            await asyncio.create_subprocess_exec(*kill_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-            await asyncio.sleep(0.5)
-        except Exception:
-            pass
+        """Execute command in a screen session and monitor until completion.
+
+        SAFEGUARD: Checks if a screen session with the same name already exists.
+        If it does, returns immediately with an error instead of killing the
+        existing session. This prevents duplicate task execution when the
+        orchestrator restarts while a long-running task is still processing.
+        """
+        # Check if screen session already exists - FAIL FAST to prevent duplicates
+        if await check_screen_exists(screen_name):
+            end_time = datetime.now(timezone.utc)
+            error_msg = (
+                f"Screen session '{screen_name}' already exists. "
+                f"Another instance may still be running. "
+                f"To force restart, manually kill it: screen -S {screen_name} -X quit"
+            )
+            logger.warning(error_msg)
+            return ExecutionResult(
+                success=False,
+                start_time=start_time,
+                end_time=end_time,
+                output={
+                    'screen_name': screen_name,
+                    'returncode': -2,
+                    'message': 'Skipped - screen session already exists'
+                },
+                error=error_msg
+            )
 
         # Build the command string for screen
         cmd_str = ' '.join(shlex.quote(arg) for arg in full_cmd)
@@ -202,7 +250,8 @@ class CLIExecutor(BaseExecutor):
                 os.remove(f)
 
         # Wrap command to write exit code and marker when done
-        wrapped_cmd = f'cd {shlex.quote(cwd)} && {cmd_str}; echo $? > {exit_code_file}; touch {marker_file}'
+        # Disable MallocStackLogging to suppress noisy warnings
+        wrapped_cmd = f'cd {shlex.quote(cwd)} && unset MallocStackLogging && unset MallocStackLoggingNoCompact && {cmd_str}; echo $? > {exit_code_file}; touch {marker_file}'
 
         # Start screen session
         screen_cmd = ['screen', '-dmS', screen_name, 'bash', '-c', wrapped_cmd]

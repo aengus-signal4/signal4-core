@@ -6,7 +6,7 @@ Provides different execution strategies:
 - SQLExecutor: Execute PostgreSQL functions
 """
 from .base import BaseExecutor, ExecutionResult
-from .cli import CLIExecutor
+from .cli import CLIExecutor, check_screen_exists
 from .sql import SQLExecutor
 
-__all__ = ['BaseExecutor', 'ExecutionResult', 'CLIExecutor', 'SQLExecutor']
+__all__ = ['BaseExecutor', 'ExecutionResult', 'CLIExecutor', 'SQLExecutor', 'check_screen_exists']

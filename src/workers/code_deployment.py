@@ -141,17 +141,28 @@ class CodeDeploymentManager:
             if not target_ip:
                 raise Exception(f"No IP address available for worker {worker_id}")
 
-            logger.info(f"Deploying to {worker_id} at {target_ip}")
+            logger.info(f"[{worker_id}] Starting deployment to {target_ip}")
 
-            # Connect via SSH
-            async with asyncssh.connect(
-                target_ip,
-                username=self.ssh_username,
-                client_keys=[self.ssh_key_path],
-                known_hosts=None  # Accept any host key for now
-            ) as conn:
+            # Connect via SSH with timeout
+            logger.info(f"[{worker_id}] Connecting via SSH...")
+            try:
+                conn = await asyncio.wait_for(
+                    asyncssh.connect(
+                        target_ip,
+                        username=self.ssh_username,
+                        client_keys=[self.ssh_key_path],
+                        known_hosts=None  # Accept any host key for now
+                    ),
+                    timeout=30
+                )
+            except asyncio.TimeoutError:
+                raise Exception(f"SSH connection timed out after 30s")
+
+            logger.info(f"[{worker_id}] SSH connected")
+            async with conn:
 
                 # Step 1: Create project directory if it doesn't exist
+                logger.debug(f"[{worker_id}] Creating project directory")
                 result = await conn.run(f'mkdir -p {self.project_path}')
                 steps_completed.append('create_directory')
                 output_lines.append(f"Create directory: {result.stdout}")
@@ -161,6 +172,7 @@ class CodeDeploymentManager:
                 import asyncio
 
                 # Create directory structure on worker first
+                logger.info(f"[{worker_id}] Syncing code via rsync...")
                 await conn.run(f'mkdir -p /Users/signal4/signal4')
 
                 # Rsync from head TO worker (push direction)
@@ -181,22 +193,35 @@ class CodeDeploymentManager:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE
                 )
-                stdout, stderr = await proc.communicate()
+                try:
+                    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    raise Exception(f"Rsync timed out after 180s")
 
                 if proc.returncode != 0:
                     raise Exception(f"Rsync failed: {stderr.decode()}")
                 steps_completed.append('sync_code')
+                logger.info(f"[{worker_id}] Code synced successfully")
                 output_lines.append(f"Rsync: Synced code from head to worker ({stdout.decode().strip()})")
 
                 # Step 5: Update dependencies
                 # Use the working SSH command format
+                logger.info(f"[{worker_id}] Running uv sync...")
                 uv_cmd = f'cd {self.project_path} && /Users/signal4/.local/bin/uv sync --quiet'
-                result = await conn.run(uv_cmd)
-                steps_completed.append('uv_sync')
-                output_lines.append(f"UV sync: Dependencies synced successfully")
+                try:
+                    result = await asyncio.wait_for(conn.run(uv_cmd), timeout=120)
+                    steps_completed.append('uv_sync')
+                    logger.info(f"[{worker_id}] Dependencies synced")
+                    output_lines.append(f"UV sync: Dependencies synced successfully")
+                except asyncio.TimeoutError:
+                    logger.warning(f"[{worker_id}] uv sync timed out after 120s, continuing anyway")
+                    steps_completed.append('uv_sync_timeout')
+                    output_lines.append("UV sync: Timed out after 120s")
 
                 # Step 6: Always restart processor to pick up new code
                 # Stop existing processor
+                logger.info(f"[{worker_id}] Restarting processor...")
                 await conn.run('pkill -f "processor.py" || true')
                 steps_completed.append('stop_processor')
 
@@ -208,6 +233,7 @@ class CodeDeploymentManager:
                 start_cmd = f'cd {self.project_path} && nohup /Users/signal4/.local/bin/uv run python src/workers/processor.py > /tmp/processor.log 2>&1 &'
                 await conn.run(start_cmd)
                 steps_completed.append('start_processor')
+                logger.info(f"[{worker_id}] Processor restarted")
                 output_lines.append("Processor restarted")
 
                 # Optionally restart model server if requested
