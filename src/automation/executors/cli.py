@@ -1,9 +1,10 @@
 """
-CLI Executor - Runs shell commands via asyncio subprocess
+CLI Executor - Runs shell commands via asyncio subprocess or screen sessions
 """
 import asyncio
 import os
 import logging
+import shlex
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from pathlib import Path
@@ -15,13 +16,15 @@ logger = logging.getLogger(__name__)
 
 class CLIExecutor(BaseExecutor):
     """
-    Executes CLI commands using asyncio subprocess.
+    Executes CLI commands using asyncio subprocess or screen sessions.
 
     Config options:
     - command: The command to run (e.g., "python")
     - args: List of arguments
     - cwd: Working directory (optional)
     - env: Additional environment variables (optional)
+    - use_screen: Run in a named screen session (optional, default False)
+    - screen_name: Name for the screen session (optional, defaults to task_id)
     """
 
     def __init__(self, default_cwd: Optional[str] = None, default_uv_path: Optional[str] = None):
@@ -41,12 +44,20 @@ class CLIExecutor(BaseExecutor):
         args = config.get('args', [])
         cwd = config.get('cwd', self.default_cwd)
         env_additions = config.get('env', {})
+        use_screen = config.get('use_screen', False)
+        screen_name = config.get('screen_name') or context.get('task_id', 'scheduled_task')
 
         # Use uv run for python commands to ensure correct environment
         if command == 'python':
             full_cmd = [self.default_uv_path, 'run', 'python'] + args
         else:
             full_cmd = [command] + args
+
+        # If use_screen is enabled, run in a screen session
+        if use_screen:
+            return await self._execute_in_screen(
+                full_cmd, screen_name, cwd, env_additions, timeout_seconds, start_time
+            )
 
         # Prepare environment
         env = os.environ.copy()
@@ -105,6 +116,23 @@ class CLIExecutor(BaseExecutor):
             if not success:
                 logger.error(f"Command failed with return code {returncode}")
 
+            # Build error message including stderr details for failures
+            error_msg = None
+            if not success:
+                # Get last 10 lines of stderr for error context
+                stderr_tail = stderr_lines[-10:] if stderr_lines else []
+                stderr_snippet = '\n'.join(stderr_tail)
+                if stderr_snippet:
+                    error_msg = f"Command exited with code {returncode}. stderr:\n{stderr_snippet}"
+                else:
+                    # No stderr - check stdout for error info
+                    stdout_tail = stdout_lines[-10:] if stdout_lines else []
+                    stdout_snippet = '\n'.join(stdout_tail)
+                    if stdout_snippet:
+                        error_msg = f"Command exited with code {returncode}. stdout tail:\n{stdout_snippet}"
+                    else:
+                        error_msg = f"Command exited with code {returncode}"
+
             return ExecutionResult(
                 success=success,
                 start_time=start_time,
@@ -114,7 +142,7 @@ class CLIExecutor(BaseExecutor):
                     'stderr': '\n'.join(stderr_lines),
                     'returncode': returncode
                 },
-                error=None if success else f"Command exited with code {returncode}"
+                error=error_msg
             )
 
         except FileNotFoundError as e:
@@ -140,6 +168,119 @@ class CLIExecutor(BaseExecutor):
                     'stdout': '\n'.join(stdout_lines),
                     'stderr': '\n'.join(stderr_lines)
                 },
+                error=error_msg
+            )
+
+    async def _execute_in_screen(
+        self,
+        full_cmd: list,
+        screen_name: str,
+        cwd: str,
+        env_additions: Dict[str, Any],
+        timeout_seconds: int,
+        start_time: datetime
+    ) -> ExecutionResult:
+        """Execute command in a screen session and monitor until completion"""
+        # Kill any existing screen with the same name
+        kill_cmd = ['screen', '-S', screen_name, '-X', 'quit']
+        try:
+            await asyncio.create_subprocess_exec(*kill_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            await asyncio.sleep(0.5)
+        except Exception:
+            pass
+
+        # Build the command string for screen
+        cmd_str = ' '.join(shlex.quote(arg) for arg in full_cmd)
+
+        # Create a marker file to detect completion
+        marker_file = f"/tmp/screen_done_{screen_name}"
+        exit_code_file = f"/tmp/screen_exit_{screen_name}"
+
+        # Remove old marker files
+        for f in [marker_file, exit_code_file]:
+            if os.path.exists(f):
+                os.remove(f)
+
+        # Wrap command to write exit code and marker when done
+        wrapped_cmd = f'cd {shlex.quote(cwd)} && {cmd_str}; echo $? > {exit_code_file}; touch {marker_file}'
+
+        # Start screen session
+        screen_cmd = ['screen', '-dmS', screen_name, 'bash', '-c', wrapped_cmd]
+
+        logger.info(f"Starting screen session '{screen_name}': {cmd_str}")
+
+        env = os.environ.copy()
+        env.update(env_additions)
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *screen_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env
+            )
+            await process.wait()
+
+            # Wait for completion by polling marker file
+            poll_interval = 5  # seconds
+            elapsed = 0
+
+            while elapsed < timeout_seconds:
+                if os.path.exists(marker_file):
+                    # Command completed
+                    exit_code = 0
+                    if os.path.exists(exit_code_file):
+                        try:
+                            with open(exit_code_file, 'r') as f:
+                                exit_code = int(f.read().strip())
+                        except (ValueError, IOError):
+                            pass
+
+                    # Clean up marker files
+                    for f in [marker_file, exit_code_file]:
+                        if os.path.exists(f):
+                            os.remove(f)
+
+                    end_time = datetime.now(timezone.utc)
+                    success = exit_code == 0
+
+                    return ExecutionResult(
+                        success=success,
+                        start_time=start_time,
+                        end_time=end_time,
+                        output={
+                            'screen_name': screen_name,
+                            'returncode': exit_code,
+                            'message': f"Command completed in screen '{screen_name}'"
+                        },
+                        error=f"Command exited with code {exit_code}" if not success else None
+                    )
+
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
+
+            # Timeout - but leave screen running
+            end_time = datetime.now(timezone.utc)
+            return ExecutionResult(
+                success=False,
+                start_time=start_time,
+                end_time=end_time,
+                output={
+                    'screen_name': screen_name,
+                    'returncode': -1,
+                    'message': f"Screen session '{screen_name}' still running (timed out waiting)"
+                },
+                error=f"Timed out after {timeout_seconds}s - screen '{screen_name}' still running, attach with: screen -r {screen_name}"
+            )
+
+        except Exception as e:
+            end_time = datetime.now(timezone.utc)
+            error_msg = f"Error starting screen session: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return ExecutionResult(
+                success=False,
+                start_time=start_time,
+                end_time=end_time,
                 error=error_msg
             )
 

@@ -14,9 +14,12 @@ Usage:
     uv run python hydrate_tones.py --project Canadian --dry-run
 """
 
+# Suppress macOS MallocStackLogging warnings (must be before other imports)
+import os
+os.environ["MallocStackLogging"] = "0"
+
 import argparse
 import json
-import os
 import subprocess
 import tempfile
 import time
@@ -37,7 +40,8 @@ from tqdm import tqdm
 CORE_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(CORE_DIR / ".env", override=True)
 
-MODEL_PATH = "./mlx_qwen3_omni_4bit"
+SCRIPT_DIR = Path(__file__).resolve().parent
+MODEL_PATH = str(SCRIPT_DIR / "mlx_qwen3_omni_4bit")
 MIN_WORDS = 5
 MAX_CHUNK_DURATION = 60.0  # Split speaker runs longer than this
 
@@ -105,7 +109,7 @@ def get_content_needing_tone(projects: List[str], limit: int = None, since: str 
                        COUNT(s.id) as sentences_needing_tone
                 FROM content c
                 JOIN sentences s ON s.content_id = c.id
-                WHERE c.projects && %s
+                WHERE c.projects && %s::varchar[]
                   AND s.emotion IS NULL
                   AND s.word_count >= %s
                   AND c.is_transcribed = true
