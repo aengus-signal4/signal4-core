@@ -7,7 +7,7 @@ Monitors:
 - LLM Server (port 8002)
 - Model Servers (port 8004+)
 
-Uses exponential backoff with the same pattern as WorkerInfo for restart attempts.
+Uses ExponentialBackoffMixin for consistent retry behavior with WorkerInfo.
 """
 import asyncio
 import logging
@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional, TYPE_CHECKING
 from enum import Enum
 import aiohttp
+
+from src.utils.backoff import ExponentialBackoffMixin
 
 if TYPE_CHECKING:
     from src.workers.service_startup import ServiceStartupManager
@@ -32,11 +34,11 @@ class ServiceStatus(Enum):
     DISABLED = "disabled"
 
 
-class HeadNodeServiceInfo:
+class HeadNodeServiceInfo(ExponentialBackoffMixin):
     """
     Tracks restart state for a single head node service.
 
-    Uses the same exponential backoff pattern as WorkerInfo:
+    Uses ExponentialBackoffMixin for consistent backoff behavior:
     - base=60s, max=24h, max_attempts=20
     - Requires 3 consecutive health check failures before restarting
     """
@@ -60,78 +62,32 @@ class HeadNodeServiceInfo:
         self.consecutive_failures = 0
         self.failure_threshold = 3  # Require 3 consecutive failures before restart
 
-        # Restart tracking with exponential backoff (same as WorkerInfo)
-        self.restart_attempts = 0
-        self.last_restart_attempt: Optional[datetime] = None
-        self.max_restart_attempts = 20
-        self.restart_backoff_base = 60  # 1 minute base
-        self.restart_backoff_max = 60 * 60 * 24  # 24 hours max
-
-        # Restart lock to prevent concurrent restart attempts
-        self.restart_lock = asyncio.Lock()
+        # Initialize exponential backoff from mixin
+        self.init_backoff()
 
         # Timestamps
         self.last_health_check: Optional[datetime] = None
         self.last_healthy: Optional[datetime] = None
         self.last_restart_success: Optional[datetime] = None
 
-    def should_attempt_restart(self) -> bool:
-        """Check if we should attempt to restart this service based on retry logic."""
-        if self.restart_attempts >= self.max_restart_attempts:
-            return False
-
-        if self.last_restart_attempt is None:
-            return True
-
-        # Calculate exponential backoff
-        backoff_time = min(
-            self.restart_backoff_base * (2 ** self.restart_attempts),
-            self.restart_backoff_max
-        )
-
-        time_since_last_attempt = (datetime.now(timezone.utc) - self.last_restart_attempt).total_seconds()
-        return time_since_last_attempt >= backoff_time
-
-    def get_restart_backoff_remaining(self) -> float:
-        """Get remaining time until next restart attempt is allowed."""
-        if self.last_restart_attempt is None or self.restart_attempts >= self.max_restart_attempts:
-            return 0.0
-
-        backoff_time = min(
-            self.restart_backoff_base * (2 ** self.restart_attempts),
-            self.restart_backoff_max
-        )
-
-        time_since_last_attempt = (datetime.now(timezone.utc) - self.last_restart_attempt).total_seconds()
-        return max(0.0, backoff_time - time_since_last_attempt)
+    def _get_identifier(self) -> str:
+        """Override mixin method to return service_name for logging."""
+        return self.service_name
 
     def record_restart_attempt(self, success: bool):
-        """Record a restart attempt and its outcome."""
-        self.last_restart_attempt = datetime.now(timezone.utc)
+        """Record a restart attempt and its outcome. Extends mixin to update service status."""
+        # Call parent implementation for backoff tracking
+        super().record_restart_attempt(success)
 
         if success:
-            # Reset retry tracking on successful restart
-            self.restart_attempts = 0
             self.consecutive_failures = 0
             self.status = ServiceStatus.HEALTHY
             self.last_restart_success = datetime.now(timezone.utc)
-            logger.info(f"Service {self.service_name} successfully restarted, reset retry count")
         else:
-            self.restart_attempts += 1
-            next_backoff = min(
-                self.restart_backoff_base * (2 ** self.restart_attempts),
-                self.restart_backoff_max
-            )
-
             if self.restart_attempts >= self.max_restart_attempts:
                 self.status = ServiceStatus.PERMANENTLY_FAILED
-                logger.error(f"Service {self.service_name} permanently failed after {self.restart_attempts} restart attempts")
             else:
                 self.status = ServiceStatus.FAILED
-                logger.warning(
-                    f"Service {self.service_name} restart attempt {self.restart_attempts}/{self.max_restart_attempts} failed. "
-                    f"Next retry in {next_backoff}s"
-                )
 
     def record_health_check(self, is_healthy: bool):
         """Record result of a health check."""

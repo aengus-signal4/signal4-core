@@ -42,6 +42,17 @@ import os
 # Monkey-patch torch.load to use weights_only=False for all model loading.
 # This must happen BEFORE any pyannote imports.
 import torch
+import warnings
+
+# Suppress PyTorch Lightning migration warnings (these are informational, not errors)
+# The warning about checkpoint upgrade is printed to stderr but doesn't affect functionality
+warnings.filterwarnings("ignore", message="You have multiple `ModelCheckpoint` callback states")
+warnings.filterwarnings("ignore", message="Lightning automatically upgraded your loaded checkpoint")
+warnings.filterwarnings("ignore", message="Model was trained with pyannote.audio")
+warnings.filterwarnings("ignore", message="Model was trained with torch")
+warnings.filterwarnings("ignore", message="Model was trained with.*pytorch_lightning")
+warnings.filterwarnings("ignore", message=".*does not support seeking.")
+
 _original_torch_load = torch.load
 def _patched_torch_load(*args, **kwargs):
     if 'weights_only' not in kwargs:

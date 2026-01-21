@@ -6,11 +6,14 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Set
 
+from src.utils.backoff import ExponentialBackoffMixin
+
 logger = logging.getLogger(__name__)
 
-class WorkerInfo:
-    """Enhanced worker information with service tracking"""
-    
+
+class WorkerInfo(ExponentialBackoffMixin):
+    """Enhanced worker information with service tracking and exponential backoff restart logic."""
+
     def __init__(self, worker_id: str, config: Dict[str, Any]):
         self.worker_id = worker_id
         self.config = config
@@ -64,14 +67,8 @@ class WorkerInfo:
         # Download mode configuration
         self.download_mode = config.get('download_mode', 'cookie')  # 'cookie' or 'proxy'
 
-        # Restart retry tracking with exponential backoff
-        self.restart_attempts = 0
-        self.last_restart_attempt = None
-        self.max_restart_attempts = 20  # Maximum restart attempts before giving up
-        self.restart_backoff_base = 60  # Base backoff time in seconds (1 minute)
-        self.restart_backoff_max = 60*60*24  # Maximum backoff time in seconds (24 hours)
-        # Add restart lock to prevent concurrent restart attempts
-        self.restart_lock = asyncio.Lock()
+        # Initialize exponential backoff for restart retry logic (from mixin)
+        self.init_backoff()
 
         # Queue depth tracking for batch task dispatch
         self.queue_depths_by_type: Dict[str, int] = {task_type: 0 for task_type in self.task_types}
@@ -82,86 +79,22 @@ class WorkerInfo:
         self.last_heartbeat = datetime.now(timezone.utc)
         self.started_at = None
         self.available_after = None
-    
-    def should_attempt_restart(self) -> bool:
-        """Check if we should attempt to restart this worker based on retry logic."""
-        if self.restart_attempts >= self.max_restart_attempts:
-            return False
-            
-        if self.last_restart_attempt is None:
-            return True
-            
-        # Calculate exponential backoff
-        backoff_time = min(
-            self.restart_backoff_base * (2 ** self.restart_attempts),
-            self.restart_backoff_max
-        )
-        
-        time_since_last_attempt = (datetime.now(timezone.utc) - self.last_restart_attempt).total_seconds()
-        return time_since_last_attempt >= backoff_time
 
-    def record_restart_attempt(self, success: bool):
-        """Record a restart attempt and its outcome."""
-        self.last_restart_attempt = datetime.now(timezone.utc)
-        
-        if success:
-            # Reset retry tracking on successful restart
-            self.restart_attempts = 0
-            logger.info(f"Worker {self.worker_id} successfully restarted, reset retry count")
-        else:
-            self.restart_attempts += 1
-            next_backoff = min(
-                self.restart_backoff_base * (2 ** self.restart_attempts),
-                self.restart_backoff_max
-            )
-            logger.warning(f"Worker {self.worker_id} restart attempt {self.restart_attempts}/{self.max_restart_attempts} failed. "
-                         f"Next retry in {next_backoff}s")
+    def _get_identifier(self) -> str:
+        """Override mixin method to return worker_id for logging."""
+        return self.worker_id
 
-    def get_restart_backoff_remaining(self) -> float:
-        """Get remaining time until next restart attempt is allowed."""
-        if self.last_restart_attempt is None or self.restart_attempts >= self.max_restart_attempts:
-            return 0.0
-            
-        backoff_time = min(
-            self.restart_backoff_base * (2 ** self.restart_attempts),
-            self.restart_backoff_max
-        )
-        
-        time_since_last_attempt = (datetime.now(timezone.utc) - self.last_restart_attempt).total_seconds()
-        return max(0.0, backoff_time - time_since_last_attempt)
-    
     async def attempt_restart_with_lock(self, restart_manager_func):
         """
         Attempt to restart the worker with a lock to prevent concurrent restart attempts.
+
+        This overrides the mixin method to also update worker status on success.
         Returns (success: bool, attempted: bool) where attempted indicates if a restart was actually tried.
         """
-        if self.restart_lock.locked():
-            logger.debug(f"Worker {self.worker_id} restart already in progress, skipping concurrent attempt")
-            return False, False
-            
-        async with self.restart_lock:
-            # Double-check should_attempt_restart inside the lock
-            if not self.should_attempt_restart():
-                backoff_remaining = self.get_restart_backoff_remaining()
-                logger.debug(f"Worker {self.worker_id} restart not allowed: "
-                           f"attempts={self.restart_attempts}/{self.max_restart_attempts}, "
-                           f"backoff_remaining={backoff_remaining:.1f}s")
-                return False, False
-                
-            # Perform the restart
-            logger.info(f"Attempting to restart worker {self.worker_id} "
-                       f"(attempt {self.restart_attempts + 1}/{self.max_restart_attempts})")
-            
-            restart_success = await restart_manager_func(self.worker_id)
-            self.record_restart_attempt(restart_success)
-            
-            if restart_success:
-                self.status = 'active'
-                logger.info(f"Successfully restarted worker {self.worker_id}")
-            else:
-                logger.warning(f"Failed to restart worker {self.worker_id}")
-                
-            return restart_success, True
+        success, attempted = await super().attempt_restart_with_lock(restart_manager_func)
+        if success:
+            self.status = 'active'
+        return success, attempted
 
     def get_queue_capacity(self, task_type: str) -> int:
         """Calculate maximum queue capacity: limit × 2 + 2"""

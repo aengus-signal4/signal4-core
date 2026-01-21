@@ -843,14 +843,25 @@ async def run_processing_script(task_type: str, task_data: Dict[str, Any]) -> Di
         stdout = stdout_bytes.decode('utf-8', errors='replace').strip() if stdout_bytes else ""
         stderr = stderr_bytes.decode('utf-8', errors='replace').strip() if stderr_bytes else ""
 
-        # Filter out uv noise from stderr (informational messages that aren't errors)
+        # Filter out non-error noise from stderr (informational messages and warnings)
         if stderr:
-            stderr_lines = [line for line in stderr.splitlines()
-                          if not line.startswith('Bytecode compiled')
-                          and not line.startswith('Resolved ')
-                          and not line.startswith('Prepared ')
-                          and not line.startswith('Installed ')
-                          and not line.startswith('Uninstalled ')]
+            stderr_lines = []
+            for line in stderr.splitlines():
+                # Skip uv package manager noise
+                if line.startswith(('Bytecode compiled', 'Resolved ', 'Prepared ', 'Installed ', 'Uninstalled ')):
+                    continue
+                # Skip PyTorch Lightning checkpoint upgrade warnings (informational, not errors)
+                if 'Lightning automatically upgraded your loaded checkpoint' in line:
+                    continue
+                if 'pytorch_lightning.utilities.upgrade_checkpoint' in line:
+                    continue
+                # Skip aiohttp unclosed session warnings (cleanup warnings, not errors)
+                if 'Unclosed client session' in line or 'Unclosed connector' in line:
+                    continue
+                # Skip multiprocessing resource tracker warnings
+                if 'resource_tracker:' in line and 'leaked semaphore' in line:
+                    continue
+                stderr_lines.append(line)
             stderr = '\n'.join(stderr_lines).strip()
         
         # Special handling for convert.py exit code 2 (invalid media file)
