@@ -3,9 +3,10 @@ Service Startup Manager - Manages central services on head node
 
 Manages startup of:
 - LLM server
-- Monitoring dashboards (worker, project, orchestrator, system)
-- Audio server
+- Monitoring dashboards (system)
 - Backend API
+- Embedding Server
+- Model Servers
 
 All services run in named screen sessions for persistence across orchestrator restarts.
 """
@@ -99,6 +100,18 @@ class ServiceStartupManager:
         self.model_server_instances = model_servers_config.get('instances', {})
         self.model_server_script = self.base_path / 'src' / 'services' / 'llm' / 'mlx_server.py'
 
+        # Embedding Server configuration
+        embedding_config = services_config.get('embedding_server', {})
+        self.embedding_server_enabled = embedding_config.get('enabled', True)
+        self.embedding_server_port = embedding_config.get('port', 8005)
+        self.embedding_server_script = self.base_path / 'src' / 'services' / 'embedding_server.py'
+
+        # Memory Monitor configuration
+        memory_monitor_config = services_config.get('memory_monitor', {})
+        self.memory_monitor_enabled = memory_monitor_config.get('enabled', True)
+        self.memory_monitor_script = self.base_path.parent / 'scripts' / 'memory_monitor.sh'
+        self.memory_monitor_log = self.base_path / 'logs' / 'memory_log.csv'
+
         # Process tracking (legacy - kept for compatibility but not used for screen sessions)
         self.processes = {}
         self.should_stop = False
@@ -108,12 +121,22 @@ class ServiceStartupManager:
             'backend': 'backend_api',
             'llm_server': 'llm_server',
             'audio_server': 'audio_server',
+            'embedding_server': 'embedding_server',
             'system_monitoring': 'system_monitoring',
+            'memory_monitor': 'memory_monitor',
         }
 
     async def start_services(self):
         """Start all configured services"""
-        # Start backend API first (other services may depend on it)
+        # Start memory monitor first (lightweight, always useful)
+        if self.memory_monitor_enabled:
+            await self._start_memory_monitor()
+
+        # Start embedding server (backend depends on it)
+        if self.embedding_server_enabled:
+            await self._start_embedding_server()
+
+        # Start backend API (other services may depend on it)
         if self.backend_enabled:
             await self._start_backend()
 
@@ -135,6 +158,7 @@ class ServiceStartupManager:
 
         self.logger.info(
             f"Service startup manager initialized. Services: "
+            f"MemoryMonitor={self.memory_monitor_enabled}, Embedding={self.embedding_server_enabled}, "
             f"Backend={self.backend_enabled}, Audio={self.audio_server_enabled}, "
             f"LLM={self.llm_enabled}, ModelServers={self.model_servers_enabled}, Dashboards={self.dashboards_enabled}"
         )
@@ -261,6 +285,68 @@ class ServiceStartupManager:
         except Exception as e:
             self.logger.error(f"Error stopping {service_description}: {e}")
             return False
+
+    async def _start_memory_monitor(self):
+        """Start the memory monitor in a screen session (no port check needed)"""
+        screen_name = self.screen_names['memory_monitor']
+
+        # Check if script exists
+        if not self.memory_monitor_script.exists():
+            self.logger.warning(f"Memory monitor script not found: {self.memory_monitor_script}")
+            return
+
+        # Check if already running
+        if await check_screen_exists(screen_name):
+            self.logger.info(f"Memory monitor already running in screen '{screen_name}'")
+            return
+
+        self.logger.info(f"Starting memory monitor in screen '{screen_name}'...")
+
+        # Ensure log directory exists
+        self.memory_monitor_log.parent.mkdir(parents=True, exist_ok=True)
+
+        # Build command - memory_monitor.sh takes log file as first argument
+        cmd_str = f'{shlex.quote(str(self.memory_monitor_script))} {shlex.quote(str(self.memory_monitor_log))}'
+
+        # Start screen session
+        screen_cmd = ['screen', '-dmS', screen_name, 'bash', '-c', cmd_str]
+
+        process = await asyncio.create_subprocess_exec(
+            *screen_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await process.communicate()
+
+        # Brief wait and verify screen started
+        await asyncio.sleep(1)
+        if await check_screen_exists(screen_name):
+            self.logger.info(f"Memory monitor started successfully in screen '{screen_name}'")
+        else:
+            self.logger.error(f"Memory monitor failed to start")
+
+    async def _start_embedding_server(self):
+        """Start the Embedding server in a screen session"""
+        # Check if script exists
+        if not self.embedding_server_script.exists():
+            self.logger.warning(f"Embedding server script not found: {self.embedding_server_script}")
+            return
+
+        screen_name = self.screen_names['embedding_server']
+        cmd = [
+            str(self.uv_path), 'run', 'python',
+            str(self.embedding_server_script),
+            '--port', str(self.embedding_server_port),
+            '--host', '0.0.0.0'
+        ]
+
+        await self._start_in_screen(
+            screen_name=screen_name,
+            cmd=cmd,
+            port=self.embedding_server_port,
+            service_description='Embedding server',
+            log_file='logs/services/embedding_server.log'
+        )
 
     async def _start_llm_server(self):
         """Start the LLM server in a screen session"""
