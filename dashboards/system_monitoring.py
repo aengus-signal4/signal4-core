@@ -652,6 +652,11 @@ def get_cache_table_status(time_window: str = '30d') -> dict:
             # Get cache table stats per project
             project_stats = {}
 
+            # Generate date range for the cache window
+            days = 30 if time_window == '30d' else 7
+            end_date = datetime.now(timezone.utc).date()
+            start_date = end_date - timedelta(days=days - 1)
+
             for project in active_projects:
                 # Get segment and content counts from cache table
                 result = session.execute(text(f"""
@@ -666,7 +671,7 @@ def get_cache_table_status(time_window: str = '30d') -> dict:
                     WHERE :project = ANY(projects)
                 """), {'project': project}).fetchone()
 
-                # Get daily segment counts (by publish_date)
+                # Get daily embedded content counts (by publish_date) from cache
                 daily_results = session.execute(text(f"""
                     SELECT
                         DATE(publish_date AT TIME ZONE 'UTC') as publish_day,
@@ -678,8 +683,34 @@ def get_cache_table_status(time_window: str = '30d') -> dict:
                     ORDER BY publish_day
                 """), {'project': project}).fetchall()
 
-                daily_content = {row.publish_day: row.content_count for row in daily_results}
+                daily_embedded = {row.publish_day: row.content_count for row in daily_results}
                 daily_segments = {row.publish_day: row.segment_count for row in daily_results}
+
+                # Get daily total content counts from content table (stitched content in date range)
+                total_daily_results = session.execute(text("""
+                    SELECT
+                        DATE(publish_date AT TIME ZONE 'UTC') as publish_day,
+                        COUNT(*) as total_content,
+                        COUNT(*) FILTER (WHERE is_stitched = true) as stitched_content,
+                        COUNT(*) FILTER (WHERE is_embedded = true) as embedded_content
+                    FROM content
+                    WHERE :project = ANY(projects)
+                      AND blocked_download = false
+                      AND is_duplicate = false
+                      AND is_short = false
+                      AND publish_date >= :start_date
+                      AND publish_date < :end_date + interval '1 day'
+                    GROUP BY DATE(publish_date AT TIME ZONE 'UTC')
+                    ORDER BY publish_day
+                """), {
+                    'project': project,
+                    'start_date': start_date,
+                    'end_date': end_date
+                }).fetchall()
+
+                daily_total = {row.publish_day: row.total_content for row in total_daily_results}
+                daily_stitched = {row.publish_day: row.stitched_content for row in total_daily_results}
+                daily_embedded_content = {row.publish_day: row.embedded_content for row in total_daily_results}
 
                 project_stats[project] = {
                     'segment_count': result.segment_count or 0,
@@ -688,8 +719,11 @@ def get_cache_table_status(time_window: str = '30d') -> dict:
                     'with_alt_embedding': result.with_alt_embedding or 0,
                     'earliest_date': result.earliest_date.date().isoformat() if result.earliest_date else None,
                     'latest_date': result.latest_date.date().isoformat() if result.latest_date else None,
-                    'daily_content': daily_content,
+                    'daily_embedded': daily_embedded,
                     'daily_segments': daily_segments,
+                    'daily_total': daily_total,
+                    'daily_stitched': daily_stitched,
+                    'daily_embedded_content': daily_embedded_content,
                 }
 
             # Get overall cache stats
@@ -702,22 +736,20 @@ def get_cache_table_status(time_window: str = '30d') -> dict:
                 FROM {cache_table}
             """)).fetchone()
 
-            # Get total indexed content (content with segment embeddings) for percentage calculation
-            # Note: content.id (integer PK) joins to embedding_segments.content_id (integer FK)
-            indexed_result = session.execute(text("""
+            # Get total content in the date range for percentage calculation
+            window_totals = session.execute(text("""
                 SELECT
-                    COUNT(DISTINCT c.id) as total_indexed_content,
-                    COUNT(DISTINCT es.content_id) as content_with_embeddings,
-                    COUNT(es.id) as total_embedding_segments
-                FROM content c
-                LEFT JOIN embedding_segments es ON c.id = es.content_id
-                WHERE c.is_transcribed = true
-            """)).fetchone()
+                    COUNT(*) as total_content,
+                    COUNT(*) FILTER (WHERE is_stitched = true) as stitched_content,
+                    COUNT(*) FILTER (WHERE is_embedded = true) as embedded_content
+                FROM content
+                WHERE blocked_download = false
+                  AND is_duplicate = false
+                  AND is_short = false
+                  AND publish_date >= :start_date
+                  AND publish_date < :end_date + interval '1 day'
+            """), {'start_date': start_date, 'end_date': end_date}).fetchone()
 
-            # Generate date range for the cache window
-            days = 30 if time_window == '30d' else 7
-            end_date = datetime.now(timezone.utc).date()
-            start_date = end_date - timedelta(days=days - 1)
             all_dates = []
             current = start_date
             while current <= end_date:
@@ -729,12 +761,12 @@ def get_cache_table_status(time_window: str = '30d') -> dict:
                 'cache_table': cache_table,
                 'projects': project_stats,
                 'total_segments': total_result.total_segments or 0,
-                'total_content': total_result.total_content or 0,
+                'total_content_in_cache': total_result.total_content or 0,
                 'cache_start': total_result.cache_start.date().isoformat() if total_result.cache_start else None,
                 'cache_end': total_result.cache_end.date().isoformat() if total_result.cache_end else None,
-                'total_indexed_content': indexed_result.total_indexed_content or 0,
-                'content_with_embeddings': indexed_result.content_with_embeddings or 0,
-                'total_embedding_segments': indexed_result.total_embedding_segments or 0,
+                'window_total_content': window_totals.total_content or 0,
+                'window_stitched_content': window_totals.stitched_content or 0,
+                'window_embedded_content': window_totals.embedded_content or 0,
                 'date_range': {
                     'start': start_date.isoformat(),
                     'end': end_date.isoformat(),
@@ -874,15 +906,14 @@ def get_global_content_status() -> dict:
 # Visualization Functions
 # =============================================================================
 
-def create_cache_heatmap(cache_status: dict, show_segments: bool = False) -> go.Figure | None:
-    """Create a heatmap showing daily content/segments in the cache table per project.
+def create_cache_heatmap(cache_status: dict) -> go.Figure | None:
+    """Create a heatmap showing daily embedded percentage per project.
 
-    Color intensity indicates content available for analysis that day.
-    Shows overall system health and data availability at a glance.
+    Color intensity indicates what percentage of content published that day
+    has been fully processed (embedded). 100% = all green.
 
     Args:
         cache_status: Output from get_cache_table_status()
-        show_segments: If True, show segment counts; if False, show content counts
     """
     try:
         if not cache_status or 'error' in cache_status:
@@ -900,42 +931,58 @@ def create_cache_heatmap(cache_status: dict, show_segments: bool = False) -> go.
         sorted_projects = sorted(projects.keys())
         z_data = []
         hover_text = []
-        metric_name = "Segments" if show_segments else "Content"
-        daily_key = 'daily_segments' if show_segments else 'daily_content'
 
         for project in sorted_projects:
             project_data = projects[project]
-            daily = project_data.get(daily_key, {})
+            daily_total = project_data.get('daily_total', {})
+            daily_embedded = project_data.get('daily_embedded_content', {})
+            daily_stitched = project_data.get('daily_stitched', {})
             row_data = []
             row_hover = []
 
             for date_str in dates:
                 date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
-                count = daily.get(date_obj, 0)
-                row_data.append(count)
-                row_hover.append(f"{project}<br>{date_str}<br>{metric_name}: {count:,}")
+                total = daily_total.get(date_obj, 0)
+                embedded = daily_embedded.get(date_obj, 0)
+                stitched = daily_stitched.get(date_obj, 0)
+
+                if total > 0:
+                    pct = (embedded / total) * 100
+                    stitched_pct = (stitched / total) * 100
+                else:
+                    pct = 0
+                    stitched_pct = 0
+
+                row_data.append(pct)
+                row_hover.append(
+                    f"{project}<br>{date_str}<br>"
+                    f"Embedded: {embedded:,}/{total:,} ({pct:.0f}%)<br>"
+                    f"Stitched: {stitched:,}/{total:,} ({stitched_pct:.0f}%)"
+                )
 
             z_data.append(row_data)
             hover_text.append(row_hover)
 
-        # Create heatmap
+        # Create heatmap with 0-100% scale
         fig = go.Figure(data=go.Heatmap(
             z=z_data,
             x=[datetime.strptime(d, "%Y-%m-%d").strftime("%m/%d") for d in dates],
             y=sorted_projects,
+            zmin=0,
+            zmax=100,
             colorscale=[
-                [0, '#f0f0f0'],      # No data - light gray
-                [0.01, '#c6e48b'],   # Low - light green
-                [0.25, '#7bc96f'],   # Medium-low
-                [0.5, '#239a3b'],    # Medium
-                [0.75, '#196127'],   # Medium-high
-                [1, '#0e4429']       # High - dark green
+                [0, '#f0f0f0'],      # 0% - light gray
+                [0.01, '#ffcccc'],   # 1% - light red
+                [0.25, '#ffeb99'],   # 25% - yellow
+                [0.5, '#c6e48b'],    # 50% - light green
+                [0.75, '#7bc96f'],   # 75% - medium green
+                [1, '#239a3b']       # 100% - full green
             ],
             showscale=True,
             colorbar=dict(
-                title=metric_name,
+                title="Embedded %",
                 titleside="right",
-                tickformat=","
+                ticksuffix="%",
             ),
             hovertemplate='%{text}<extra></extra>',
             text=hover_text,
@@ -2132,32 +2179,31 @@ def render_projects_tab():
     if cache_status and 'error' not in cache_status:
         projects = cache_status.get('projects', {})
 
-        # Get totals for percentage calculation
-        total_content = cache_status.get('total_content', 0)
+        # Get totals for the time window
+        window_total = cache_status.get('window_total_content', 0)
+        window_stitched = cache_status.get('window_stitched_content', 0)
+        window_embedded = cache_status.get('window_embedded_content', 0)
         total_segments = cache_status.get('total_segments', 0)
-        total_indexed_content = cache_status.get('total_indexed_content', 0)
-        content_with_embeddings = cache_status.get('content_with_embeddings', 0)
-        total_embedding_segments = cache_status.get('total_embedding_segments', 0)
 
-        # Calculate percentages
-        content_pct = (total_content / total_indexed_content * 100) if total_indexed_content > 0 else 0
-        segment_pct = (total_segments / total_embedding_segments * 100) if total_embedding_segments > 0 else 0
+        # Calculate percentages for content in the time window
+        stitched_pct = (window_stitched / window_total * 100) if window_total > 0 else 0
+        embedded_pct = (window_embedded / window_total * 100) if window_total > 0 else 0
 
         # Summary metrics row
         col1, col2, col3, col4 = st.columns(4)
 
         with col1:
             st.metric(
-                "Content in Cache",
-                f"{content_pct:.1f}%",
-                delta=f"{total_content:,} of {total_indexed_content:,}",
+                "Stitched",
+                f"{stitched_pct:.1f}%",
+                delta=f"{window_stitched:,} of {window_total:,}",
                 delta_color="off"
             )
         with col2:
             st.metric(
-                "Segments in Cache",
-                f"{segment_pct:.1f}%",
-                delta=f"{total_segments:,} of {total_embedding_segments:,}",
+                "Embedded",
+                f"{embedded_pct:.1f}%",
+                delta=f"{window_embedded:,} of {window_total:,}",
                 delta_color="off"
             )
         with col3:
@@ -2180,13 +2226,13 @@ def render_projects_tab():
             )
 
         # Show cache date range
-        cache_start = cache_status.get('cache_start', 'N/A')
-        cache_end = cache_status.get('cache_end', 'N/A')
-        st.caption(f"Cache range: {cache_start} to {cache_end} | Table: `{cache_status.get('cache_table')}`")
+        date_range = cache_status.get('date_range', {})
+        cache_start = date_range.get('start', 'N/A')
+        cache_end = date_range.get('end', 'N/A')
+        st.caption(f"Date range: {cache_start} to {cache_end} | Cache table: `{cache_status.get('cache_table')}`")
 
-        # Heatmap visualization
-        show_segments = st.checkbox("Show segments (instead of content)", value=False, key='show_segments')
-        heatmap_fig = create_cache_heatmap(cache_status, show_segments=show_segments)
+        # Heatmap visualization (show_segments parameter no longer used)
+        heatmap_fig = create_cache_heatmap(cache_status)
         if heatmap_fig:
             st.plotly_chart(heatmap_fig, use_container_width=True)
         else:
