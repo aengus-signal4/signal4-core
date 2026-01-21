@@ -6,12 +6,19 @@ Groups consecutive sentences by same speaker for efficient analysis.
 Single-speaker segments are analyzed as one chunk.
 Multi-speaker segments are split by speaker runs.
 
+Memory Management:
+    - Uses MLX metal cache limit to bound GPU memory usage
+    - Clears cache + gc.collect() after each content item
+    - Model weights: ~22GB (loaded separately, not counted in cache limit)
+    - Default cache limit: 10GB → total ~32GB peak, safe for 64GB with other processes
+
 Usage:
     uv run python hydrate_tones.py --project Canadian
     uv run python hydrate_tones.py --project Canadian --project CPRMV
     uv run python hydrate_tones.py --project Canadian --limit 100
     uv run python hydrate_tones.py --project Canadian --since 2025-01-01
     uv run python hydrate_tones.py --project Canadian --dry-run
+    uv run python hydrate_tones.py --project Canadian --memory-limit 16  # 16GB limit
 """
 
 # Suppress macOS MallocStackLogging warnings (must be before other imports)
@@ -19,8 +26,10 @@ import os
 os.environ["MallocStackLogging"] = "0"
 
 import argparse
+import gc
 import json
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -36,14 +45,23 @@ import psycopg2
 from dotenv import load_dotenv
 from tqdm import tqdm
 
-# Load environment from core/.env
+# MLX memory management
+import mlx.core as mx
+
+# Load environment from core/.env and add core/src to path for imports
 CORE_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(CORE_DIR / ".env", override=True)
+sys.path.insert(0, str(CORE_DIR))
+
+from src.utils.logger import setup_worker_logger
+
+logger = setup_worker_logger("tone_hydration")
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 MODEL_PATH = str(SCRIPT_DIR / "mlx_qwen3_omni_4bit")
 MIN_WORDS = 5
 MAX_CHUNK_DURATION = 60.0  # Split speaker runs longer than this
+DEFAULT_MEMORY_LIMIT_GB = 10  # Default MLX cache limit in GB (model uses ~22GB separately)
 
 # Tone analysis prompt
 TONE_PROMPT = """Listen to this audio and classify the speaker's vocal tone.
@@ -66,6 +84,19 @@ Respond with JSON only:
 DOMINANCE_MAP = {"submissive": 0.2, "neutral": 0.5, "assertive": 0.7, "commanding": 0.9}
 AROUSAL_MAP = {"neutral": 0.3, "angry": 0.9, "happy": 0.7, "sad": 0.3, "fearful": 0.8, "disgusted": 0.6, "surprised": 0.8}
 VALENCE_MAP = {"neutral": 0.5, "angry": 0.2, "happy": 0.9, "sad": 0.2, "fearful": 0.3, "disgusted": 0.2, "surprised": 0.6}
+
+
+def clear_mlx_memory():
+    """Clear MLX metal cache and run Python garbage collection."""
+    gc.collect()
+    mx.metal.clear_cache()
+
+
+def set_mlx_memory_limit(limit_gb: float):
+    """Set MLX metal cache limit in GB."""
+    limit_bytes = int(limit_gb * 1024 * 1024 * 1024)
+    mx.metal.set_cache_limit(limit_bytes)
+    logger.info(f"MLX cache limit set to {limit_gb:.1f} GB ({limit_bytes:,} bytes)")
 
 
 @dataclass
@@ -420,6 +451,9 @@ def process_content(content_id: str, model, processor, dry_run: bool = False) ->
             if audio_path and os.path.exists(audio_path):
                 os.unlink(audio_path)
 
+    # Clear MLX memory after processing all chunks for this content
+    clear_mlx_memory()
+
     return {
         "status": "success",
         "chunks": len(chunks),
@@ -437,36 +471,40 @@ def main():
     parser.add_argument("--limit", "-l", type=int, help="Max content items to process")
     parser.add_argument("--since", "-s", type=str, help="Only process content published since (YYYY-MM-DD)")
     parser.add_argument("--dry-run", action="store_true", help="Don't update database")
+    parser.add_argument("--memory-limit", "-m", type=float, default=DEFAULT_MEMORY_LIMIT_GB,
+                        help=f"MLX cache memory limit in GB (default: {DEFAULT_MEMORY_LIMIT_GB})")
     args = parser.parse_args()
 
     projects = args.project  # List of projects
 
+    # Set MLX memory limit before loading model
+    set_mlx_memory_limit(args.memory_limit)
+
     # Load model
-    print(f"Loading model: {MODEL_PATH}")
+    logger.info(f"Loading model: {MODEL_PATH}")
     from mlx_vlm import load
     model, processor = load(MODEL_PATH, trust_remote_code=True)
-    print("Model loaded\n")
+    logger.info("Model loaded")
 
     # Get content needing tone
     projects_str = ", ".join(projects)
-    print(f"Finding content needing tone analysis for: {projects_str}")
+    logger.info(f"Finding content needing tone analysis for: {projects_str}")
     if args.since:
-        print(f"  (published since {args.since})")
+        logger.info(f"  (published since {args.since})")
 
     content_list = get_content_needing_tone(projects, args.limit, args.since)
 
     if not content_list:
-        print("No content found needing tone analysis.")
+        logger.info("No content found needing tone analysis.")
         return
 
     total_sentences = sum(c['sentences_needing'] for c in content_list)
     total_duration = sum(c['duration'] or 0 for c in content_list)
 
-    print(f"Found {len(content_list)} content items")
-    print(f"Total sentences needing tone: {total_sentences:,}")
-    print(f"Total audio duration: {total_duration/3600:.1f} hours")
-    print(f"Estimated processing time at 7x RT: {total_duration/3600/7:.1f} hours")
-    print()
+    logger.info(f"Found {len(content_list)} content items")
+    logger.info(f"Total sentences needing tone: {total_sentences:,}")
+    logger.info(f"Total audio duration: {total_duration/3600:.1f} hours")
+    logger.info(f"Estimated processing time at 7x RT: {total_duration/3600/7:.1f} hours")
 
     # Stats tracking
     stats = {
@@ -491,10 +529,17 @@ def main():
                 stats['sentences_updated'] += result['sentences']
                 stats['audio_seconds'] += result['audio_s']
                 stats['analysis_seconds'] += result['analysis_s']
+                # Log each content completion
+                item_rt = result['analysis_s'] / result['audio_s'] if result['audio_s'] > 0 else 0
+                msg = f"✓ {item['content_id']}: {result['sentences']} sentences, {result['audio_s']:.0f}s audio, RT={item_rt:.2f}x"
+                logger.info(msg)
+                tqdm.write(msg)  # Print to console without disrupting progress bar
             elif result['status'] == 'no_audio':
                 stats['no_audio'] += 1
+                logger.warning(f"No audio for {item['content_id']}")
             elif result['status'] == 'no_chunks':
                 stats['no_chunks'] += 1
+                logger.debug(f"No chunks for {item['content_id']}")
 
             # Update progress bar with running stats
             if stats['audio_seconds'] > 0:
@@ -508,20 +553,20 @@ def main():
     rt_factor = stats['analysis_seconds'] / stats['audio_seconds'] if stats['audio_seconds'] > 0 else 0
     speed = stats['audio_seconds'] / stats['analysis_seconds'] if stats['analysis_seconds'] > 0 else 0
 
-    # Final summary (human readable)
-    print("\n" + "="*60)
-    print(f"COMPLETED - Tone Analysis ({projects_str})")
-    print("="*60)
-    print(f"Content processed: {stats['processed']}")
-    print(f"No audio: {stats['no_audio']}")
-    print(f"No chunks: {stats['no_chunks']}")
-    print(f"Sentences updated: {stats['sentences_updated']:,}")
-    print(f"Audio processed: {stats['audio_seconds']/3600:.2f} hours")
-    print(f"Analysis time: {stats['analysis_seconds']/3600:.2f} hours")
+    # Final summary
+    logger.info("="*60)
+    logger.info(f"COMPLETED - Tone Analysis ({projects_str})")
+    logger.info("="*60)
+    logger.info(f"Content processed: {stats['processed']}")
+    logger.info(f"No audio: {stats['no_audio']}")
+    logger.info(f"No chunks: {stats['no_chunks']}")
+    logger.info(f"Sentences updated: {stats['sentences_updated']:,}")
+    logger.info(f"Audio processed: {stats['audio_seconds']/3600:.2f} hours")
+    logger.info(f"Analysis time: {stats['analysis_seconds']/3600:.2f} hours")
     if stats['audio_seconds'] > 0:
-        print(f"RT factor: {rt_factor:.3f}x ({speed:.1f}x real-time)")
+        logger.info(f"RT factor: {rt_factor:.3f}x ({speed:.1f}x real-time)")
     if args.dry_run:
-        print("\n[DRY RUN - no database updates made]")
+        logger.info("[DRY RUN - no database updates made]")
 
     # Standardized metrics output (JSON on single line for orchestrator parsing)
     metrics = {
@@ -537,7 +582,7 @@ def main():
         "speed_multiplier": round(speed, 1),
         "dry_run": args.dry_run,
     }
-    print(f"\nMETRICS_JSON: {json.dumps(metrics)}")
+    logger.info(f"METRICS_JSON: {json.dumps(metrics)}")
 
 
 if __name__ == "__main__":
