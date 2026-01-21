@@ -6,13 +6,11 @@ Loads configuration from environment variables.
 """
 
 import os
-from pathlib import Path
-from src.utils.paths import get_project_root, get_config_path
+from src.utils.paths import get_project_root, get_config_path, get_env_path
 from dotenv import load_dotenv
 
-# Load .env file
-env_path = get_project_root() / '.env'
-load_dotenv(env_path)
+# Load .env file from parent signal4/ directory
+load_dotenv(get_env_path())
 
 # Database - use centralized config
 def _get_database_url():

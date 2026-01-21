@@ -27,9 +27,9 @@ def load_env():
         stacklevel=2
     )
 
-    # Find the root directory (where .env is located)
-    from .paths import get_project_root
-    env_path = get_project_root() / '.env'
+    # Find the .env file (in parent signal4/ directory)
+    from .paths import get_env_path
+    env_path = get_env_path()
 
     # Load environment variables from .env file
     load_dotenv(env_path)

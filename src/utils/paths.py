@@ -31,6 +31,26 @@ def get_project_root() -> Path:
     return _project_root
 
 
+# Cache the env path
+_env_path: Optional[Path] = None
+
+
+def get_env_path() -> Path:
+    """Get the path to the .env file.
+
+    The .env file lives in the parent signal4/ directory, not in core/.
+    This is the canonical way to find credentials.
+
+    Returns:
+        Path to .env file (e.g., /Users/signal4/signal4/.env)
+    """
+    global _env_path
+    if _env_path is None:
+        # .env is in the parent directory (signal4/), not in core/
+        _env_path = get_project_root().parent / '.env'
+    return _env_path
+
+
 def get_config_path(filename: str = "config.yaml") -> Path:
     """Get path to a config file.
 
