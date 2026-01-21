@@ -72,9 +72,12 @@ class YouTubeDownloader:
         # Download settings
         self.download_retries = self.yt_config.get('download_retries', 3)
         self.socket_timeout = self.yt_config.get('socket_timeout', 30)
-        # Limit to 360p for bandwidth/storage efficiency
-        # Prefer combined formats (18) over separate video+audio to handle flaky networks better
+        # Standard format: 360p MP4 for bandwidth/storage efficiency
         self.video_format = self.yt_config.get('video_format', 'best[height<=360][ext=mp4]/18/best[height<=360]/best')
+        # Flexible format for Shorts (<= 60s): handles HLS/m3u8 streams from SABR
+        self.shorts_format = 'bestvideo[height<=360]+bestaudio/worstvideo+worstaudio/best'
+        # Duration threshold for Shorts detection (seconds)
+        self.shorts_duration_threshold = 60
         
         # Get and parse throttle rate
         self.throttle_rate_str = self.yt_config.get('throttle_rate')
@@ -402,14 +405,44 @@ class YouTubeDownloader:
             logger.error(f"Error checking if content exists in S3: {str(e)}")
             return False
 
+    def _get_video_info(self, video_url: str) -> Optional[Dict]:
+        """Extract video info without downloading to check duration."""
+        try:
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': False,
+                'skip_download': True,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(video_url, download=False)
+                return info
+        except Exception as e:
+            logger.warning(f"Could not extract video info: {e}")
+            return None
+
+    def _is_short_video(self, video_url: str) -> bool:
+        """Check if video is a Short (duration <= 60s)."""
+        info = self._get_video_info(video_url)
+        if info and info.get('duration'):
+            duration = info['duration']
+            is_short = duration <= self.shorts_duration_threshold
+            if is_short:
+                logger.info(f"Detected Short video ({duration}s <= {self.shorts_duration_threshold}s), using flexible format")
+            return is_short
+        return False
+
     async def _download_video(self, video_url: str, output_path: Path) -> Dict:
         """Download video using yt-dlp"""
         try:
             logger.info(f"Starting download for {video_url} to {output_path}")
 
+            # Check if this is a Short and select appropriate format
+            video_format = self.shorts_format if self._is_short_video(video_url) else self.video_format
+
             # Configure yt-dlp
             ydl_opts = {
-                'format': self.video_format,
+                'format': video_format,
                 'outtmpl': str(output_path),
                 'quiet': False,  # Enable output to see what's happening
                 'no_warnings': False,  # Show warnings
@@ -423,6 +456,7 @@ class YouTubeDownloader:
                 'file_access_retries': 5,  # Retry file operations
                 'http_chunk_size': 1048576,  # 1MB chunks to handle connection drops better
                 'noresizebuffer': True,  # Don't resize buffer (more stable)
+                'merge_output_format': 'mp4',  # Always output mp4 when merging
             }
 
             # Add rate limit if configured
@@ -482,7 +516,7 @@ class YouTubeDownloader:
 
                 # Retry with default format as last resort
                 if retry_with_default_format:
-                    logger.warning(f"Format '{self.video_format}' not available. Retrying with default format...")
+                    logger.warning(f"Format '{video_format}' not available. Retrying with default format...")
                     ydl_opts_default = dict(ydl_opts)
                     # Remove format specification to use yt-dlp's default selection
                     del ydl_opts_default['format']
