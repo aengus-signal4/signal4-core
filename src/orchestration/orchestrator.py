@@ -166,48 +166,7 @@ class TaskOrchestratorV2:
         logger.info(f"Task Orchestrator V{self.VERSION} initialized successfully")
         logger.info(f"Configuration loaded from: {self.config_manager.config_path}")
         logger.info(f"Global pause enabled: {self.global_pause_until is not None}")
-    
-    async def _reload_config(self) -> bool:
-        """Reload configuration and update components"""
-        try:
-            # Use config manager for reloading
-            reloaded = self.config_manager.reload_config()
-            if not reloaded:
-                return False
-            
-            # Update local reference
-            self.config = self.config_manager.config
-            
-            # Update component configurations
-            if hasattr(self.task_manager, 'update_config'):
-                self.task_manager.update_config(new_config)
-            
-            # Update worker configurations using worker pool
-            worker_configs = self.config_manager.get_worker_configs()
-            self.worker_pool.update_all_from_config(worker_configs)
-            
-            # Update behavior manager
-            self.behavior_manager = HumanBehaviorManager(self.config_manager.config_path)
-            
-            # Update pipeline manager
-            self.pipeline_manager = PipelineManager(
-                self.behavior_manager,
-                self.config,
-                self.failure_tracker.worker_task_failures
-            )
-            
-            # Update API configuration from config manager
-            self.api_host = self.config_manager.api_host
-            self.api_port = self.config_manager.api_port
-            self.callback_url = self.config_manager.callback_url
-            
-            logger.info("Configuration reloaded successfully")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error reloading configuration: {str(e)}")
-            return False
-    
+
     async def initialize(self) -> bool:
         """Initialize the orchestrator and all components"""
         try:

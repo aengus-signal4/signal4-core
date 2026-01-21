@@ -182,7 +182,25 @@ class HealthChecker:
 
 
 class TaskAssigner:
-    """Handles the main task assignment loop"""
+    """
+    Handles the main (proactive) task assignment loop.
+
+    DUAL ASSIGNMENT ARCHITECTURE:
+    -----------------------------
+    Tasks are assigned through TWO complementary paths:
+
+    1. PROACTIVE (this class): Runs every 5 seconds, checks all available workers,
+       and fills their queues to capacity. Ensures workers always have work queued.
+
+    2. REACTIVE (ReactiveAssignmentManager): Triggered immediately when a task
+       completes. Backfills the worker's queue without waiting for the next cycle.
+
+    This dual approach minimizes worker idle time:
+    - Proactive catches workers that become available between reactive triggers
+    - Reactive ensures immediate backfill on task completion (no 5s wait)
+
+    Both paths respect the same constraints (capacity, failure tracking, global pause).
+    """
 
     def __init__(self, orchestrator: 'TaskOrchestratorV2'):
         self.orchestrator = orchestrator

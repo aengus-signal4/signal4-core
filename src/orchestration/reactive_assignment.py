@@ -1,5 +1,21 @@
 """
 Reactive Assignment - Immediately assigns new tasks when workers complete tasks
+
+DUAL ASSIGNMENT ARCHITECTURE:
+-----------------------------
+Tasks are assigned through TWO complementary paths:
+
+1. PROACTIVE (TaskAssigner in background_loops.py): Runs every 5 seconds,
+   checks all available workers, and fills their queues to capacity.
+
+2. REACTIVE (this module): Triggered immediately when a task completes via
+   the orchestrator callback. Backfills the worker's queue without waiting.
+
+This dual approach minimizes worker idle time:
+- Proactive catches workers that become available between reactive triggers
+- Reactive ensures immediate backfill on task completion (no 5s wait)
+
+Both paths respect the same constraints (capacity, failure tracking, global pause).
 """
 import asyncio
 import logging
@@ -8,8 +24,15 @@ from typing import Dict, List, Any, Optional, Set
 
 logger = logging.getLogger(__name__)
 
+
 class ReactiveAssignmentManager:
-    """Manages immediate task assignment when workers complete tasks"""
+    """
+    Manages immediate task assignment when workers complete tasks.
+
+    Called from orchestrator.handle_task_callback() to immediately backfill
+    a worker's queue after task completion, rather than waiting for the
+    next TaskAssigner cycle (up to 5 seconds).
+    """
 
     def __init__(self, task_manager, orchestrator):
         self.task_manager = task_manager
