@@ -708,28 +708,29 @@ Examples:
 
         # Print machine-readable summary for orchestrator
         import json
+        phases_run = phases or orchestrator.phases
         summary = {
-            'phases_run': args.phases,
+            'phases_run': phases_run,
             'total_time_minutes': round(stats.get('total_time', 0) / 60, 1)
         }
         # Add phase-specific stats
-        if 1 in args.phases:
+        if 1 in phases_run:
             p1 = stats.get('phase1', {})
             summary['phase1_episodes_processed'] = p1.get('episodes_processed', 0)
             summary['phase1_speakers_identified'] = p1.get('speakers_identified', 0)
-        if 2 in args.phases:
+        if 2 in phases_run:
             p2 = stats.get('phase2', {})
             summary['phase2_evidence_certain'] = p2.get('evidence_found_certain', 0)
             summary['phase2_evidence_none'] = p2.get('evidence_none', 0)
-        if 3 in args.phases:
+        if 3 in phases_run:
             p3 = stats.get('phase3', {})
             summary['phase3_clusters_created'] = p3.get('clusters_created', 0)
             summary['phase3_speakers_assigned'] = p3.get('speakers_assigned', 0)
-        if 4 in args.phases:
+        if 4 in phases_run:
             p4 = stats.get('phase4', {})
             summary['phase4_merges_confirmed'] = p4.get('llm_confirmed_same', 0)
             summary['phase4_merges_executed'] = p4.get('merges_executed', 0)
-        if 5 in args.phases:
+        if 5 in phases_run:
             p5 = stats.get('phase5', {})
             summary['phase5_identities_hydrated'] = p5.get('identities_hydrated', 0)
         print(f"TASK_SUMMARY: {json.dumps(summary)}")
