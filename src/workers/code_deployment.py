@@ -183,6 +183,7 @@ class CodeDeploymentManager:
                     '--exclude=.git',
                     '--exclude=*.pyc',
                     '--exclude=.next',
+                    '--exclude=core/scripts',  # Large model weights, not needed on workers
                     '-e', f'ssh -o StrictHostKeyChecking=no -i {self.ssh_key_path}',
                     f'{self.project_root}/',
                     f'{self.ssh_username}@{target_ip}:{self.project_root}/'
