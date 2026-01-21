@@ -51,7 +51,9 @@ class CodeDeploymentManager:
         self.config = config
         self.ssh_username = config.get('processing', {}).get('ssh_username', 'signal4')
         self.ssh_key_path = config.get('processing', {}).get('ssh_key_path', '/Users/signal4/.ssh/id_ed25519')
-        self.project_path = '/Users/signal4/signal4/core'
+        # Sync full signal4/ directory (includes core/, frontend/, brand/, .env, etc.)
+        self.project_root = '/Users/signal4/signal4'
+        self.core_path = '/Users/signal4/signal4/core'
 
         # Track deployment status
         self.current_deployment: Optional[DeploymentStatus] = None
@@ -163,27 +165,27 @@ class CodeDeploymentManager:
 
                 # Step 1: Create project directory if it doesn't exist
                 logger.debug(f"[{worker_id}] Creating project directory")
-                result = await conn.run(f'mkdir -p {self.project_path}')
+                result = await conn.run(f'mkdir -p {self.project_root}')
                 steps_completed.append('create_directory')
                 output_lines.append(f"Create directory: {result.stdout}")
 
-                # Step 2: Rsync code from head node TO worker (correct direction)
-                # Execute locally on head node to push code to worker
-
-                # Create directory structure on worker first
-                logger.info(f"[{worker_id}] Syncing code via rsync...")
-                await conn.run(f'mkdir -p /Users/signal4/signal4')
+                # Step 2: Rsync full signal4/ directory from head node TO worker
+                # This includes core/, frontend/, brand/, .env, CLAUDE.md, etc.
+                logger.info(f"[{worker_id}] Syncing signal4/ directory via rsync...")
 
                 # Rsync from head TO worker (push direction)
+                # Exclude .git directories and venvs, but sync everything else
                 rsync_cmd = [
                     'rsync', '-av', '--delete',
                     '--exclude=.venv',
+                    '--exclude=node_modules',
                     '--exclude=__pycache__',
                     '--exclude=.git',
                     '--exclude=*.pyc',
+                    '--exclude=.next',
                     '-e', f'ssh -o StrictHostKeyChecking=no -i {self.ssh_key_path}',
-                    '/Users/signal4/signal4/core/',
-                    f'{self.ssh_username}@{target_ip}:/Users/signal4/signal4/core/'
+                    f'{self.project_root}/',
+                    f'{self.ssh_username}@{target_ip}:{self.project_root}/'
                 ]
 
                 # Execute rsync locally (on head node) to push to worker
@@ -193,21 +195,21 @@ class CodeDeploymentManager:
                     stderr=asyncio.subprocess.PIPE
                 )
                 try:
-                    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
+                    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
                 except asyncio.TimeoutError:
                     proc.kill()
-                    raise Exception(f"Rsync timed out after 180s")
+                    raise Exception(f"Rsync timed out after 300s")
 
                 if proc.returncode != 0:
                     raise Exception(f"Rsync failed: {stderr.decode()}")
                 steps_completed.append('sync_code')
-                logger.info(f"[{worker_id}] Code synced successfully")
-                output_lines.append(f"Rsync: Synced code from head to worker ({stdout.decode().strip()})")
+                logger.info(f"[{worker_id}] signal4/ directory synced successfully")
+                output_lines.append(f"Rsync: Synced signal4/ from head to worker")
 
-                # Step 5: Update dependencies
+                # Step 3: Update dependencies
                 # Use the working SSH command format
                 logger.info(f"[{worker_id}] Running uv sync...")
-                uv_cmd = f'cd {self.project_path} && /Users/signal4/.local/bin/uv sync --quiet'
+                uv_cmd = f'cd {self.core_path} && /Users/signal4/.local/bin/uv sync --quiet'
                 try:
                     result = await asyncio.wait_for(conn.run(uv_cmd), timeout=120)
                     steps_completed.append('uv_sync')
@@ -218,7 +220,7 @@ class CodeDeploymentManager:
                     steps_completed.append('uv_sync_timeout')
                     output_lines.append("UV sync: Timed out after 120s")
 
-                # Step 6: Always restart processor to pick up new code
+                # Step 4: Always restart processor to pick up new code
                 # Stop existing processor
                 logger.info(f"[{worker_id}] Restarting processor...")
                 await conn.run('pkill -f "processor.py" || true')
@@ -229,7 +231,7 @@ class CodeDeploymentManager:
 
                 # Start processor in background
                 # Use nohup to detach from SSH session
-                start_cmd = f'cd {self.project_path} && nohup /Users/signal4/.local/bin/uv run python src/workers/processor.py > /tmp/processor.log 2>&1 &'
+                start_cmd = f'cd {self.core_path} && nohup /Users/signal4/.local/bin/uv run python src/workers/processor.py > /tmp/processor.log 2>&1 &'
                 await conn.run(start_cmd)
                 steps_completed.append('start_processor')
                 logger.info(f"[{worker_id}] Processor restarted")
