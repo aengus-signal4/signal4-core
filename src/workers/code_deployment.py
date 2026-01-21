@@ -169,7 +169,6 @@ class CodeDeploymentManager:
 
                 # Step 2: Rsync code from head node TO worker (correct direction)
                 # Execute locally on head node to push code to worker
-                import asyncio
 
                 # Create directory structure on worker first
                 logger.info(f"[{worker_id}] Syncing code via rsync...")
