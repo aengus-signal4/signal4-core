@@ -6,17 +6,55 @@ Manages startup of:
 - Monitoring dashboards (worker, project, orchestrator, system)
 - Audio server
 - Backend API
+
+All services run in named screen sessions for persistence across orchestrator restarts.
 """
 import asyncio
 import subprocess
 import logging
 import signal
 import os
+import shlex
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
+
+
+async def check_screen_exists(screen_name: str) -> bool:
+    """Check if a screen session with the given name exists."""
+    try:
+        process = await asyncio.create_subprocess_exec(
+            'screen', '-ls',
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await process.communicate()
+        output = stdout.decode('utf-8', errors='replace')
+
+        for line in output.split('\n'):
+            if f'.{screen_name}' in line or f'\t{screen_name}\t' in line:
+                return True
+        return False
+    except Exception as e:
+        logger.warning(f"Error checking screen sessions: {e}")
+        return False
+
+
+async def kill_screen_session(screen_name: str) -> bool:
+    """Kill a screen session by name."""
+    try:
+        process = await asyncio.create_subprocess_exec(
+            'screen', '-S', screen_name, '-X', 'quit',
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await process.communicate()
+        return True
+    except Exception as e:
+        logger.warning(f"Error killing screen session {screen_name}: {e}")
+        return False
 
 class ServiceStartupManager:
     """Manages startup of central services on head node"""
@@ -61,9 +99,17 @@ class ServiceStartupManager:
         self.model_server_instances = model_servers_config.get('instances', {})
         self.model_server_script = self.base_path / 'src' / 'services' / 'llm' / 'mlx_server.py'
 
-        # Process tracking
+        # Process tracking (legacy - kept for compatibility but not used for screen sessions)
         self.processes = {}
         self.should_stop = False
+
+        # Screen session names for each service
+        self.screen_names = {
+            'backend': 'backend_api',
+            'llm_server': 'llm_server',
+            'audio_server': 'audio_server',
+            'system_monitoring': 'system_monitoring',
+        }
 
     async def start_services(self):
         """Start all configured services"""
@@ -94,12 +140,23 @@ class ServiceStartupManager:
         )
 
     async def stop_services(self):
-        """Stop all managed services"""
+        """Stop all managed services running in screen sessions"""
         self.should_stop = True
 
+        # Stop all screen-based services
+        for service_name, screen_name in self.screen_names.items():
+            await self._stop_screen_service(screen_name, service_name)
+
+        # Stop any model server screens
+        if self.model_servers_enabled:
+            for instance_name in self.model_server_instances.keys():
+                screen_name = f'model_server_{instance_name}'
+                await self._stop_screen_service(screen_name, f'Model server {instance_name}')
+
+        # Legacy: stop any subprocess-based services that might still be running
         for service_name, process in self.processes.items():
             if process and process.returncode is None:
-                self.logger.info(f"Stopping {service_name}...")
+                self.logger.info(f"Stopping legacy process {service_name}...")
                 try:
                     process.terminate()
                     try:
@@ -107,131 +164,160 @@ class ServiceStartupManager:
                     except subprocess.TimeoutExpired:
                         process.kill()
                         process.wait()
-                    self.logger.info(f"Stopped {service_name}")
+                    self.logger.info(f"Stopped legacy process {service_name}")
                 except Exception as e:
                     self.logger.error(f"Error stopping {service_name}: {e}")
 
         self.processes.clear()
 
-    async def _start_llm_server(self):
-        """Start the LLM server"""
+    async def _start_in_screen(
+        self,
+        screen_name: str,
+        cmd: List[str],
+        port: int,
+        service_description: str,
+        log_file: Optional[str] = None
+    ) -> bool:
+        """Start a service in a named screen session.
+
+        Args:
+            screen_name: Name for the screen session
+            cmd: Command to run (list of strings)
+            port: Port the service listens on (for health checking)
+            service_description: Human-readable description for logging
+            log_file: Optional log file path (relative to base_path)
+
+        Returns:
+            True if service started successfully
+        """
         try:
-            self.logger.info(f"Starting LLM server on port {self.llm_port}...")
+            # Check if screen session already exists
+            if await check_screen_exists(screen_name):
+                # Screen exists - check if service is actually running on port
+                if await self._check_port_in_use(port):
+                    self.logger.info(f"{service_description} already running in screen '{screen_name}' on port {port}")
+                    return True
+                else:
+                    # Screen exists but port not in use - kill stale screen
+                    self.logger.warning(f"Found stale screen session '{screen_name}', killing it")
+                    await kill_screen_session(screen_name)
+                    await asyncio.sleep(1)
 
-            # Check if already running
-            if await self._check_port_in_use(self.llm_port):
-                self.logger.warning(f"LLM server already running on port {self.llm_port}")
-                return
+            # Check if port is in use by something else (not our screen)
+            if await self._check_port_in_use(port):
+                self.logger.warning(f"{service_description} port {port} already in use by another process")
+                return True  # Consider it running
 
-            # Start LLM server using uv run for proper environment
-            cmd = [
-                str(self.uv_path), 'run', 'python',
-                str(self.llm_script),
-                '--port', str(self.llm_port)
-            ]
+            self.logger.info(f"Starting {service_description} in screen '{screen_name}' on port {port}...")
 
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=str(self.base_path)
+            # Build the command string
+            cmd_str = ' '.join(shlex.quote(str(arg)) for arg in cmd)
+
+            # Add logging if log file specified
+            if log_file:
+                log_path = self.base_path / log_file
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                cmd_str = f'{cmd_str} 2>&1 | tee -a {shlex.quote(str(log_path))}'
+
+            # Wrap command to run in project directory
+            wrapped_cmd = f'cd {shlex.quote(str(self.base_path))} && {cmd_str}'
+
+            # Start screen session
+            screen_cmd = ['screen', '-dmS', screen_name, 'bash', '-c', wrapped_cmd]
+
+            process = await asyncio.create_subprocess_exec(
+                *screen_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
             )
+            await process.communicate()
 
-            self.processes['llm_server'] = process
-
-            # Wait a moment and check if it's running
-            await asyncio.sleep(2)
-
-            if process.poll() is None:
-                self.logger.info(f"LLM server started successfully on port {self.llm_port}")
-            else:
-                stdout, stderr = process.communicate()
-                self.logger.error(f"LLM server failed to start. stdout: {stdout.decode()}, stderr: {stderr.decode()}")
-
-        except Exception as e:
-            self.logger.error(f"Error starting LLM server: {e}", exc_info=True)
-
-    async def _start_backend(self):
-        """Start the Backend API server"""
-        try:
-            self.logger.info(f"Starting Backend API on port {self.backend_port}...")
-
-            # Check if already running
-            if await self._check_port_in_use(self.backend_port):
-                self.logger.warning(f"Backend API already running on port {self.backend_port}")
-                return
-
-            # Start Backend API using uv run uvicorn
-            cmd = [
-                str(self.uv_path), 'run', 'python',
-                '-m', 'uvicorn',
-                self.backend_module,
-                '--host', '0.0.0.0',
-                '--port', str(self.backend_port)
-            ]
-
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=str(self.base_path)
-            )
-
-            self.processes['backend'] = process
-
-            # Wait a moment and check if it's running
+            # Wait for service to start and verify
             await asyncio.sleep(3)
 
-            if process.poll() is None:
-                self.logger.info(f"Backend API started successfully on port {self.backend_port}")
+            if await self._check_port_in_use(port):
+                self.logger.info(f"{service_description} started successfully in screen '{screen_name}' on port {port}")
+                return True
             else:
-                stdout, stderr = process.communicate()
-                self.logger.error(f"Backend API failed to start. stdout: {stdout.decode()}, stderr: {stderr.decode()}")
+                self.logger.error(f"{service_description} failed to start - port {port} not listening")
+                return False
 
         except Exception as e:
-            self.logger.error(f"Error starting Backend API: {e}", exc_info=True)
+            self.logger.error(f"Error starting {service_description}: {e}", exc_info=True)
+            return False
+
+    async def _stop_screen_service(self, screen_name: str, service_description: str) -> bool:
+        """Stop a service running in a screen session."""
+        try:
+            if await check_screen_exists(screen_name):
+                self.logger.info(f"Stopping {service_description} (screen: {screen_name})...")
+                await kill_screen_session(screen_name)
+                await asyncio.sleep(1)
+                self.logger.info(f"Stopped {service_description}")
+                return True
+            else:
+                self.logger.info(f"{service_description} not running (no screen session found)")
+                return True
+        except Exception as e:
+            self.logger.error(f"Error stopping {service_description}: {e}")
+            return False
+
+    async def _start_llm_server(self):
+        """Start the LLM server in a screen session"""
+        screen_name = self.screen_names['llm_server']
+        cmd = [
+            str(self.uv_path), 'run', 'python',
+            str(self.llm_script),
+            '--port', str(self.llm_port)
+        ]
+
+        await self._start_in_screen(
+            screen_name=screen_name,
+            cmd=cmd,
+            port=self.llm_port,
+            service_description='LLM server',
+            log_file='logs/services/llm_server.log'
+        )
+
+    async def _start_backend(self):
+        """Start the Backend API server in a screen session"""
+        screen_name = self.screen_names['backend']
+        cmd = [
+            str(self.uv_path), 'run', 'python',
+            '-m', 'uvicorn',
+            self.backend_module,
+            '--host', '0.0.0.0',
+            '--port', str(self.backend_port)
+        ]
+
+        await self._start_in_screen(
+            screen_name=screen_name,
+            cmd=cmd,
+            port=self.backend_port,
+            service_description='Backend API',
+            log_file='logs/services/backend_api.log'
+        )
 
     async def _start_audio_server(self):
-        """Start the Audio server"""
-        try:
-            self.logger.info(f"Starting Audio server on port {self.audio_server_port}...")
+        """Start the Audio server in a screen session"""
+        # Check if script exists
+        if not self.audio_server_script.exists():
+            self.logger.warning(f"Audio server script not found: {self.audio_server_script}")
+            return
 
-            # Check if already running
-            if await self._check_port_in_use(self.audio_server_port):
-                self.logger.warning(f"Audio server already running on port {self.audio_server_port}")
-                return
+        screen_name = self.screen_names['audio_server']
+        cmd = [
+            str(self.uv_path), 'run', 'python',
+            str(self.audio_server_script)
+        ]
 
-            # Check if script exists
-            if not self.audio_server_script.exists():
-                self.logger.warning(f"Audio server script not found: {self.audio_server_script}")
-                return
-
-            # Start Audio server using uv run
-            cmd = [
-                str(self.uv_path), 'run', 'python',
-                str(self.audio_server_script)
-            ]
-
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=str(self.base_path)
-            )
-
-            self.processes['audio_server'] = process
-
-            # Wait a moment and check if it's running
-            await asyncio.sleep(2)
-
-            if process.poll() is None:
-                self.logger.info(f"Audio server started successfully on port {self.audio_server_port}")
-            else:
-                stdout, stderr = process.communicate()
-                self.logger.error(f"Audio server failed to start. stdout: {stdout.decode()}, stderr: {stderr.decode()}")
-
-        except Exception as e:
-            self.logger.error(f"Error starting Audio server: {e}", exc_info=True)
+        await self._start_in_screen(
+            screen_name=screen_name,
+            cmd=cmd,
+            port=self.audio_server_port,
+            service_description='Audio server',
+            log_file='logs/services/audio_server.log'
+        )
 
     async def _start_dashboards(self):
         """Start the system monitoring dashboard"""
@@ -247,50 +333,29 @@ class ServiceStartupManager:
             self.logger.error(f"Error starting dashboard: {e}", exc_info=True)
 
     async def _start_dashboard(self, name: str, script_path: str, port: int):
-        """Start a specific Streamlit dashboard"""
-        try:
-            full_script_path = self.base_path / script_path
+        """Start a specific Streamlit dashboard in a screen session"""
+        full_script_path = self.base_path / script_path
 
-            if not full_script_path.exists():
-                self.logger.warning(f"Dashboard script not found: {full_script_path}")
-                return
+        if not full_script_path.exists():
+            self.logger.warning(f"Dashboard script not found: {full_script_path}")
+            return
 
-            self.logger.info(f"Starting {name} dashboard on port {port}...")
+        screen_name = self.screen_names.get(name, f'dashboard_{name}')
+        cmd = [
+            'streamlit', 'run',
+            str(full_script_path),
+            '--server.port', str(port),
+            '--server.headless', 'true',
+            '--browser.gatherUsageStats', 'false'
+        ]
 
-            # Check if already running
-            if await self._check_port_in_use(port):
-                self.logger.warning(f"{name} dashboard already running on port {port}")
-                return
-
-            # Start Streamlit dashboard
-            cmd = [
-                'streamlit', 'run',
-                str(full_script_path),
-                '--server.port', str(port),
-                '--server.headless', 'true',
-                '--browser.gatherUsageStats', 'false'
-            ]
-
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=str(self.base_path)
-            )
-
-            self.processes[name] = process
-
-            # Wait a moment and check if it's running
-            await asyncio.sleep(3)
-
-            if process.poll() is None:
-                self.logger.info(f"{name} dashboard started successfully on port {port}")
-            else:
-                stdout, stderr = process.communicate()
-                self.logger.error(f"{name} dashboard failed to start. stdout: {stdout.decode()}, stderr: {stderr.decode()}")
-
-        except Exception as e:
-            self.logger.error(f"Error starting {name} dashboard: {e}", exc_info=True)
+        await self._start_in_screen(
+            screen_name=screen_name,
+            cmd=cmd,
+            port=port,
+            service_description=f'{name} dashboard',
+            log_file=f'logs/services/{name}_dashboard.log'
+        )
 
     async def _start_model_servers(self):
         """Start model server instances as infrastructure services"""
@@ -326,51 +391,22 @@ class ServiceStartupManager:
             self.logger.error(f"Error starting model server {instance_name}: {e}", exc_info=True)
 
     async def _start_local_model_server(self, instance_name: str, port: int, config: dict):
-        """Start a local model server instance"""
-        try:
-            # Check if already running
-            if await self._check_port_in_use(port):
-                self.logger.warning(f"Model server {instance_name} already running on port {port}")
-                return
+        """Start a local model server instance in a screen session"""
+        screen_name = f'model_server_{instance_name}'
+        cmd = [
+            str(self.uv_path), 'run', 'python',
+            str(self.model_server_script),
+            '--port', str(port),
+            '--host', '0.0.0.0'
+        ]
 
-            # Prepare environment with model configuration
-            env = {}
-            env.update({
-                'ALLOWED_MODELS': ','.join(config.get('allowed_models', [])),
-                'DEFAULT_MODEL': config.get('default_model', ''),
-                'PORT': str(port),
-                'HOST': '0.0.0.0'
-            })
-
-            # Start model server using uv run
-            cmd = [
-                str(self.uv_path), 'run', 'python',
-                str(self.model_server_script),
-                '--port', str(port),
-                '--host', '0.0.0.0'
-            ]
-
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=str(self.base_path),
-                env={**os.environ, **env}
-            )
-
-            self.processes[f'model_server_{instance_name}'] = process
-
-            # Wait a moment and check if it's running
-            await asyncio.sleep(3)
-
-            if process.poll() is None:
-                self.logger.info(f"Model server {instance_name} started successfully on port {port}")
-            else:
-                stdout, stderr = process.communicate()
-                self.logger.error(f"Model server {instance_name} failed to start. stdout: {stdout.decode()}, stderr: {stderr.decode()}")
-
-        except Exception as e:
-            self.logger.error(f"Error starting local model server {instance_name}: {e}", exc_info=True)
+        await self._start_in_screen(
+            screen_name=screen_name,
+            cmd=cmd,
+            port=port,
+            service_description=f'Model server {instance_name}',
+            log_file=f'logs/services/model_server_{instance_name}.log'
+        )
 
     async def _start_remote_model_server(self, instance_name: str, host: str, port: int, config: dict):
         """Start a remote model server instance via SSH"""
@@ -453,8 +489,8 @@ echo "[$(date)] Model server {instance_name} started with PID $!"
         except Exception as e:
             self.logger.error(f"Error starting remote model server {instance_name}: {e}", exc_info=True)
 
-    async def _check_port_in_use(self, port: int) -> bool:
-        """Check if a port is already in use"""
+    def _check_port_in_use_sync(self, port: int) -> bool:
+        """Check if a port is already in use (synchronous version)"""
         import socket
         sock = None
         try:
@@ -469,6 +505,10 @@ echo "[$(date)] Model server {instance_name} started with PID $!"
                     sock.close()
                 except Exception:
                     pass
+
+    async def _check_port_in_use(self, port: int) -> bool:
+        """Check if a port is already in use (async wrapper)"""
+        return self._check_port_in_use_sync(port)
 
     def get_status(self) -> Dict[str, Any]:
         """Get status of all managed services"""
@@ -512,38 +552,35 @@ echo "[$(date)] Model server {instance_name} started with PID $!"
                     'running': False
                 }
 
-        # Check process status
-        for service_name, process in self.processes.items():
-            if process and process.returncode is None:
-                if service_name == 'backend':
-                    status['backend']['running'] = True
-                elif service_name == 'audio_server':
-                    status['audio_server']['running'] = True
-                elif service_name == 'llm_server':
-                    status['llm_server']['running'] = True
-                elif service_name == 'system_monitoring':
-                    status['dashboards']['system_monitoring']['running'] = True
-                elif service_name.startswith('model_server_'):
-                    instance_name = service_name.replace('model_server_', '')
+        # Check screen session status by port (using sync version for non-async method)
+        if self._check_port_in_use_sync(self.backend_port):
+            status['backend']['running'] = True
+        if self._check_port_in_use_sync(self.audio_server_port):
+            status['audio_server']['running'] = True
+        if self._check_port_in_use_sync(self.llm_port):
+            status['llm_server']['running'] = True
+        if self._check_port_in_use_sync(self.system_dashboard_port):
+            status['dashboards']['system_monitoring']['running'] = True
+
+        # Check model server instances
+        for instance_name, instance_config in self.model_server_instances.items():
+            port = instance_config.get('port', 8004)
+            host = instance_config.get('host', 'localhost')
+            if host in ('localhost', '10.0.0.4'):  # Local only
+                if self._check_port_in_use_sync(port):
                     if instance_name in status['model_servers']['instances']:
                         status['model_servers']['instances'][instance_name]['running'] = True
 
         return status
 
     async def restart_service(self, service_name: str) -> bool:
-        """Restart a specific service"""
+        """Restart a specific service running in a screen session"""
         try:
-            # Stop the service
-            if service_name in self.processes:
-                process = self.processes[service_name]
-                if process and process.returncode is None:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait()
-                del self.processes[service_name]
+            # Stop the screen session if it exists
+            screen_name = self.screen_names.get(service_name)
+            if screen_name:
+                await self._stop_screen_service(screen_name, service_name)
+                await asyncio.sleep(1)
 
             # Restart based on service name
             if service_name == 'backend':
