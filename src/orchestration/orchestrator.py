@@ -562,46 +562,21 @@ class TaskOrchestratorV2:
             await asyncio.sleep(check_interval)
 
     async def _assign_task_to_worker(self, task: Dict[str, Any], worker: WorkerInfo) -> bool:
-        """Assign a specific task to a worker with health check and retry logic"""
+        """Assign a specific task to a worker.
+
+        Note: Health monitoring and restart logic is handled by NetworkMonitor.
+        This method simply attempts assignment and marks worker unhealthy on
+        connection failures, allowing NetworkMonitor to handle recovery.
+        """
         try:
             task_id = str(task['id'])
             task_type = task['task_type']
-            
-            # First verify worker is actually healthy before attempting assignment
-            try:
-                if not await self.network_manager.check_worker_health(worker.worker_id):
-                    logger.warning(f"Worker {worker.worker_id} failed health check before task assignment. Triggering restart.")
-                    worker.status = 'unhealthy'
-                    
-                    # Use the locked restart method
-                    restart_success, attempted = await worker.attempt_restart_with_lock(
-                        self.worker_manager.restart_unhealthy_worker
-                    )
-                    
-                    if not attempted:
-                        backoff_remaining = worker.get_restart_backoff_remaining()
-                        logger.debug(f"Worker {worker.worker_id} unhealthy but cannot restart yet "
-                                   f"(backoff: {backoff_remaining:.1f}s, attempts: {worker.restart_attempts}/{worker.max_restart_attempts})")
-                        return False
-                    
-                    if not restart_success:
-                        logger.error(f"Failed to restart unhealthy worker {worker.worker_id}. Task will be retried later.")
-                        return False
-                    
-                    # Even if restart succeeded, wait a moment for services to fully initialize
-                    await asyncio.sleep(2)
-                    
-                    # Verify health again after restart
-                    if not await self.network_manager.check_worker_health(worker.worker_id):
-                        logger.error(f"Worker {worker.worker_id} still unhealthy after restart. Task will be retried later.")
-                        return False
-                    else:
-                        # Health check passed after restart
-                        logger.info(f"Worker {worker.worker_id} successfully restarted and healthy")
-            except Exception as health_e:
-                logger.error(f"Error checking worker {worker.worker_id} health: {str(health_e)}")
+
+            # Skip if worker is not active (NetworkMonitor will handle recovery)
+            if worker.status != 'active':
+                logger.debug(f"Skipping assignment to worker {worker.worker_id} (status: {worker.status})")
                 return False
-            
+
             # Mark task as assigned in task manager
             success = await self.task_manager.mark_task_assigned(task_id, worker.worker_id)
             if not success:
@@ -658,42 +633,25 @@ class TaskOrchestratorV2:
                 self.failure_tracker.record_success(worker.worker_id, task_type)
                 return True
             else:
-                # Handle API failure with retry logic
+                # Handle API failure
                 logger.error(f"Failed to assign task {task_id} to worker {worker.worker_id}: {response}")
-                
+
                 # Record failure for tracking
                 should_pause = self.failure_tracker.record_failure(
                     worker.worker_id, task_type, f"API call failed: {response}"
                 )
                 if should_pause:
                     logger.warning(f"Task type {task_type} paused for worker {worker.worker_id} due to failures")
-                
-                # Check if this was a connection error and trigger restart
+
+                # Mark worker unhealthy on connection errors (NetworkMonitor will handle restart)
                 if "connection" in str(response).lower() or "timeout" in str(response).lower():
-                    logger.warning(f"Connection failed to worker {worker.worker_id}. Marking as unhealthy.")
+                    logger.warning(f"Connection failed to worker {worker.worker_id}. Marking as unhealthy for NetworkMonitor.")
                     worker.status = 'unhealthy'
-                    
-                    # Trigger background restart with retry tracking
-                    async def background_restart():
-                        restart_success, attempted = await worker.attempt_restart_with_lock(
-                            self.worker_manager.restart_unhealthy_worker
-                        )
-                        
-                        if attempted:
-                            if restart_success:
-                                logger.info(f"Background restart of worker {worker.worker_id} succeeded")
-                            else:
-                                logger.warning(f"Background restart of worker {worker.worker_id} failed")
-                        else:
-                            logger.debug(f"Background restart of worker {worker.worker_id} skipped "
-                                       f"(concurrent attempt or retry limit)")
-                    
-                    asyncio.create_task(background_restart())
-                
+
                 # Rollback on API failure
                 worker.remove_task(task_id, task_type)
                 await self.task_manager.handle_task_failure(
-                    task_id, worker.worker_id, task_type, 
+                    task_id, worker.worker_id, task_type,
                     f"API call failed: {response}"
                 )
                 return False

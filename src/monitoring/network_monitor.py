@@ -1,5 +1,18 @@
 """
 Network Monitor - Monitors worker network connectivity and health with exponential backoff retry
+
+OWNERSHIP: This module is the SOLE owner of worker health monitoring and restart logic.
+
+Other components (TaskAssigner, reactive_assignment) should:
+- Only assign tasks to workers with status == 'active'
+- Mark workers as 'unhealthy' on connection failures
+- NOT attempt restarts directly
+
+This module will:
+- Detect unhealthy workers every 30 seconds
+- Attempt restarts with exponential backoff (60s base, 24h max, 20 attempts)
+- Reset tasks from failed workers
+- Mark workers as 'permanently_failed' after max attempts
 """
 import asyncio
 import aiohttp
