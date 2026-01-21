@@ -15,7 +15,7 @@ from ...utils.backend_logger import get_logger
 logger = get_logger("theme_summarizer")
 
 from .citation_manager import CitationManager, Citation
-from ...models.db_models import EmbeddingSegment as SampledSegment
+from src.database.models import EmbeddingSegment as SampledSegment
 
 
 @dataclass

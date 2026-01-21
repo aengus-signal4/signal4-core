@@ -25,7 +25,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 import asyncio
 from collections import defaultdict
 
-from ...models.db_models import EmbeddingSegment as Segment
+from src.database.models import EmbeddingSegment as Segment
 from ..llm_service import LLMService
 
 

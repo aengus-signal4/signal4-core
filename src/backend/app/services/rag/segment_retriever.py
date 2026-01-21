@@ -14,7 +14,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, joinedload
 
 from ...database.connection import get_db
-from ...models.db_models import EmbeddingSegment, Content, Speaker
+from src.database.models import EmbeddingSegment, Content, Speaker
 from ...utils.backend_logger import get_logger
 
 logger = get_logger("segment_retriever")

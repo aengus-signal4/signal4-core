@@ -17,7 +17,7 @@ from ...utils.backend_logger import get_logger
 logger = get_logger("dynamic_grouper")
 
 # Import database models
-from ...models.db_models import EmbeddingSegment, Content
+from src.database.models import EmbeddingSegment, Content
 
 
 @dataclass

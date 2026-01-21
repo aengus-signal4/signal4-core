@@ -17,7 +17,7 @@ import numpy as np
 from datetime import datetime
 from collections import defaultdict
 
-from ...models.db_models import EmbeddingSegment as Segment
+from src.database.models import EmbeddingSegment as Segment
 from .theme_extractor import Theme
 
 from ...utils.backend_logger import get_logger

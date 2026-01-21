@@ -16,7 +16,7 @@ from app.services.rag.segment_selector import (
     select_balanced
 )
 from app.services.rag.theme_extractor import Theme
-from app.models.db_models import EmbeddingSegment as Segment
+from src.database.models import EmbeddingSegment as Segment
 
 
 @pytest.fixture

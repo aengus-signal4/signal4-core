@@ -263,7 +263,7 @@ class QuantitativeAnalyzer:
             return {'total_duration_hours': None, 'episode_count': len(content_ids)}
 
         try:
-            from ...models.db_models import Content
+            from src.database.models import Content
             from sqlalchemy import func
 
             # Query for total duration and count

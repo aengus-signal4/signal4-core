@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 import asyncio
 
 from app.services.rag.theme_extractor import ThemeExtractor, Theme
-from app.models.db_models import EmbeddingSegment as Segment
+from src.database.models import EmbeddingSegment as Segment
 
 
 @pytest.fixture
