@@ -126,25 +126,25 @@ class TaskCleaner:
 
 class HealthChecker:
     """Performs health checks on workers and services"""
-    
+
     def __init__(self, orchestrator: 'TaskOrchestratorV2'):
         self.orchestrator = orchestrator
         self.interval = 30  # seconds
-    
+
     async def run(self):
         """Run the health check loop"""
         logger.info("Starting health check loop")
-        
+
         while not self.orchestrator.should_stop:
             try:
                 # Check worker network health
                 health_results = await self.orchestrator.network_manager.perform_bulk_health_check()
-                
+
                 for worker_id, is_healthy in health_results.items():
                     worker = self.orchestrator.worker_pool.get_worker(worker_id)
                     if not worker:
                         continue
-                    
+
                     if is_healthy:
                         if worker.status in ['unhealthy', 'failed']:
                             logger.info(f"Worker {worker_id} recovered")
@@ -154,21 +154,53 @@ class HealthChecker:
                         if worker.status == 'active':
                             logger.warning(f"Worker {worker_id} became unhealthy")
                             worker.status = 'unhealthy'
-                
+
                 # Check service health
                 for worker in self.orchestrator.worker_pool.get_active_workers():
                     service_health = await self.orchestrator.service_manager.health_check_services(worker.worker_id)
-                    
+
                     # If task processor is unhealthy, mark worker as unhealthy
                     if not service_health.get('task_processor', True):
                         logger.warning(f"Task processor unhealthy on worker {worker.worker_id}")
                         worker.status = 'unhealthy'
-                
+
+                # Check head node service health
+                await self._check_head_node_services()
+
                 await asyncio.sleep(self.interval)
-                
+
             except Exception as e:
                 logger.error(f"Error in health check loop: {str(e)}")
                 await asyncio.sleep(self.interval)
+
+    async def _check_head_node_services(self):
+        """Check health of head node services and trigger restarts if needed."""
+        if not hasattr(self.orchestrator, 'head_node_monitor'):
+            return
+
+        try:
+            monitor = self.orchestrator.head_node_monitor
+
+            # Check all services
+            health_results = await monitor.check_all_services_health()
+
+            # Handle unhealthy services
+            for service_name, is_healthy in health_results.items():
+                if not is_healthy:
+                    service = monitor.services.get(service_name)
+                    if service:
+                        logger.warning(
+                            f"Head node service {service_name} unhealthy "
+                            f"({service.consecutive_failures}/{service.failure_threshold} failures)"
+                        )
+
+                        # Attempt restart if threshold exceeded
+                        if service.needs_restart():
+                            logger.info(f"Attempting to restart head node service {service_name}")
+                            await monitor.handle_unhealthy_service(service_name)
+
+        except Exception as e:
+            logger.error(f"Error checking head node services: {str(e)}")
 
 
 class TaskAssigner:

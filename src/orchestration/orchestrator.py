@@ -42,6 +42,7 @@ from src.workers.code_deployment import CodeDeploymentManager
 
 # OllamaMonitor removed - we use MLX only now
 from src.workers.service_startup import ServiceStartupManager
+from src.monitoring.head_node_monitor import HeadNodeServiceMonitor
 from src.orchestration.logging_setup import setup_orchestrator_logging, TaskLogger, configure_noise_suppression
 from src.workers.info import WorkerInfo
 from src.orchestration.config_manager import ConfigManager
@@ -128,6 +129,10 @@ class TaskOrchestratorV2:
         # Initialize service startup manager (LLM server + dashboards)
         self.service_startup = ServiceStartupManager(self.config)
         logger.info("Service startup manager initialized")
+
+        # Initialize head node service monitor (health monitoring + auto-restart)
+        self.head_node_monitor = HeadNodeServiceMonitor(self.service_startup, self.config)
+        logger.info("Head node service monitor initialized")
 
         # Initialize code deployment manager
         self.code_deployment = CodeDeploymentManager(self.config)
@@ -1056,6 +1061,10 @@ class TaskOrchestratorV2:
 
         # Stop unified scheduled task manager
         await self.scheduled_task_manager.stop()
+
+        # Close head node monitor HTTP session
+        if hasattr(self, 'head_node_monitor'):
+            await self.head_node_monitor.close()
 
         # Stop LLM server and dashboards
         await self.service_startup.stop_services()

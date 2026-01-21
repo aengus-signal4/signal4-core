@@ -81,14 +81,8 @@ class ServiceStartupManager:
         self.dashboards_enabled = dashboard_config.get('enabled', True)
         self.system_dashboard_port = dashboard_config.get('system_monitoring_port', 8501)
 
-        # Audio Server configuration
-        services_config = config.get('services', {})
-        audio_config = services_config.get('audio_server', {})
-        self.audio_server_enabled = audio_config.get('enabled', True)
-        self.audio_server_port = audio_config.get('port', 8010)
-        self.audio_server_script = self.base_path / 'src' / 'services' / 'audio_server.py'
-
         # Backend API configuration
+        services_config = config.get('services', {})
         backend_config = services_config.get('backend', {})
         self.backend_enabled = backend_config.get('enabled', True)
         self.backend_port = backend_config.get('port', 7999)
@@ -120,7 +114,6 @@ class ServiceStartupManager:
         self.screen_names = {
             'backend': 'backend_api',
             'llm_server': 'llm_server',
-            'audio_server': 'audio_server',
             'embedding_server': 'embedding_server',
             'system_monitoring': 'system_monitoring',
             'memory_monitor': 'memory_monitor',
@@ -140,10 +133,6 @@ class ServiceStartupManager:
         if self.backend_enabled:
             await self._start_backend()
 
-        # Start audio server
-        if self.audio_server_enabled:
-            await self._start_audio_server()
-
         # Start LLM server
         if self.llm_enabled:
             await self._start_llm_server()
@@ -159,8 +148,8 @@ class ServiceStartupManager:
         self.logger.info(
             f"Service startup manager initialized. Services: "
             f"MemoryMonitor={self.memory_monitor_enabled}, Embedding={self.embedding_server_enabled}, "
-            f"Backend={self.backend_enabled}, Audio={self.audio_server_enabled}, "
-            f"LLM={self.llm_enabled}, ModelServers={self.model_servers_enabled}, Dashboards={self.dashboards_enabled}"
+            f"Backend={self.backend_enabled}, LLM={self.llm_enabled}, "
+            f"ModelServers={self.model_servers_enabled}, Dashboards={self.dashboards_enabled}"
         )
 
     async def stop_services(self):
@@ -384,27 +373,6 @@ class ServiceStartupManager:
             log_file='logs/services/backend_api.log'
         )
 
-    async def _start_audio_server(self):
-        """Start the Audio server in a screen session"""
-        # Check if script exists
-        if not self.audio_server_script.exists():
-            self.logger.warning(f"Audio server script not found: {self.audio_server_script}")
-            return
-
-        screen_name = self.screen_names['audio_server']
-        cmd = [
-            str(self.uv_path), 'run', 'python',
-            str(self.audio_server_script)
-        ]
-
-        await self._start_in_screen(
-            screen_name=screen_name,
-            cmd=cmd,
-            port=self.audio_server_port,
-            service_description='Audio server',
-            log_file='logs/services/audio_server.log'
-        )
-
     async def _start_dashboards(self):
         """Start the system monitoring dashboard"""
         try:
@@ -599,14 +567,14 @@ echo "[$(date)] Model server {instance_name} started with PID $!"
     def get_status(self) -> Dict[str, Any]:
         """Get status of all managed services"""
         status = {
+            'embedding_server': {
+                'enabled': self.embedding_server_enabled,
+                'port': self.embedding_server_port,
+                'running': False
+            },
             'backend': {
                 'enabled': self.backend_enabled,
                 'port': self.backend_port,
-                'running': False
-            },
-            'audio_server': {
-                'enabled': self.audio_server_enabled,
-                'port': self.audio_server_port,
                 'running': False
             },
             'llm_server': {
@@ -639,10 +607,10 @@ echo "[$(date)] Model server {instance_name} started with PID $!"
                 }
 
         # Check screen session status by port (using sync version for non-async method)
+        if self._check_port_in_use_sync(self.embedding_server_port):
+            status['embedding_server']['running'] = True
         if self._check_port_in_use_sync(self.backend_port):
             status['backend']['running'] = True
-        if self._check_port_in_use_sync(self.audio_server_port):
-            status['audio_server']['running'] = True
         if self._check_port_in_use_sync(self.llm_port):
             status['llm_server']['running'] = True
         if self._check_port_in_use_sync(self.system_dashboard_port):
@@ -671,12 +639,26 @@ echo "[$(date)] Model server {instance_name} started with PID $!"
             # Restart based on service name
             if service_name == 'backend':
                 await self._start_backend()
-            elif service_name == 'audio_server':
-                await self._start_audio_server()
+            elif service_name == 'embedding_server':
+                await self._start_embedding_server()
             elif service_name == 'llm_server':
                 await self._start_llm_server()
             elif service_name == 'system_monitoring':
                 await self._start_dashboard('system_monitoring', 'dashboards/system_monitoring.py', self.system_dashboard_port)
+            elif service_name.startswith('model_server_'):
+                # Handle model_server_{name} pattern
+                instance_name = service_name[len('model_server_'):]
+                if instance_name in self.model_server_instances:
+                    # Stop the model server screen first
+                    screen_name = f'model_server_{instance_name}'
+                    await self._stop_screen_service(screen_name, f'Model server {instance_name}')
+                    await asyncio.sleep(1)
+                    # Restart it
+                    instance_config = self.model_server_instances[instance_name]
+                    await self._start_model_server_instance(instance_name, instance_config)
+                else:
+                    self.logger.error(f"Unknown model server instance: {instance_name}")
+                    return False
             else:
                 self.logger.error(f"Unknown service: {service_name}")
                 return False

@@ -1036,4 +1036,94 @@ def create_api_endpoints(orchestrator) -> FastAPI:
             logger.error(f"Error getting deployment history: {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
 
+    # === Head Node Services API ===
+
+    @app.get("/api/head-node-services/status")
+    async def get_head_node_services_status():
+        """Get status of all head node services (Backend API, Embedding Server, LLM Server, Model Servers)"""
+        try:
+            if hasattr(orchestrator, 'head_node_monitor'):
+                return orchestrator.head_node_monitor.get_status()
+            else:
+                raise HTTPException(status_code=501, detail="Head node service monitor not available")
+        except Exception as e:
+            logger.error(f"Error getting head node services status: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/api/head-node-services/{service_name}/status")
+    async def get_head_node_service_status(service_name: str):
+        """Get status of a specific head node service"""
+        try:
+            if hasattr(orchestrator, 'head_node_monitor'):
+                status = orchestrator.head_node_monitor.get_service_status(service_name)
+                if status is None:
+                    raise HTTPException(status_code=404, detail=f"Service {service_name} not found")
+                return status
+            else:
+                raise HTTPException(status_code=501, detail="Head node service monitor not available")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting head node service {service_name} status: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/api/head-node-services/{service_name}/restart")
+    async def restart_head_node_service(service_name: str):
+        """
+        Manually restart a head node service, ignoring backoff timers.
+
+        This resets the restart attempt counter and immediately attempts restart.
+        """
+        try:
+            if hasattr(orchestrator, 'head_node_monitor'):
+                success = await orchestrator.head_node_monitor.manual_restart_service(service_name)
+                if success:
+                    return {
+                        "status": "success",
+                        "message": f"Service {service_name} restarted successfully"
+                    }
+                else:
+                    return {
+                        "status": "error",
+                        "message": f"Failed to restart service {service_name}"
+                    }
+            else:
+                raise HTTPException(status_code=501, detail="Head node service monitor not available")
+        except Exception as e:
+            logger.error(f"Error restarting head node service {service_name}: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/api/head-node-services/{service_name}/reset-retries")
+    async def reset_head_node_service_retries(service_name: str):
+        """Reset retry count for a head node service"""
+        try:
+            if hasattr(orchestrator, 'head_node_monitor'):
+                service = orchestrator.head_node_monitor.services.get(service_name)
+                if service is None:
+                    raise HTTPException(status_code=404, detail=f"Service {service_name} not found")
+
+                old_attempts = service.restart_attempts
+                service.restart_attempts = 0
+                service.last_restart_attempt = None
+                service.consecutive_failures = 0
+
+                # Reset status if it was failed
+                from src.monitoring.head_node_monitor import ServiceStatus
+                if service.status in (ServiceStatus.FAILED, ServiceStatus.PERMANENTLY_FAILED):
+                    service.status = ServiceStatus.UNHEALTHY
+
+                return {
+                    "status": "success",
+                    "message": f"Reset retry count for service {service_name}",
+                    "before": {"restart_attempts": old_attempts},
+                    "after": {"restart_attempts": 0}
+                }
+            else:
+                raise HTTPException(status_code=501, detail="Head node service monitor not available")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error resetting retries for head node service {service_name}: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
     return app
