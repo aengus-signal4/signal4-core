@@ -39,11 +39,6 @@ class EmbeddingSegment(Base):
     # Segment type describes how it was created
     segment_type = Column(String(20), nullable=False)  # 'single', 'combined', 'split'
 
-    # DEPRECATED: Legacy references to SpeakerTranscription records
-    # This column is no longer populated for new content (since Jan 2026)
-    # Use source_sentence_ids instead for sentence-level tracking
-    source_transcription_ids = Column(ARRAY(Integer), nullable=True)  # DEPRECATED
-
     # For split segments, store character offsets into source text
     source_start_char = Column(Integer, nullable=True)  # Start character in source text
     source_end_char = Column(Integer, nullable=True)    # End character in source text
@@ -93,7 +88,6 @@ class EmbeddingSegment(Base):
 
     __table_args__ = (
         Index('idx_embedding_segments_content_index', 'content_id', 'segment_index'),
-        Index('idx_embedding_segments_source_ids', 'source_transcription_ids', postgresql_using='gin'),
         Index('idx_embedding_segments_text_search', 'text', postgresql_using='gin', postgresql_ops={'text': 'gin_tsvector_ops'}),
         Index('idx_embedding_segments_text_trigram', 'text', postgresql_using='gin', postgresql_ops={'text': 'gin_trgm_ops'}),
         UniqueConstraint('content_id', 'segment_hash', name='uq_embedding_segments_content_hash'),  # Unique hash per content

@@ -331,7 +331,7 @@ class TranscriptSegmenter:
             word_table: Optional WordTable for speaker_db_dictionary
 
         Returns:
-            Segment dictionary with source_sentence_ids instead of source_transcription_ids
+            Segment dictionary with source_sentence_ids
         """
         if not sentences or not local_indices:
             return {}
@@ -409,7 +409,6 @@ class TranscriptSegmenter:
             'speaker_ids': speaker_ids,
             'speaker_names': [],  # Deprecated - use speaker_positions
             'source_sentence_ids': source_sentence_indices,  # References sentences table
-            'source_transcription_ids': [],  # Deprecated - kept for backwards compatibility
             'sentence_count': len(sentences),
             'word_count': sum(sentence_metadata[idx].get('word_count', 0) for idx in local_indices),
             'timing_method': 'sentence_precise',
@@ -702,51 +701,6 @@ class TranscriptSegmenter:
             if 'speaker' in meta:
                 speakers.add(meta['speaker'])
 
-        # Map segment to source speaker transcription IDs using PRECISE timing
-        # Since both segments and speaker turns are derived from the same words,
-        # we can use exact timing boundaries for perfect matching
-        source_transcription_ids = []
-        if speaker_turns:
-            # Define segment time range with tiny tolerance for floating point comparison
-            tolerance = 0.01  # 10ms tolerance for floating point precision
-
-            for turn in speaker_turns:
-                turn_start = turn.get('start_time', 0)
-                turn_end = turn.get('end_time', 0)
-                turn_db_id = turn.get('db_id')
-
-                if not turn_db_id:
-                    continue
-
-                # Calculate overlap between segment and turn
-                overlap_start = max(start_time, turn_start)
-                overlap_end = min(end_time, turn_end)
-                overlap = max(0, overlap_end - overlap_start)
-
-                # If there's ANY meaningful overlap (>10ms), this turn is part of the segment
-                # We use a small threshold to handle floating point precision issues
-                if overlap > tolerance:
-                    source_transcription_ids.append(turn_db_id)
-
-            # CRITICAL CHECK: If no matches found, the pipeline is broken - FAIL THE STITCH
-            if not source_transcription_ids:
-                error_msg = (
-                    f"FATAL: Failed to match segment [{start_time:.2f}s - {end_time:.2f}s] "
-                    f"to any speaker turns. Available turns: {len(speaker_turns)}. "
-                    f"This should NEVER happen as segments are derived from speaker turns! "
-                    f"Pipeline integrity violated."
-                )
-                logger.error(f"[{content_id}] {error_msg}")
-
-                # Log turn boundaries for debugging
-                if speaker_turns:
-                    turn_ranges = [f"[{t.get('start_time', 0):.2f}s - {t.get('end_time', 0):.2f}s]"
-                                  for t in speaker_turns[:5]]
-                    logger.error(f"[{content_id}] First 5 turn ranges: {', '.join(turn_ranges)}")
-
-                # Raise exception to fail the stitch
-                raise RuntimeError(error_msg)
-
         return {
             'text': segment_text,
             'start_time': start_time,
@@ -755,7 +709,6 @@ class TranscriptSegmenter:
             'segment_type': reason,
             'speaker_ids': [],  # Will be populated by caller if needed
             'speaker_names': list(speakers),
-            'source_transcription_ids': source_transcription_ids,
             'sentence_count': len(sentences),
             'word_count': sum(len(sentence_metadata[idx].get('word_indices', [])) for idx in sentence_indices),
             'timing_method': 'word_table_precise',
