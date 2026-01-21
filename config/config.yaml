@@ -517,7 +517,7 @@ processing:
       eth: 10.0.0.4
       wifi: 10.0.0.215
       enabled: true
-      task_types: ["download_rumble:1","download_podcast:1","download_youtube:1"] # "cleanup:1",
+      task_types: ["download_rumble:1","download_podcast:1","download_youtube:1","transcribe:1"] # "cleanup:1",
       max_concurrent_tasks: 1
       type: "head"
       services:
@@ -719,6 +719,9 @@ error_handling:
     video_unavailable:
       action: "block_content"
       block_reason: "Video unavailable"
+    empty_download:
+      action: "block_content"
+      block_reason: "Empty file download - likely a short video"
     access_denied:
       action: "block_content"
       block_reason: "Access denied (HTTP 403 Forbidden)"
@@ -881,7 +884,7 @@ scheduled_tasks:
       enabled: true
       schedule:
         type: run_then_wait
-        wait_seconds: 600  # Wait 10 minutes after completion
+        wait_seconds: 300  # Wait 5 minutes after completion
       executor:
         type: cli
         command: "python"

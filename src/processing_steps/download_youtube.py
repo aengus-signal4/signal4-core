@@ -203,7 +203,16 @@ class YouTubeDownloader:
                 permanent=True,
                 skip_state_audit=True
             )
-        
+
+        # Empty download - common with YouTube Shorts or very short videos
+        if "downloaded file is empty" in error_message.lower():
+            return create_error_result(
+                error_code=ErrorCode.EMPTY_DOWNLOAD,
+                error_message=error_message,
+                permanent=True,
+                skip_state_audit=True
+            )
+
         # Default: treat as transient error
         return create_error_result(
             error_code=ErrorCode.NETWORK_ERROR,

@@ -48,6 +48,7 @@ class ErrorCode(Enum):
     LIVE_STREAM = "live_stream"
     CONTENT_GONE = "content_gone"  # HTTP 410 - permanently deleted
     FEED_DISABLED = "feed_disabled"  # HTTP 400 - RSS/podcast feed disabled
+    EMPTY_DOWNLOAD = "empty_download"  # yt-dlp downloaded empty file (common with shorts)
     
     # Processing results (special handling)
     EMPTY_RESULT = "empty_result"
@@ -188,7 +189,8 @@ ERROR_CATEGORIES = {
         ErrorCode.VIDEO_UNAVAILABLE,
         ErrorCode.LIVE_STREAM,
         ErrorCode.CONTENT_GONE,
-        ErrorCode.FEED_DISABLED
+        ErrorCode.FEED_DISABLED,
+        ErrorCode.EMPTY_DOWNLOAD
     ],
     'special': [
         ErrorCode.EMPTY_RESULT,
