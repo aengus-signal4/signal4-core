@@ -127,6 +127,10 @@ services:
   audio_server:
     enabled: false  # Disable Audio server (functionality moved to backend)
     port: 8010     # Port for Audio server
+  embedding_server:
+    enabled: true   # Enable centralized embedding server
+    port: 8005      # Port for embedding server
+    model: "Qwen/Qwen3-Embedding-0.6B"  # Embedding model to serve
   model_servers:
     enabled: true  # Enable model servers as infrastructure services
     instances:
@@ -517,7 +521,7 @@ processing:
       eth: 10.0.0.4
       wifi: 10.0.0.215
       enabled: true
-      task_types: ["download_rumble:1","download_podcast:1","download_youtube:1","transcribe:1"] # "cleanup:1",
+      task_types: ["download_rumble:1","download_podcast:1","download_youtube:1"] # "cleanup:1",
       max_concurrent_tasks: 1
       type: "head"
       services:

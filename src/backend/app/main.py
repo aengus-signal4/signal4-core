@@ -8,17 +8,12 @@ Endpoints:
 - /health - Service health checks and monitoring
 - /api/media/content/{id} - Unified media serving with optional transcription
 - /api/analysis - All RAG/search operations with declarative workflows
+
+Note: Embedding generation is handled by the centralized Embedding Server (port 8005).
+The backend connects to it as a client with high priority (1) for interactive queries.
 """
 
-# CRITICAL: Set environment variables BEFORE any imports
-# OMP_NUM_THREADS=1 prevents OpenMP threading conflicts that cause segfaults
-# when SentenceTransformer encode() is called from ThreadPoolExecutor
 import os
-os.environ['OMP_NUM_THREADS'] = '1'
-os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
-os.environ['PYTORCH_MPS_HIGH_WATERMARK_RATIO'] = '0.0'
-os.environ['TOKENIZERS_PARALLELISM'] = 'false'  # Suppress fork warning from HuggingFace tokenizers
-
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -33,91 +28,20 @@ logger = get_logger("main")
 
 logger.info("Backend API initializing...")
 
-# Global model instances to keep warm
-_embedding_models = {}
-_model_loading = False
-_models_ready = False
-
-def _load_models_sync():
-    """Synchronous model loading to run in thread pool"""
-    import torch
-    from sentence_transformers import SentenceTransformer
-
-    # Force CPU to avoid MPS segfaults on macOS
-    device = torch.device("cpu")
-    logger.info(f"Using device: {device} (MPS disabled to prevent segfaults)")
-
-    models = {}
-
-    # Load 0.6B model only (1024-dim) - lightweight model for responsive backend
-    logger.info("Loading Qwen3-Embedding-0.6B (1024-dim)...")
-    model_start = time.time()
-    model_0_6b = SentenceTransformer('Qwen/Qwen3-Embedding-0.6B', trust_remote_code=True)
-    model_0_6b = model_0_6b.to(device)
-    # Test embedding
-    test_emb_0_6b = model_0_6b.encode(["warmup test"], convert_to_numpy=True)
-    models['0.6B'] = model_0_6b
-    logger.info(f"✓ Loaded 0.6B model in {time.time() - model_start:.1f}s (dim: {test_emb_0_6b.shape[1]})")
-
-    logger.info("=" * 80)
-    logger.info("✓ Embedding model (0.6B) loaded and warm - API ready for fast responses")
-    logger.info("=" * 80)
-
-    return models
-
-async def _load_models_async():
-    """Asynchronously load models in the background using thread pool"""
-    global _model_loading, _models_ready, _embedding_models
-    _model_loading = True
-
-    try:
-        import asyncio
-        from concurrent.futures import ThreadPoolExecutor
-
-        # Run blocking model loading in thread pool to avoid blocking event loop
-        loop = asyncio.get_event_loop()
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            models = await loop.run_in_executor(executor, _load_models_sync)
-            _embedding_models.update(models)
-
-    except Exception as e:
-        logger.error(f"Background model loading failed: {e}", exc_info=True)
-        logger.warning("Models will be lazy-loaded on first request")
-    finally:
-        _model_loading = False
-        _models_ready = True
-
-async def wait_for_models():
-    """Wait for models to finish loading if still loading"""
-    import asyncio
-    while _model_loading:
-        await asyncio.sleep(0.1)
-    return _embedding_models
-
 # Lifespan context manager for startup/shutdown events
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan - startup and shutdown events"""
-    global _embedding_models, _models_ready
-
-    # Startup: Load models synchronously to keep them warm
-    # With OMP_NUM_THREADS=1, this is safe and prevents segfaults
-    logger.info("Loading embedding models at startup (OMP_NUM_THREADS=1)...")
-    try:
-        _embedding_models = _load_models_sync()
-        _models_ready = True
-        logger.info("Models loaded and warm - API ready for requests")
-    except Exception as e:
-        logger.error(f"Failed to load models at startup: {e}", exc_info=True)
-        logger.warning("Models will be lazy-loaded on first request")
-        _models_ready = True  # Allow startup to continue
+    # Startup: Backend now uses the centralized embedding server
+    logger.info("=" * 80)
+    logger.info("Backend API starting...")
+    logger.info("Embedding generation delegated to Embedding Server (port 8005)")
+    logger.info("=" * 80)
 
     yield  # App runs
 
-    # Shutdown: Cleanup models
+    # Shutdown
     logger.info("Backend API shutting down...")
-    logger.info("Cleaning up embedding models...")
-    _embedding_models.clear()
 
 # Debug mode from environment (controls docs and CORS)
 # SECURITY: Default to false - must explicitly set DEBUG=true for development

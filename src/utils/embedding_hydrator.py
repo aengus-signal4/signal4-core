@@ -4,6 +4,12 @@ Embedding Hydrator
 
 Core class for batch generating embeddings for segments.
 Called via scheduled tasks (see config/config.yaml under 'scheduled_tasks').
+
+Primary (0.6B) embeddings can use either:
+- Local model loading (default, for standalone operation)
+- Centralized Embedding Server (when --use-server flag is set)
+
+Alternative (4B) embeddings always use local model loading.
 """
 
 import sys
@@ -12,12 +18,14 @@ from src.utils.paths import get_project_root, get_config_path
 import argparse
 import asyncio
 import logging
+import os
 import yaml
 from typing import List, Optional
 from datetime import datetime, timezone
 import numpy as np
 from tqdm import tqdm
 import gc
+import httpx
 
 from src.utils.logger import setup_worker_logger
 from src.database.session import get_session
@@ -27,19 +35,41 @@ import torch
 
 logger = setup_worker_logger('embedding_hydrator')
 
+# Embedding server configuration
+EMBEDDING_SERVER_HOST = os.getenv('EMBEDDING_SERVER_HOST', '127.0.0.1')
+EMBEDDING_SERVER_PORT = int(os.getenv('EMBEDDING_SERVER_PORT', '8005'))
+EMBEDDING_SERVER_URL = f"http://{EMBEDDING_SERVER_HOST}:{EMBEDDING_SERVER_PORT}"
+
+# Hydration requests use lower priority (5) to allow backend queries (1) to jump ahead
+HYDRATION_PRIORITY = 5
+
 
 class EmbeddingHydrator:
     """Batch generates embeddings for segments."""
 
     def __init__(self, primary_model_override: Optional[str] = None,
                  alternative_model_override: Optional[str] = None,
-                 alternative_dim: Optional[int] = None):
+                 alternative_dim: Optional[int] = None,
+                 use_server: bool = False):
+        """
+        Initialize the embedding hydrator.
+
+        Args:
+            primary_model_override: Override primary model name
+            alternative_model_override: Override alternative model name
+            alternative_dim: Override alternative model dimension
+            use_server: If True, use centralized embedding server for primary (0.6B) embeddings
+        """
         # Load config - navigate from src/utils/ up to repo root
         config_path = get_config_path()
         with open(config_path) as f:
             self.config = yaml.safe_load(f)
 
         seg_config = self.config.get('embedding', {}).get('embedding_segmentation', {})
+
+        # Server mode for primary embeddings
+        self.use_server = use_server
+        self._http_client: Optional[httpx.Client] = None
 
         # Primary embedding model - allow override
         if primary_model_override:
@@ -69,12 +99,76 @@ class EmbeddingHydrator:
         self.alternative_model_obj = None
 
         logger.info(f"Embedding hydrator initialized")
-        logger.info(f"Primary model (will load on first use): {self.embedding_model}")
+        if self.use_server:
+            logger.info(f"Primary embeddings: Using Embedding Server at {EMBEDDING_SERVER_URL}")
+        else:
+            logger.info(f"Primary model (will load on first use): {self.embedding_model}")
         if self.alternative_model:
             logger.info(f"Alternative model (will load on first use): {self.alternative_model}")
 
+    def _get_http_client(self) -> httpx.Client:
+        """Get or create synchronous HTTP client for embedding server."""
+        if self._http_client is None or self._http_client.is_closed:
+            self._http_client = httpx.Client(
+                base_url=EMBEDDING_SERVER_URL,
+                timeout=httpx.Timeout(120.0, connect=10.0)  # 2 min total, 10s connect
+            )
+        return self._http_client
+
+    def _check_server_health(self) -> bool:
+        """Check if embedding server is healthy."""
+        try:
+            client = self._get_http_client()
+            response = client.get("/health")
+            if response.status_code == 200:
+                data = response.json()
+                return data.get('status') == 'healthy'
+            return False
+        except Exception as e:
+            logger.warning(f"Embedding server health check failed: {e}")
+            return False
+
+    def _generate_embeddings_via_server(self, texts: List[str]) -> np.ndarray:
+        """
+        Generate embeddings using the centralized embedding server.
+
+        Uses priority 5 (hydration) so backend queries (priority 1) can jump ahead.
+
+        Args:
+            texts: List of texts to embed
+
+        Returns:
+            Numpy array of embeddings
+        """
+        client = self._get_http_client()
+
+        # Send request with hydration priority (lower than backend)
+        response = client.post(
+            "/embed",
+            json={
+                "texts": texts,
+                "priority": HYDRATION_PRIORITY,
+                "add_instruction": False  # Hydration uses raw text, not queries
+            }
+        )
+
+        if response.status_code != 200:
+            raise RuntimeError(f"Embedding server error {response.status_code}: {response.text}")
+
+        result = response.json()
+        embeddings = np.array(result['embeddings'], dtype=np.float32)
+
+        return embeddings
+
     def _init_primary_model(self):
-        """Lazy load primary embedding model on first use."""
+        """Lazy load primary embedding model on first use (skipped if using server)."""
+        if self.use_server:
+            # Using embedding server - verify it's healthy
+            if not self._check_server_health():
+                raise RuntimeError(f"Embedding server at {EMBEDDING_SERVER_URL} is not healthy")
+            logger.info(f"Using embedding server at {EMBEDDING_SERVER_URL} for primary embeddings")
+            return
+
         if self.primary_model is not None:
             logger.debug("Primary model already loaded")
             return
@@ -902,7 +996,35 @@ class EmbeddingHydrator:
                     logger.info(f"About to generate embeddings for {len(batch_texts)} texts")
                     import time
                     primary_embeddings = None
-                    if generate_primary and self.primary_model:
+
+                    # Use embedding server if enabled for primary embeddings
+                    if generate_primary and self.use_server:
+                        start_time = time.time()
+
+                        # Process in chunks via server (server handles batching internally)
+                        max_chunk_size = 64  # Server can handle larger chunks
+                        all_embeddings = []
+
+                        for chunk_start in range(0, len(batch_texts), max_chunk_size):
+                            chunk_end = min(chunk_start + max_chunk_size, len(batch_texts))
+                            chunk_texts = batch_texts[chunk_start:chunk_end]
+
+                            chunk_embeddings = self._generate_embeddings_via_server(chunk_texts)
+                            all_embeddings.append(chunk_embeddings)
+
+                            del chunk_texts
+                            gc.collect()
+
+                        primary_embeddings = np.vstack(all_embeddings) if len(all_embeddings) > 1 else all_embeddings[0]
+                        primary_embeddings = np.asarray(primary_embeddings, dtype=np.float32)
+                        del all_embeddings
+                        gc.collect()
+
+                        encode_time = time.time() - start_time
+                        logger.info(f"Generated {len(primary_embeddings)} primary embeddings via server in {encode_time:.2f}s ({len(primary_embeddings)/encode_time:.1f} emb/s)")
+
+                    elif generate_primary and self.primary_model:
+                        # Local model path (original code)
                         # Check actual device
                         logger.info(f"Model device: {self.primary_model.device}")
 
@@ -1312,6 +1434,9 @@ Examples:
   # Default: Generate ALL primary (0.6B) embeddings, then ALL alternative (4B)
   uv run python -m src.utils.embedding_hydrator
 
+  # Use centralized embedding server for primary embeddings (shares model with backend)
+  uv run python -m src.utils.embedding_hydrator --use-server --primary-only
+
   # Alternative first: Generate 4B embeddings first, then 0.6B
   uv run python -m src.utils.embedding_hydrator --alt-first
 
@@ -1328,6 +1453,7 @@ IMPORTANT:
   - Default: Runs BOTH phases (primary 0.6B, then alternative 4B)
   - --alt-first: Just changes order (4B first, then 0.6B)
   - --primary-only or --alternative-only: Run only one phase
+  - --use-server: Use centralized embedding server (recommended when backend is running)
         ''',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -1338,6 +1464,7 @@ IMPORTANT:
     parser.add_argument("--alt-first", action="store_true", help="Generate alternative (4B) embeddings first, then primary (0.6B)")
     parser.add_argument("--force-reembed", action="store_true", help="Re-generate embeddings even if version exists")
     parser.add_argument("--stitch-version", type=str, default=None, help="Filter to specific stitch version prefix (e.g., 'stitch_v14')")
+    parser.add_argument("--use-server", action="store_true", help="Use centralized embedding server for primary (0.6B) embeddings")
 
     args = parser.parse_args()
 
@@ -1347,7 +1474,7 @@ IMPORTANT:
         stitch_versions = {'prefix': [args.stitch_version]}
 
     # Run hydration
-    hydrator = EmbeddingHydrator()
+    hydrator = EmbeddingHydrator(use_server=args.use_server)
 
     # Default behavior: do primary first, then alternative
     # --alt-first: do alternative first, then primary

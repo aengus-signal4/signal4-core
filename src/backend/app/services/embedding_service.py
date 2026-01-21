@@ -2,27 +2,38 @@
 Embedding Service
 =================
 
-Dedicated service for query embedding using SentenceTransformer models.
-Handles model loading, warm-up, and conversion of text queries to embeddings.
+Client for the centralized Embedding Server.
+Sends embedding requests to the server with high priority (1) for interactive queries.
 
 Separated from LLMService to maintain single responsibility principle:
-- EmbeddingService: Query → embedding vectors (semantic search)
-- LLMService: Prompts → generated text (LLM responses)
+- EmbeddingService: Query -> embedding vectors (semantic search)
+- LLMService: Prompts -> generated text (LLM responses)
 """
 
 import asyncio
 import logging
+import os
 import time
 from typing import List, Optional
+
+import httpx
 import numpy as np
 
 from ..utils.backend_logger import get_logger
 
 logger = get_logger("embedding_service")
 
+# Embedding server configuration
+EMBEDDING_SERVER_HOST = os.getenv('EMBEDDING_SERVER_HOST', '127.0.0.1')
+EMBEDDING_SERVER_PORT = int(os.getenv('EMBEDDING_SERVER_PORT', '8005'))
+EMBEDDING_SERVER_URL = f"http://{EMBEDDING_SERVER_HOST}:{EMBEDDING_SERVER_PORT}"
+
+# Backend requests get highest priority (1) to jump ahead of batch hydration (5)
+BACKEND_PRIORITY = 1
+
 
 class EmbeddingService:
-    """Service for converting text queries to embeddings using pre-loaded models."""
+    """Service for converting text queries to embeddings via the centralized Embedding Server."""
 
     def __init__(self, config, dashboard_id: str = 'unknown'):
         """
@@ -34,166 +45,51 @@ class EmbeddingService:
         """
         self.config = config
         self.dashboard_id = dashboard_id
-        self._embedding_model = None
+        self._client: Optional[httpx.AsyncClient] = None
+        self._server_healthy = False
 
-        logger.info(f"[{self.dashboard_id}] EmbeddingService initialized (model: {config.embedding_model})")
+        logger.info(f"[{self.dashboard_id}] EmbeddingService initialized (server: {EMBEDDING_SERVER_URL})")
 
-    async def _wait_for_preloaded_models(self, timeout: float = 30.0) -> bool:
-        """
-        Wait for background model loading to complete.
-
-        Args:
-            timeout: Maximum time to wait in seconds
-
-        Returns:
-            True if models loaded successfully, False if timeout
-        """
-        try:
-            from ..main import wait_for_models
-
-            logger.info(f"[{self.dashboard_id}] Waiting for pre-loaded models...")
-            start_time = time.time()
-
-            # Wait with timeout
-            while time.time() - start_time < timeout:
-                models = await wait_for_models()
-                if models:
-                    logger.info(f"[{self.dashboard_id}] Pre-loaded models available")
-                    return True
-                await asyncio.sleep(0.1)
-
-            logger.warning(f"[{self.dashboard_id}] Timeout waiting for pre-loaded models after {timeout}s")
-            return False
-
-        except Exception as e:
-            logger.error(f"[{self.dashboard_id}] Error waiting for pre-loaded models: {e}", exc_info=True)
-            return False
-
-    async def _load_embedding_model(self):
-        """
-        Load embedding model with wait logic for pre-loaded models.
-
-        Strategy:
-        1. Wait for background loading from main.py (up to 30s)
-        2. If available, use pre-loaded model
-        3. If timeout, fall back to lazy loading
-        4. If all fails, raise exception
-
-        Raises:
-            RuntimeError: If model fails to load
-        """
-        if self._embedding_model is not None:
-            return
-
-        try:
-            # Import global models from main.py
-            from ..main import _embedding_models
-
-            model_name = self.config.embedding_model
-
-            # Wait for pre-loaded models (with timeout)
-            await self._wait_for_preloaded_models(timeout=30.0)
-
-            # Always use 0.6B model for responsive backend performance
-            if '0.6B' in _embedding_models:
-                self._embedding_model = _embedding_models['0.6B']
-                logger.info(f"[{self.dashboard_id}] Using pre-loaded 0.6B model (1024-dim)")
-            else:
-                logger.warning(f"[{self.dashboard_id}] 0.6B model not in cache, lazy loading...")
-                await self._lazy_load_model('Qwen/Qwen3-Embedding-0.6B')
-
-            # Verify model works
-            if self._embedding_model is None:
-                raise RuntimeError("Embedding model failed to load")
-
-            test_embedding = self._embedding_model.encode(["test"], convert_to_numpy=True)
-            embedding_dim = test_embedding.shape[1]
-            logger.info(f"[{self.dashboard_id}] Embedding model ready, dimension: {embedding_dim}")
-
-        except Exception as e:
-            logger.error(f"[{self.dashboard_id}] Failed to load embedding model: {e}", exc_info=True)
-            raise RuntimeError(f"Embedding model loading failed: {e}") from e
-
-    async def _lazy_load_model(self, model_name: str, truncate_dim: Optional[int] = None):
-        """
-        Fallback: lazy load model if not pre-loaded.
-
-        Args:
-            model_name: Model identifier
-            truncate_dim: Optional dimension truncation
-
-        Raises:
-            RuntimeError: If lazy loading fails
-        """
-        try:
-            import torch
-            from sentence_transformers import SentenceTransformer
-
-            logger.info(f"[{self.dashboard_id}] Lazy loading embedding model: {model_name}")
-
-            # Load model directly (avoid thread pool to prevent semaphore leaks)
-            if truncate_dim:
-                model = SentenceTransformer(
-                    model_name,
-                    trust_remote_code=True,
-                    truncate_dim=truncate_dim
-                )
-            else:
-                model = SentenceTransformer(
-                    model_name,
-                    trust_remote_code=True
-                )
-
-            # Move to device (use CPU to match main.py preloading)
-            device = torch.device("cpu")
-            self._embedding_model = model.to(device)
-            logger.info(f"[{self.dashboard_id}] Lazy loaded model successfully")
-
-        except Exception as e:
-            logger.error(f"[{self.dashboard_id}] Failed to lazy load model: {e}", exc_info=True)
-            raise RuntimeError(f"Lazy loading failed: {e}") from e
-
-    def _encode_batch_sync(self, query_texts: List[str], batch_size: int) -> np.ndarray:
-        """
-        Synchronous encoding helper - runs in thread pool executor.
-
-        Args:
-            query_texts: Formatted query strings
-            batch_size: Batch size for encoding
-
-        Returns:
-            Numpy array of embeddings
-        """
-        import torch
-
-        # Clear MPS cache before encoding to reduce memory contention
-        if torch.backends.mps.is_available():
-            try:
-                torch.mps.empty_cache()
-            except:
-                pass  # Ignore if cache clear fails
-
-        with torch.no_grad():
-            result = self._embedding_model.encode(
-                query_texts,
-                convert_to_numpy=True,
-                normalize_embeddings=True,
-                show_progress_bar=False,
-                batch_size=batch_size
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Get or create async HTTP client."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                base_url=EMBEDDING_SERVER_URL,
+                timeout=httpx.Timeout(60.0, connect=5.0)  # 60s total, 5s connect
             )
+        return self._client
 
-            # Synchronize MPS to ensure operation completes
-            if torch.backends.mps.is_available():
-                try:
-                    torch.mps.synchronize()
-                except:
-                    pass
+    async def _check_server_health(self) -> bool:
+        """Check if embedding server is healthy."""
+        try:
+            client = await self._get_client()
+            response = await client.get("/health")
+            if response.status_code == 200:
+                data = response.json()
+                self._server_healthy = data.get('status') == 'healthy'
+                return self._server_healthy
+            return False
+        except Exception as e:
+            logger.warning(f"[{self.dashboard_id}] Embedding server health check failed: {e}")
+            self._server_healthy = False
+            return False
 
-            return result
+    async def _wait_for_server(self, timeout: float = 30.0) -> bool:
+        """Wait for embedding server to become healthy."""
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if await self._check_server_health():
+                return True
+            await asyncio.sleep(0.5)
+
+        logger.error(f"[{self.dashboard_id}] Embedding server not available after {timeout}s")
+        return False
 
     async def encode_queries(self, queries: List[str]) -> List[np.ndarray]:
         """
-        Convert multiple queries to embeddings in a single batch (async, non-blocking).
+        Convert multiple queries to embeddings via the Embedding Server.
+
+        Backend requests use priority 1 to jump ahead of batch hydration requests.
 
         Args:
             queries: List of query strings
@@ -204,76 +100,87 @@ class EmbeddingService:
         Raises:
             RuntimeError: If embedding generation fails
         """
+        if not queries:
+            return []
+
         try:
-            t_load_start = time.time()
-            await self._load_embedding_model()
-            t_load_end = time.time()
+            t_start = time.time()
 
-            if (t_load_end - t_load_start) > 0.1:
-                logger.warning(
-                    f"[{self.dashboard_id}] Model loading took {(t_load_end-t_load_start)*1000:.0f}ms - "
-                    "should be pre-loaded!"
-                )
+            # Ensure server is available
+            if not self._server_healthy:
+                await self._wait_for_server(timeout=30.0)
 
-            # Format all queries with instruction prefix (Qwen format)
-            query_texts = [f"Instruct: Retrieve relevant passages.\nQuery: {q}" for q in queries]
+            client = await self._get_client()
 
-            # Use batch_size appropriate for 0.6B model
-            batch_size = 32
-
-            device = self._embedding_model.device
-
-            # Log MPS memory status before encoding
-            import torch
-            mps_mem_gb = 0.0
-            if torch.backends.mps.is_available():
-                try:
-                    mps_mem_gb = torch.mps.current_allocated_memory() / 1024**3
-                    if mps_mem_gb > 10.0:
-                        logger.warning(
-                            f"[{self.dashboard_id}] High MPS memory usage: {mps_mem_gb:.1f} GB "
-                            "(may cause slowdown)"
-                        )
-                except:
-                    pass
-
-            logger.info(
-                f"[{self.dashboard_id}] Batch embedding {len(queries)} queries "
-                f"(device={device}, batch_size={batch_size}, mps_mem={mps_mem_gb:.1f}GB)..."
+            # Send request with high priority (backend jumps the queue)
+            response = await client.post(
+                "/embed",
+                json={
+                    "texts": queries,
+                    "priority": BACKEND_PRIORITY,
+                    "add_instruction": True  # Server adds Qwen instruction prefix
+                }
             )
 
-            t_encode_start = time.time()
-            # Run encoding directly (no thread pool to avoid semaphore leaks)
-            # Model is on CPU and batch sizes are small, so this won't block long
-            embeddings = self._encode_batch_sync(query_texts, batch_size)
-            t_encode_end = time.time()
+            if response.status_code != 200:
+                error_detail = response.text
+                raise RuntimeError(f"Embedding server error {response.status_code}: {error_detail}")
 
-            duration_ms = (t_encode_end - t_encode_start) * 1000
-            emb_per_sec = len(queries) / (duration_ms / 1000) if duration_ms > 0 else 0
+            result = response.json()
+            embeddings = result['embeddings']
+            processing_time_ms = result.get('processing_time_ms', 0)
+            queue_time_ms = result.get('queue_time_ms', 0)
+
+            t_end = time.time()
+            total_ms = (t_end - t_start) * 1000
+
             logger.info(
-                f"[{self.dashboard_id}] ✓ Batch embedded {len(queries)} queries "
-                f"in {duration_ms:.0f}ms ({emb_per_sec:.1f} emb/sec)"
+                f"[{self.dashboard_id}] Embedded {len(queries)} queries "
+                f"total={total_ms:.0f}ms queue={queue_time_ms:.0f}ms process={processing_time_ms:.0f}ms"
             )
 
             # Validate dimensions
-            if embeddings.shape[1] != self.config.embedding_dim:
+            if embeddings and len(embeddings[0]) != self.config.embedding_dim:
                 raise RuntimeError(
                     f"Embedding dimension mismatch! Expected {self.config.embedding_dim}, "
-                    f"got {embeddings.shape[1]}"
+                    f"got {len(embeddings[0])}"
                 )
 
-            return [emb.astype(np.float32) for emb in embeddings]
+            return [np.array(emb, dtype=np.float32) for emb in embeddings]
 
+        except httpx.TimeoutException as e:
+            logger.error(f"[{self.dashboard_id}] Embedding server timeout: {e}")
+            raise RuntimeError(f"Embedding server timeout: {e}") from e
+        except httpx.ConnectError as e:
+            logger.error(f"[{self.dashboard_id}] Cannot connect to embedding server: {e}")
+            self._server_healthy = False
+            raise RuntimeError(f"Cannot connect to embedding server at {EMBEDDING_SERVER_URL}: {e}") from e
         except Exception as e:
-            logger.error(f"[{self.dashboard_id}] Error generating batch embeddings: {e}", exc_info=True)
+            logger.error(f"[{self.dashboard_id}] Error generating embeddings: {e}", exc_info=True)
             raise RuntimeError(f"Failed to generate embeddings: {e}") from e
+
+    async def encode_query_async(self, query: str) -> np.ndarray:
+        """
+        Convert single query to embedding vector (async version).
+
+        Args:
+            query: Natural language query
+
+        Returns:
+            Embedding vector (normalized numpy array)
+
+        Raises:
+            RuntimeError: If embedding generation fails
+        """
+        embeddings = await self.encode_queries([query])
+        return embeddings[0]
 
     def encode_query(self, query: str) -> np.ndarray:
         """
         Convert single query to embedding vector (synchronous).
 
-        Uses pre-loaded model directly without async/threading to avoid
-        multiprocessing issues with semaphores.
+        Note: This creates a new event loop for synchronous callers.
+        Prefer encode_query_async() when in async context.
 
         Args:
             query: Natural language query
@@ -285,26 +192,18 @@ class EmbeddingService:
             RuntimeError: If embedding generation fails
         """
         try:
-            # Get pre-loaded model directly (avoid async loading)
-            if self._embedding_model is None:
-                from ..main import _embedding_models
-                if '0.6B' in _embedding_models:
-                    self._embedding_model = _embedding_models['0.6B']
-                else:
-                    raise RuntimeError("Embedding model not pre-loaded. Call encode_queries() from async context instead.")
-
-            # Format query with instruction prefix (Qwen format)
-            query_text = f"Instruct: Retrieve relevant passages.\nQuery: {query}"
-
-            # Encode synchronously
-            embedding = self._embedding_model.encode(
-                [query_text],
-                convert_to_numpy=True,
-                normalize_embeddings=True
-            )
-
-            return embedding[0].astype(np.float32)
-
+            # Run async version in new event loop
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(self.encode_query_async(query))
+            finally:
+                loop.close()
         except Exception as e:
             logger.error(f"[{self.dashboard_id}] Error encoding single query: {e}", exc_info=True)
             raise RuntimeError(f"Failed to encode query: {e}") from e
+
+    async def close(self):
+        """Close the HTTP client."""
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
