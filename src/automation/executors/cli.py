@@ -219,12 +219,6 @@ class CLIExecutor(BaseExecutor):
         # Check if screen session already exists - FAIL FAST to prevent duplicates
         if await check_screen_exists(screen_name):
             end_time = datetime.now(timezone.utc)
-            error_msg = (
-                f"Screen session '{screen_name}' already exists. "
-                f"Another instance may still be running. "
-                f"To force restart, manually kill it: screen -S {screen_name} -X quit"
-            )
-            logger.warning(error_msg)
             return ExecutionResult(
                 success=False,
                 start_time=start_time,
@@ -232,9 +226,10 @@ class CLIExecutor(BaseExecutor):
                 output={
                     'screen_name': screen_name,
                     'returncode': -2,
+                    'skipped_already_running': True,
                     'message': 'Skipped - screen session already exists'
                 },
-                error=error_msg
+                error=None  # Not an error, just skipped
             )
 
         # Build the command string for screen

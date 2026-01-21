@@ -442,6 +442,10 @@ class ScheduledTaskManager:
             if result.success:
                 summary_info = f" - {task.state.last_summary}" if task.state.last_summary else ""
                 logger.info(f"COMPLETED TASK {task_id}: success in {result.duration_seconds:.1f}s{summary_info}")
+            elif result.output and result.output.get('skipped_already_running'):
+                # Not a real failure - task was scheduled but already running
+                logger.info(f"Task {task_id} scheduled but already running, no action taken")
+                task.state.last_run_result = 'skipped'  # Override 'failed' status
             else:
                 logger.error(f"COMPLETED TASK {task_id}: failed - {result.error}")
 
