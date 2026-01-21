@@ -1120,8 +1120,9 @@ async def process_task(task_request: TaskRequest):
         "worker_id": task_request.worker_id,
         "original_task_id": task_request.original_task_id  # Store the original task ID
     }
-    tasks[task_id] = serialize_task_data(task_data) # Store basic info immediately
-    
+    async with tasks_lock:
+        tasks[task_id] = serialize_task_data(task_data)  # Store basic info immediately
+
     # Log task acceptance
     logger.info(f"Accepted task {task_id} for content {task_request.content_id} of type {task_request.task_type}")
 
@@ -1353,9 +1354,11 @@ async def get_task_status(task_id: str):
 @app.get("/tasks")
 async def list_tasks():
     """List all tasks for health check."""
+    async with tasks_lock:
+        task_count = len(tasks)
     return {
-        "status": "healthy", 
-        "tasks": len(tasks),
+        "status": "healthy",
+        "tasks": task_count,
         "session_manager": session_manager
     }
 
@@ -1363,18 +1366,19 @@ async def list_tasks():
 async def cancel_task(task_id: str):
     """Cancel a task if it exists and is still processing."""
     logger.info(f"Received cancellation request for task {task_id}")
-    
+
     # Find task with matching original_task_id
-    task_api_id = None
-    for api_id, task_info in tasks.items():
-        if task_info.get("original_task_id") == task_id:
-            task_api_id = api_id
-            break
-    
-    if not task_api_id:
-        raise HTTPException(status_code=404, detail="Task not found")
-        
-    task_info = tasks[task_api_id]
+    async with tasks_lock:
+        task_api_id = None
+        for api_id, info in tasks.items():
+            if info.get("original_task_id") == task_id:
+                task_api_id = api_id
+                break
+
+        if not task_api_id:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        task_info = tasks[task_api_id]
     
     # Only allow cancellation of processing tasks
     if task_info["status"] != "processing":
@@ -1492,7 +1496,8 @@ async def process_task_batch(batch_request: TaskBatchRequest):
             "worker_id": task_request.worker_id,
             "original_task_id": task_request.original_task_id
         }
-        tasks[task_id] = serialize_task_data(task_data)
+        async with tasks_lock:
+            tasks[task_id] = serialize_task_data(task_data)
 
         # Enqueue the task
         await enqueue_task(task_id, task_request.task_type, task_data)
