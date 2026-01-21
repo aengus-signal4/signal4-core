@@ -34,6 +34,9 @@ class ScheduleState:
     # Execution output (captured from stdout/stderr)
     last_error: Optional[str] = None  # Error message if failed
     last_summary: Optional[Dict[str, Any]] = None  # Parsed JSON summary from script output
+    # Screen session tracking for restart recovery
+    screen_session_name: Optional[str] = None  # Name of running screen session
+    execution_start_time: Optional[datetime] = None  # When the current execution started
 
 
 class BaseSchedule:

@@ -25,6 +25,7 @@ from .schedule_types import (
     create_schedule
 )
 from .executors import CLIExecutor, SQLExecutor, ExecutionResult
+from .executors.cli import check_screen_exists
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,11 @@ class ScheduledTaskManager:
                 logger.error(f"Error loading task {task_id}: {e}")
 
     def _load_state(self):
-        """Load persisted state from file"""
+        """Load persisted state from file.
+
+        Note: is_running state is loaded but will be verified against actual
+        screen sessions in _verify_running_tasks() called during start().
+        """
         try:
             if self.state_file.exists():
                 with open(self.state_file, 'r') as f:
@@ -168,6 +173,13 @@ class ScheduledTaskManager:
                         task.state.last_run_date = task_state.get('last_run_date')
                         task.state.last_error = task_state.get('last_error')
                         task.state.last_summary = task_state.get('last_summary')
+                        # Load running state for restart recovery
+                        task.state.is_running = task_state.get('is_running', False)
+                        task.state.screen_session_name = task_state.get('screen_session_name')
+                        if task_state.get('execution_start_time'):
+                            task.state.execution_start_time = datetime.fromisoformat(
+                                task_state['execution_start_time']
+                            )
 
                 logger.info(f"Loaded state for {len(tasks_state)} tasks")
 
@@ -175,12 +187,12 @@ class ScheduledTaskManager:
             logger.error(f"Error loading state: {e}")
 
     def _save_state(self):
-        """Save current state to file"""
+        """Save current state to file, including running state for restart recovery"""
         try:
             self.state_file.parent.mkdir(parents=True, exist_ok=True)
 
             state_data = {
-                'version': '1.0.0',
+                'version': '1.1.0',
                 'updated_at': datetime.now(timezone.utc).isoformat(),
                 'tasks': {}
             }
@@ -192,7 +204,11 @@ class ScheduledTaskManager:
                     'last_duration_seconds': task.state.last_duration_seconds,
                     'last_run_date': task.state.last_run_date,
                     'last_error': task.state.last_error,
-                    'last_summary': task.state.last_summary
+                    'last_summary': task.state.last_summary,
+                    # Persist running state for restart recovery
+                    'is_running': task.state.is_running,
+                    'screen_session_name': task.state.screen_session_name,
+                    'execution_start_time': task.state.execution_start_time.isoformat() if task.state.execution_start_time else None,
                 }
 
             with open(self.state_file, 'w') as f:
@@ -201,6 +217,58 @@ class ScheduledTaskManager:
         except Exception as e:
             logger.error(f"Error saving state: {e}")
 
+    async def _verify_running_tasks(self):
+        """Verify tasks marked as running actually have screen sessions.
+
+        Called on startup to reconcile persisted state with actual system state.
+        This handles the case where orchestrator restarted while tasks were running.
+        """
+        verified_count = 0
+        cleared_count = 0
+
+        for task_id, task in self.tasks.items():
+            if not task.state.is_running:
+                continue
+
+            screen_name = task.state.screen_session_name
+            if not screen_name:
+                # Task marked running but no screen session name - clear the flag
+                logger.warning(
+                    f"Task {task_id} marked as running but no screen session name, clearing flag"
+                )
+                task.state.is_running = False
+                cleared_count += 1
+                continue
+
+            # Check if screen session actually exists
+            if await check_screen_exists(screen_name):
+                # Screen session exists - task is genuinely still running
+                logger.info(
+                    f"Task {task_id} has running screen session '{screen_name}', "
+                    f"resuming monitoring (started: {task.state.execution_start_time})"
+                )
+                verified_count += 1
+            else:
+                # Screen session doesn't exist - task completed or crashed while we were down
+                logger.warning(
+                    f"Task {task_id} was marked running but screen session '{screen_name}' "
+                    f"no longer exists, clearing flag"
+                )
+                task.state.is_running = False
+                task.state.screen_session_name = None
+                task.state.execution_start_time = None
+                # Mark as failed since we don't know the outcome
+                if task.state.last_run_result != 'success':
+                    task.state.last_run_result = 'unknown'
+                    task.state.last_error = 'Orchestrator restarted and screen session was lost'
+                cleared_count += 1
+
+        if verified_count > 0 or cleared_count > 0:
+            logger.info(
+                f"Running task verification: {verified_count} verified, {cleared_count} cleared"
+            )
+            self._save_state()
+
     async def start(self):
         """Start the scheduler"""
         if not self.enabled:
@@ -208,6 +276,10 @@ class ScheduledTaskManager:
             return
 
         logger.info("Starting scheduled task manager")
+
+        # Verify tasks marked as running actually have screen sessions
+        await self._verify_running_tasks()
+
         self.should_stop = False
         self._scheduler_task = asyncio.create_task(self._scheduler_loop())
 
@@ -255,9 +327,27 @@ class ScheduledTaskManager:
                     if not task.enabled:
                         continue
 
-                    # Skip already running tasks
+                    # Skip already running tasks, but verify screen sessions still exist
                     if task.state.is_running:
-                        continue
+                        # For screen-based tasks, verify the session still exists
+                        if task.state.screen_session_name:
+                            if not await check_screen_exists(task.state.screen_session_name):
+                                # Screen session disappeared - task must have completed/crashed
+                                logger.warning(
+                                    f"Screen session '{task.state.screen_session_name}' for task "
+                                    f"{task_id} no longer exists, clearing running state"
+                                )
+                                task.state.is_running = False
+                                task.state.screen_session_name = None
+                                task.state.execution_start_time = None
+                                task.state.last_run_result = 'unknown'
+                                task.state.last_error = 'Screen session disappeared unexpectedly'
+                                self._save_state()
+                                # Don't skip - let it be scheduled if needed
+                            else:
+                                continue  # Screen still running, skip
+                        else:
+                            continue  # Non-screen task, trust the flag
 
                     # Check if task should run
                     if task.schedule.should_run(task.state):
@@ -311,7 +401,17 @@ class ScheduledTaskManager:
             return
 
         task.state.is_running = True
+        task.state.execution_start_time = datetime.now(timezone.utc)
         logger.info(f"INITIALIZING TASK {task_id}")
+
+        # Track screen session info for restart recovery
+        use_screen = task.executor_config.get('use_screen', False)
+        if use_screen:
+            screen_name = task.executor_config.get('screen_name') or task_id
+            task.state.screen_session_name = screen_name
+            # Save state immediately so we can recover if orchestrator crashes
+            self._save_state()
+            logger.info(f"Task {task_id} will use screen session '{screen_name}'")
 
         try:
             # Get executor
@@ -322,7 +422,7 @@ class ScheduledTaskManager:
             # Execute
             result = await executor.execute(
                 config=task.executor_config,
-                context={'orchestrator': self.orchestrator},
+                context={'orchestrator': self.orchestrator, 'task_id': task_id},
                 timeout_seconds=task.timeout_seconds
             )
 
@@ -358,6 +458,9 @@ class ScheduledTaskManager:
 
         finally:
             task.state.is_running = False
+            task.state.screen_session_name = None
+            task.state.execution_start_time = None
+            self._save_state()
 
     async def trigger_task(self, task_id: str) -> Dict[str, Any]:
         """Manually trigger a task"""
