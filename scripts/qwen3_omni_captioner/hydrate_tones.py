@@ -21,9 +21,12 @@ Usage:
     uv run python hydrate_tones.py --project Canadian --memory-limit 16  # 16GB limit
 """
 
-# Suppress macOS MallocStackLogging warnings (must be before other imports)
+# Suppress macOS MallocStackLogging and other warnings (must be before other imports)
 import os
+import warnings
 os.environ["MallocStackLogging"] = "0"
+os.environ["MallocStackLoggingDirectory"] = ""
+warnings.filterwarnings("ignore", message=".*set_cache_limit is deprecated.*")
 
 import argparse
 import gc
@@ -48,9 +51,10 @@ from tqdm import tqdm
 # MLX memory management
 import mlx.core as mx
 
-# Load environment from core/.env and add core/src to path for imports
+# Load environment from root .env and add core/src to path for imports
 CORE_DIR = Path(__file__).resolve().parent.parent.parent
-load_dotenv(CORE_DIR / ".env", override=True)
+ROOT_DIR = CORE_DIR.parent  # signal4/ root where .env lives
+load_dotenv(ROOT_DIR / ".env", override=True)
 sys.path.insert(0, str(CORE_DIR))
 
 from src.utils.logger import setup_worker_logger
@@ -87,15 +91,15 @@ VALENCE_MAP = {"neutral": 0.5, "angry": 0.2, "happy": 0.9, "sad": 0.2, "fearful"
 
 
 def clear_mlx_memory():
-    """Clear MLX metal cache and run Python garbage collection."""
+    """Clear MLX cache and run Python garbage collection."""
     gc.collect()
-    mx.metal.clear_cache()
+    mx.clear_cache()
 
 
 def set_mlx_memory_limit(limit_gb: float):
-    """Set MLX metal cache limit in GB."""
+    """Set MLX cache limit in GB."""
     limit_bytes = int(limit_gb * 1024 * 1024 * 1024)
-    mx.metal.set_cache_limit(limit_bytes)
+    mx.set_cache_limit(limit_bytes)
     logger.info(f"MLX cache limit set to {limit_gb:.1f} GB ({limit_bytes:,} bytes)")
 
 
