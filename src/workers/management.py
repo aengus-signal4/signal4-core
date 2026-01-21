@@ -554,7 +554,8 @@ exec {self.head_python_path} {llm_server_path} 2>&1 | tee -a {log_dir}/llm_serve
                 # Start new tmux session with task_processor.py using uv
                 uv_path = self.uv_path
                 # Run uv which automatically uses the project's .venv
-                tmux_cmd = f"cd {project_root} && export PYTHONPATH={project_root}:$PYTHONPATH && PATH=/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin:$PATH tmux new-session -d -s processor '{uv_path} run --project {project_root} python {processor_path} 2>&1 | tee -a {log_dir}/processor.log'"
+                # Use exec to replace shell with python process, keeping it attached to tmux
+                tmux_cmd = f"cd {project_root} && export PYTHONPATH={project_root}:$PYTHONPATH && PATH=/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin:$PATH tmux new-session -d -s processor 'exec {uv_path} run --project {project_root} python -u {processor_path} >> {log_dir}/processor.log 2>&1'"
                 result = await self._run_command(worker, tmux_cmd)
 
                 if hasattr(result, 'returncode') and result.returncode != 0:
@@ -584,8 +585,9 @@ exec {self.head_python_path} {llm_server_path} 2>&1 | tee -a {log_dir}/llm_serve
                 # Start new screen session using uv
                 uv_path = self.uv_path
                 # Run uv which automatically uses the project's .venv
-                # Wrap in bash -c to keep process attached to screen session
-                screen_cmd = f"screen -dmS processor bash -c 'cd {project_root} && export PYTHONPATH={project_root}:$PYTHONPATH && {uv_path} run --project {project_root} python {processor_path} 2>&1 | tee -a {log_dir}/processor.log'"
+                # Use exec to replace bash with the python process, keeping it attached to screen
+                # Redirect output directly to log file (use tail -f to view logs)
+                screen_cmd = f"screen -dmS processor bash -c 'cd {project_root} && export PYTHONPATH={project_root}:$PYTHONPATH && exec {uv_path} run --project {project_root} python -u {processor_path} >> {log_dir}/processor.log 2>&1'"
                 result = await self._run_command(worker, screen_cmd)
 
                 if hasattr(result, 'returncode') and result.returncode != 0:
