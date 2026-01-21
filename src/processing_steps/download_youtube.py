@@ -26,6 +26,7 @@ from src.utils.config import load_config
 from src.storage.s3_utils import S3StorageConfig, S3Storage, create_s3_storage_from_config
 from src.utils.datetime_encoder import DateTimeEncoder
 from src.utils.error_codes import ErrorCode, create_error_result, create_skipped_result
+from src.utils.content_id import get_raw_id
 
 logger = setup_worker_logger('download_youtube')
 
@@ -623,8 +624,9 @@ class YouTubeDownloader:
             logger.info(f"Ensuring is_downloaded=False before download attempt")
             self._update_content_state(content_id, is_downloaded=False, blocked_download=False)
 
-            # Download video
-            video_url = f"https://www.youtube.com/watch?v={content_id}"
+            # Download video - extract raw video ID (strip yt_ prefix if present)
+            video_id = get_raw_id(content_id)
+            video_url = f"https://www.youtube.com/watch?v={video_id}"
             temp_path = self.temp_dir / f"{content_id}.mp4"
             download_result = await self._download_video(video_url, temp_path)
 
