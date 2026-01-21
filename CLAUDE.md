@@ -301,16 +301,18 @@ Use these commands to quickly investigate content issues. Environment variables 
 
 ### PostgreSQL Access
 
+The `.env` file doesn't use `export` statements, so use `set -a` (auto-export mode) before sourcing:
+
 ```bash
-# Quick query (loads creds from .env automatically)
+# Quick query (set -a exports all variables to child processes)
 cd ~/signal4/core
-source .env && psql -h 10.0.0.4 -U signal4 -d av_content
+set -a && source .env && set +a && PGPASSWORD=$POSTGRES_PASSWORD psql -h 10.0.0.4 -U signal4 -d av_content
 
 # One-liner queries
-source .env && psql -h 10.0.0.4 -U signal4 -d av_content -c "SELECT * FROM content WHERE content_id = 'pod_9bb4e73a66d8'"
+set -a && source .env && set +a && PGPASSWORD=$POSTGRES_PASSWORD psql -h 10.0.0.4 -U signal4 -d av_content -c "SELECT * FROM content WHERE content_id = 'pod_9bb4e73a66d8'"
 
 # Check content and chunks for an item
-source .env && psql -h 10.0.0.4 -U signal4 -d av_content -c "
+set -a && source .env && set +a && PGPASSWORD=$POSTGRES_PASSWORD psql -h 10.0.0.4 -U signal4 -d av_content -c "
 SELECT c.content_id, c.title, c.is_transcribed, c.processing_stage,
        COUNT(ch.id) as chunks,
        SUM(CASE WHEN ch.transcription_status = 'completed' THEN 1 ELSE 0 END) as completed
@@ -320,7 +322,7 @@ WHERE c.content_id = 'CONTENT_ID_HERE'
 GROUP BY c.content_id, c.title, c.is_transcribed, c.processing_stage"
 
 # Check chunk statuses for a content item
-source .env && psql -h 10.0.0.4 -U signal4 -d av_content -c "
+set -a && source .env && set +a && PGPASSWORD=$POSTGRES_PASSWORD psql -h 10.0.0.4 -U signal4 -d av_content -c "
 SELECT chunk_index, transcription_status, transcription_model, diarization_status
 FROM content_chunks WHERE content_id = 'CONTENT_ID_HERE' ORDER BY chunk_index"
 ```
@@ -329,7 +331,7 @@ FROM content_chunks WHERE content_id = 'CONTENT_ID_HERE' ORDER BY chunk_index"
 
 ```bash
 # Configure mc alias (one-time setup)
-source .env && mc alias set minio http://10.0.0.251:9000 $S3_ACCESS_KEY $S3_SECRET_KEY
+set -a && source .env && set +a && mc alias set minio http://10.0.0.251:9000 $S3_ACCESS_KEY $S3_SECRET_KEY
 
 # List files for a content item
 mc ls minio/av-content/content/CONTENT_ID_HERE/
