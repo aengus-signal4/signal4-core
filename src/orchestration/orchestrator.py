@@ -485,6 +485,11 @@ class TaskOrchestratorV2:
         logger.info("Starting network monitor")
         await self.network_monitor.start_monitoring(self.worker_pool.get_all_workers(), get_session)
 
+        # Wait for head node services to be healthy before starting scheduled tasks
+        # (scheduled tasks depend on LLM server, embedding server, etc.)
+        logger.info("Waiting for head node services to be healthy...")
+        await self._wait_for_head_node_services()
+
         # Start unified scheduled task manager for background services
         # (indexing, downloading, speaker ID, hydration, podcast collection)
         logger.info("Starting scheduled task manager")
@@ -511,8 +516,51 @@ class TaskOrchestratorV2:
             logger.error(f"Error in main loop: {str(e)}")
         finally:
             logger.info("Orchestrator main loop stopped")
-    
-    
+
+    async def _wait_for_head_node_services(self, timeout: float = 120.0, check_interval: float = 5.0):
+        """
+        Wait for critical head node services to be healthy before proceeding.
+
+        Services checked: embedding_server, llm_server (if enabled)
+        This ensures scheduled tasks that depend on these services don't fail on startup.
+        """
+        if not hasattr(self, 'head_node_monitor'):
+            logger.warning("Head node monitor not available, skipping service health wait")
+            return
+
+        critical_services = ['embedding_server', 'llm_server']
+        start_time = asyncio.get_event_loop().time()
+
+        while True:
+            elapsed = asyncio.get_event_loop().time() - start_time
+            if elapsed >= timeout:
+                logger.warning(f"Timeout waiting for head node services after {timeout}s, proceeding anyway")
+                break
+
+            all_healthy = True
+            unhealthy_services = []
+
+            for service_name in critical_services:
+                service = self.head_node_monitor.services.get(service_name)
+                if service is None:
+                    # Service not configured, skip
+                    continue
+
+                if not service.enabled:
+                    continue
+
+                is_healthy = await self.head_node_monitor.check_service_health(service_name)
+                if not is_healthy:
+                    all_healthy = False
+                    unhealthy_services.append(service_name)
+
+            if all_healthy:
+                logger.info("All critical head node services are healthy")
+                break
+
+            logger.info(f"Waiting for services to be healthy: {unhealthy_services} ({elapsed:.0f}s/{timeout:.0f}s)")
+            await asyncio.sleep(check_interval)
+
     async def _assign_task_to_worker(self, task: Dict[str, Any], worker: WorkerInfo) -> bool:
         """Assign a specific task to a worker with health check and retry logic"""
         try:
