@@ -183,7 +183,9 @@ QUICK_STATUS_GROUPS = {
         {'name': 'Embeddings', 'task_id': 'embedding_hydration'},
         {'name': 'Speaker ID 1', 'task_id': 'speaker_id_phase1'},
         {'name': 'Speaker ID 2', 'task_id': 'speaker_id_phase2'},
-        {'name': 'Podcast Charts', 'task_id': 'podcast_collection'},
+        {'name': 'Tone', 'task_id': 'tone_hydration'},
+        {'name': 'Cache 30d', 'task_id': 'cache_refresh_30d'},
+        {'name': 'Cache 7d', 'task_id': 'cache_refresh_7d'},
     ],
 }
 
@@ -700,6 +702,18 @@ def get_cache_table_status(time_window: str = '30d') -> dict:
                 FROM {cache_table}
             """)).fetchone()
 
+            # Get total indexed content (content with segment embeddings) for percentage calculation
+            # Note: content.id (integer PK) joins to embedding_segments.content_id (integer FK)
+            indexed_result = session.execute(text("""
+                SELECT
+                    COUNT(DISTINCT c.id) as total_indexed_content,
+                    COUNT(DISTINCT es.content_id) as content_with_embeddings,
+                    COUNT(es.id) as total_embedding_segments
+                FROM content c
+                LEFT JOIN embedding_segments es ON c.id = es.content_id
+                WHERE c.is_transcribed = true
+            """)).fetchone()
+
             # Generate date range for the cache window
             days = 30 if time_window == '30d' else 7
             end_date = datetime.now(timezone.utc).date()
@@ -718,6 +732,9 @@ def get_cache_table_status(time_window: str = '30d') -> dict:
                 'total_content': total_result.total_content or 0,
                 'cache_start': total_result.cache_start.date().isoformat() if total_result.cache_start else None,
                 'cache_end': total_result.cache_end.date().isoformat() if total_result.cache_end else None,
+                'total_indexed_content': indexed_result.total_indexed_content or 0,
+                'content_with_embeddings': indexed_result.content_with_embeddings or 0,
+                'total_embedding_segments': indexed_result.total_embedding_segments or 0,
                 'date_range': {
                     'start': start_date.isoformat(),
                     'end': end_date.isoformat(),
@@ -1511,9 +1528,22 @@ def render_scheduled_tasks_summary():
         duration = last_run.get('duration_seconds')
         summary = last_run.get('summary')
         error = last_run.get('error')
+        is_running = task.get('is_running', False)
+        screen_session = task.get('screen_session')
+        exec_start = task.get('execution_start_time')
 
-        # Format last run time
-        if last_time:
+        # Format last run time or running duration
+        if is_running and exec_start:
+            try:
+                dt = datetime.fromisoformat(exec_start.replace('Z', '+00:00'))
+                running_for = datetime.now(timezone.utc) - dt
+                if running_for.total_seconds() < 3600:
+                    time_str = f"Running {int(running_for.total_seconds() / 60)}m"
+                else:
+                    time_str = f"Running {running_for.total_seconds() / 3600:.1f}h"
+            except:
+                time_str = "Running"
+        elif last_time:
             try:
                 dt = datetime.fromisoformat(last_time.replace('Z', '+00:00'))
                 time_ago = datetime.now(timezone.utc) - dt
@@ -1529,7 +1559,7 @@ def render_scheduled_tasks_summary():
             time_str = "Never"
 
         # Format duration
-        if duration:
+        if duration and not is_running:
             if duration < 60:
                 dur_str = f"{duration:.0f}s"
             else:
@@ -1537,21 +1567,30 @@ def render_scheduled_tasks_summary():
         else:
             dur_str = "-"
 
-        # Status indicator
-        if task.get('is_running'):
-            status = "Running"
+        # Status indicator with screen session info
+        if is_running:
+            if screen_session:
+                status = f"🟢 {screen_session}"
+            else:
+                status = "🟢 Running"
+        elif not task.get('enabled'):
+            status = "⚫ Disabled"
         elif result == 'success':
-            status = "Success"
+            status = "✅ Success"
         elif result == 'failed':
-            status = "Failed"
+            status = "❌ Failed"
         elif result == 'error':
-            status = "Error"
+            status = "⚠️ Error"
+        elif result == 'unknown':
+            status = "❓ Unknown"
         else:
-            status = "Pending"
+            status = "⏳ Pending"
 
         # Build summary string from the summary dict
         summary_str = ""
-        if summary:
+        if is_running:
+            summary_str = f"screen -r {screen_session}" if screen_session else "Running..."
+        elif summary:
             # Extract key metrics based on task type
             if 'total_tasks_created' in summary:
                 summary_str = f"{summary['total_tasks_created']} tasks created"
@@ -1578,8 +1617,12 @@ def render_scheduled_tasks_summary():
             'Summary': summary_str or "-"
         })
 
-    # Sort: running first, then by last run time
+    # Sort: running first, then by status
     df = pd.DataFrame(rows)
+    # Custom sort: Running tasks first, then by status
+    status_order = {'🟢': 0, '❌': 1, '⚠️': 2, '❓': 3, '✅': 4, '⏳': 5, '⚫': 6}
+    df['_sort'] = df['Status'].apply(lambda x: status_order.get(x[:1] if x else '', 99))
+    df = df.sort_values('_sort').drop('_sort', axis=1)
     st.dataframe(df, use_container_width=True, hide_index=True)
 
     st.divider()
@@ -2089,22 +2132,52 @@ def render_projects_tab():
     if cache_status and 'error' not in cache_status:
         projects = cache_status.get('projects', {})
 
+        # Get totals for percentage calculation
+        total_content = cache_status.get('total_content', 0)
+        total_segments = cache_status.get('total_segments', 0)
+        total_indexed_content = cache_status.get('total_indexed_content', 0)
+        content_with_embeddings = cache_status.get('content_with_embeddings', 0)
+        total_embedding_segments = cache_status.get('total_embedding_segments', 0)
+
+        # Calculate percentages
+        content_pct = (total_content / total_indexed_content * 100) if total_indexed_content > 0 else 0
+        segment_pct = (total_segments / total_embedding_segments * 100) if total_embedding_segments > 0 else 0
+
         # Summary metrics row
         col1, col2, col3, col4 = st.columns(4)
 
-        total_content = cache_status.get('total_content', 0)
-        total_segments = cache_status.get('total_segments', 0)
-        total_with_main = sum(p.get('with_main_embedding', 0) for p in projects.values())
-        total_with_alt = sum(p.get('with_alt_embedding', 0) for p in projects.values())
-
         with col1:
-            st.metric("Content Items", f"{total_content:,}")
+            st.metric(
+                "Content in Cache",
+                f"{content_pct:.1f}%",
+                delta=f"{total_content:,} of {total_indexed_content:,}",
+                delta_color="off"
+            )
         with col2:
-            st.metric("Segments", f"{total_segments:,}")
+            st.metric(
+                "Segments in Cache",
+                f"{segment_pct:.1f}%",
+                delta=f"{total_segments:,} of {total_embedding_segments:,}",
+                delta_color="off"
+            )
         with col3:
-            st.metric("Main Embeddings", f"{total_with_main:,}")
+            total_with_main = sum(p.get('with_main_embedding', 0) for p in projects.values())
+            main_pct = (total_with_main / total_segments * 100) if total_segments > 0 else 0
+            st.metric(
+                "Main Embeddings",
+                f"{main_pct:.1f}%",
+                delta=f"{total_with_main:,} segments",
+                delta_color="off"
+            )
         with col4:
-            st.metric("Alt Embeddings", f"{total_with_alt:,}")
+            total_with_alt = sum(p.get('with_alt_embedding', 0) for p in projects.values())
+            alt_pct = (total_with_alt / total_segments * 100) if total_segments > 0 else 0
+            st.metric(
+                "Alt Embeddings",
+                f"{alt_pct:.1f}%",
+                delta=f"{total_with_alt:,} segments",
+                delta_color="off"
+            )
 
         # Show cache date range
         cache_start = cache_status.get('cache_start', 'N/A')
@@ -2284,16 +2357,13 @@ def render_projects_tab():
 # =============================================================================
 
 def render_header():
-    """Render dashboard header with title and refresh controls"""
-    col1, col2, col3 = st.columns([2, 1, 1])
+    """Render dashboard header with refresh controls"""
+    col1, col2 = st.columns([3, 1])
 
     with col1:
-        st.title("System Monitoring Dashboard")
-
-    with col2:
         st.caption(f"Last updated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
 
-    with col3:
+    with col2:
         if st.button("Refresh Now", use_container_width=True):
             st.cache_data.clear()
             st.rerun()

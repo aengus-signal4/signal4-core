@@ -520,6 +520,8 @@ class ScheduledTaskManager:
             'description': task.description,
             'enabled': task.enabled,
             'is_running': task.state.is_running,
+            'screen_session': task.state.screen_session_name,
+            'execution_start_time': task.state.execution_start_time.isoformat() if task.state.execution_start_time else None,
             'schedule': {
                 'type': task.schedule_config.get('type'),
                 'config': task.schedule_config
