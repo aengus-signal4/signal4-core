@@ -120,8 +120,8 @@ def get_episode_speakers(content_id: str) -> list[EpisodeSpeaker]:
                 s.duration,
                 c.duration as ep_duration,
                 ROUND((100.0 * s.duration / NULLIF(c.duration, 0))::numeric, 1) as duration_pct,
-                (SELECT COUNT(*) FROM speaker_transcriptions st
-                 WHERE st.speaker_id = s.id) as turn_count,
+                (SELECT COUNT(DISTINCT turn_index) FROM sentences sent
+                 WHERE sent.speaker_id = s.id) as turn_count,
                 si.primary_name as assigned_name
             FROM speakers s
             JOIN content c ON s.content_id = c.content_id

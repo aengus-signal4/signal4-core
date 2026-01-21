@@ -989,17 +989,16 @@ class ContextBuilder:
     def get_speaker_transcript_context(
         self,
         speaker_id: int,
-        max_utterance_chars: int = 500,
-        use_sentences: bool = True
+        max_utterance_chars: int = 500
     ) -> Optional[Dict]:
         """
         Get transcript context for a speaker (for Phase 2 LLM verification).
 
+        Uses the sentences table for transcript data.
+
         Args:
             speaker_id: Speaker ID
             max_utterance_chars: Maximum characters per utterance
-            use_sentences: If True, query sentences table (default).
-                          If False, use legacy speaker_transcriptions table.
 
         Returns:
             {
@@ -1060,7 +1059,7 @@ class ContextBuilder:
             if speaker_result.episode_duration and speaker_result.episode_duration > 0:
                 duration_pct = (speaker_result.duration / speaker_result.episode_duration) * 100
 
-            # Get the content.id (integer) from content_id (string) for speaker_transcriptions join
+            # Get the content.id (integer) from content_id (string) for sentences join
             content_db_id_query = text("""
                 SELECT id FROM content WHERE content_id = :content_id
             """)
@@ -1076,32 +1075,18 @@ class ContextBuilder:
 
             content_db_id = content_db_id_result.id
 
-            # Get speaker turns - use sentences table (aggregated) or legacy speaker_transcriptions
-            if use_sentences:
-                # Query sentences table, aggregate back into turns
-                turns_query = text("""
-                    SELECT
-                        turn_index,
-                        string_agg(text, ' ' ORDER BY sentence_in_turn) as text
-                    FROM sentences
-                    WHERE speaker_id = :speaker_id
-                      AND content_id = :content_db_id
-                      AND stitch_version = :stitch_version
-                    GROUP BY turn_index
-                    ORDER BY turn_index
-                """)
-            else:
-                # Legacy: query speaker_transcriptions directly
-                turns_query = text("""
-                    SELECT
-                        turn_index,
-                        text
-                    FROM speaker_transcriptions
-                    WHERE speaker_id = :speaker_id
-                      AND content_id = :content_db_id
-                      AND stitch_version = :stitch_version
-                    ORDER BY turn_index
-                """)
+            # Get speaker turns from sentences table (aggregated back into turns)
+            turns_query = text("""
+                SELECT
+                    turn_index,
+                    string_agg(text, ' ' ORDER BY sentence_in_turn) as text
+                FROM sentences
+                WHERE speaker_id = :speaker_id
+                  AND content_id = :content_db_id
+                  AND stitch_version = :stitch_version
+                GROUP BY turn_index
+                ORDER BY turn_index
+            """)
 
             speaker_turns = session.execute(
                 turns_query,
@@ -1114,27 +1099,16 @@ class ContextBuilder:
 
             # Fallback: try without stitch_version constraint if no turns found
             if not speaker_turns:
-                if use_sentences:
-                    turns_query_fallback = text("""
-                        SELECT
-                            turn_index,
-                            string_agg(text, ' ' ORDER BY sentence_in_turn) as text
-                        FROM sentences
-                        WHERE speaker_id = :speaker_id
-                          AND content_id = :content_db_id
-                        GROUP BY turn_index
-                        ORDER BY turn_index
-                    """)
-                else:
-                    turns_query_fallback = text("""
-                        SELECT
-                            turn_index,
-                            text
-                        FROM speaker_transcriptions
-                        WHERE speaker_id = :speaker_id
-                          AND content_id = :content_db_id
-                        ORDER BY turn_index
-                    """)
+                turns_query_fallback = text("""
+                    SELECT
+                        turn_index,
+                        string_agg(text, ' ' ORDER BY sentence_in_turn) as text
+                    FROM sentences
+                    WHERE speaker_id = :speaker_id
+                      AND content_id = :content_db_id
+                    GROUP BY turn_index
+                    ORDER BY turn_index
+                """)
                 speaker_turns = session.execute(
                     turns_query_fallback,
                     {
@@ -1166,31 +1140,19 @@ class ContextBuilder:
             # Turn before first - also get speaker name if assigned
             # NOTE: Don't filter by stitch_version here - content.stitch_version may not match
             # sentences.stitch_version due to re-stitching
-            if use_sentences:
-                before_first_query = text("""
-                    SELECT
-                        string_agg(sen.text, ' ' ORDER BY sen.sentence_in_turn) as text,
-                        si.primary_name as speaker_name
-                    FROM sentences sen
-                    LEFT JOIN speakers s ON sen.speaker_id = s.id
-                    LEFT JOIN speaker_identities si ON s.speaker_identity_id = si.id
-                    WHERE sen.content_id = :content_db_id
-                      AND sen.turn_index < :first_turn_idx
-                    GROUP BY sen.turn_index, si.primary_name
-                    ORDER BY sen.turn_index DESC
-                    LIMIT 1
-                """)
-            else:
-                before_first_query = text("""
-                    SELECT st.text, si.primary_name as speaker_name
-                    FROM speaker_transcriptions st
-                    LEFT JOIN speakers s ON st.speaker_id = s.id
-                    LEFT JOIN speaker_identities si ON s.speaker_identity_id = si.id
-                    WHERE st.content_id = :content_db_id
-                      AND st.turn_index < :first_turn_idx
-                    ORDER BY st.turn_index DESC
-                    LIMIT 1
-                """)
+            before_first_query = text("""
+                SELECT
+                    string_agg(sen.text, ' ' ORDER BY sen.sentence_in_turn) as text,
+                    si.primary_name as speaker_name
+                FROM sentences sen
+                LEFT JOIN speakers s ON sen.speaker_id = s.id
+                LEFT JOIN speaker_identities si ON s.speaker_identity_id = si.id
+                WHERE sen.content_id = :content_db_id
+                  AND sen.turn_index < :first_turn_idx
+                GROUP BY sen.turn_index, si.primary_name
+                ORDER BY sen.turn_index DESC
+                LIMIT 1
+            """)
             before_first_result = session.execute(
                 before_first_query,
                 {
@@ -1203,33 +1165,20 @@ class ContextBuilder:
                 turn_before_first_speaker_name = before_first_result.speaker_name
 
             # Turn after first - also get speaker name if assigned
-            if use_sentences:
-                after_first_query = text("""
-                    SELECT
-                        string_agg(sen.text, ' ' ORDER BY sen.sentence_in_turn) as text,
-                        si.primary_name as speaker_name
-                    FROM sentences sen
-                    LEFT JOIN speakers s ON sen.speaker_id = s.id
-                    LEFT JOIN speaker_identities si ON s.speaker_identity_id = si.id
-                    WHERE sen.content_id = :content_db_id
-                      AND sen.turn_index > :first_turn_idx
-                      AND sen.speaker_id != :speaker_id
-                    GROUP BY sen.turn_index, si.primary_name
-                    ORDER BY sen.turn_index ASC
-                    LIMIT 1
-                """)
-            else:
-                after_first_query = text("""
-                    SELECT st.text, si.primary_name as speaker_name
-                    FROM speaker_transcriptions st
-                    LEFT JOIN speakers s ON st.speaker_id = s.id
-                    LEFT JOIN speaker_identities si ON s.speaker_identity_id = si.id
-                    WHERE st.content_id = :content_db_id
-                      AND st.turn_index > :first_turn_idx
-                      AND st.speaker_id != :speaker_id
-                    ORDER BY st.turn_index ASC
-                    LIMIT 1
-                """)
+            after_first_query = text("""
+                SELECT
+                    string_agg(sen.text, ' ' ORDER BY sen.sentence_in_turn) as text,
+                    si.primary_name as speaker_name
+                FROM sentences sen
+                LEFT JOIN speakers s ON sen.speaker_id = s.id
+                LEFT JOIN speaker_identities si ON s.speaker_identity_id = si.id
+                WHERE sen.content_id = :content_db_id
+                  AND sen.turn_index > :first_turn_idx
+                  AND sen.speaker_id != :speaker_id
+                GROUP BY sen.turn_index, si.primary_name
+                ORDER BY sen.turn_index ASC
+                LIMIT 1
+            """)
             after_first_result = session.execute(
                 after_first_query,
                 {
@@ -1249,33 +1198,20 @@ class ContextBuilder:
             turn_after_last_speaker_name = None
 
             # Turn before last - also get speaker name if assigned
-            if use_sentences:
-                before_last_query = text("""
-                    SELECT
-                        string_agg(sen.text, ' ' ORDER BY sen.sentence_in_turn) as text,
-                        si.primary_name as speaker_name
-                    FROM sentences sen
-                    LEFT JOIN speakers s ON sen.speaker_id = s.id
-                    LEFT JOIN speaker_identities si ON s.speaker_identity_id = si.id
-                    WHERE sen.content_id = :content_db_id
-                      AND sen.turn_index < :last_turn_idx
-                      AND sen.speaker_id != :speaker_id
-                    GROUP BY sen.turn_index, si.primary_name
-                    ORDER BY sen.turn_index DESC
-                    LIMIT 1
-                """)
-            else:
-                before_last_query = text("""
-                    SELECT st.text, si.primary_name as speaker_name
-                    FROM speaker_transcriptions st
-                    LEFT JOIN speakers s ON st.speaker_id = s.id
-                    LEFT JOIN speaker_identities si ON s.speaker_identity_id = si.id
-                    WHERE st.content_id = :content_db_id
-                      AND st.turn_index < :last_turn_idx
-                      AND st.speaker_id != :speaker_id
-                    ORDER BY st.turn_index DESC
-                    LIMIT 1
-                """)
+            before_last_query = text("""
+                SELECT
+                    string_agg(sen.text, ' ' ORDER BY sen.sentence_in_turn) as text,
+                    si.primary_name as speaker_name
+                FROM sentences sen
+                LEFT JOIN speakers s ON sen.speaker_id = s.id
+                LEFT JOIN speaker_identities si ON s.speaker_identity_id = si.id
+                WHERE sen.content_id = :content_db_id
+                  AND sen.turn_index < :last_turn_idx
+                  AND sen.speaker_id != :speaker_id
+                GROUP BY sen.turn_index, si.primary_name
+                ORDER BY sen.turn_index DESC
+                LIMIT 1
+            """)
             before_last_result = session.execute(
                 before_last_query,
                 {
@@ -1289,31 +1225,19 @@ class ContextBuilder:
                 turn_before_last_speaker_name = before_last_result.speaker_name
 
             # Turn after last - also get speaker name if assigned
-            if use_sentences:
-                after_last_query = text("""
-                    SELECT
-                        string_agg(sen.text, ' ' ORDER BY sen.sentence_in_turn) as text,
-                        si.primary_name as speaker_name
-                    FROM sentences sen
-                    LEFT JOIN speakers s ON sen.speaker_id = s.id
-                    LEFT JOIN speaker_identities si ON s.speaker_identity_id = si.id
-                    WHERE sen.content_id = :content_db_id
-                      AND sen.turn_index > :last_turn_idx
-                    GROUP BY sen.turn_index, si.primary_name
-                    ORDER BY sen.turn_index ASC
-                    LIMIT 1
-                """)
-            else:
-                after_last_query = text("""
-                    SELECT st.text, si.primary_name as speaker_name
-                    FROM speaker_transcriptions st
-                    LEFT JOIN speakers s ON st.speaker_id = s.id
-                    LEFT JOIN speaker_identities si ON s.speaker_identity_id = si.id
-                    WHERE st.content_id = :content_db_id
-                      AND st.turn_index > :last_turn_idx
-                    ORDER BY st.turn_index ASC
-                    LIMIT 1
-                """)
+            after_last_query = text("""
+                SELECT
+                    string_agg(sen.text, ' ' ORDER BY sen.sentence_in_turn) as text,
+                    si.primary_name as speaker_name
+                FROM sentences sen
+                LEFT JOIN speakers s ON sen.speaker_id = s.id
+                LEFT JOIN speaker_identities si ON s.speaker_identity_id = si.id
+                WHERE sen.content_id = :content_db_id
+                  AND sen.turn_index > :last_turn_idx
+                GROUP BY sen.turn_index, si.primary_name
+                ORDER BY sen.turn_index ASC
+                LIMIT 1
+            """)
             after_last_result = session.execute(
                 after_last_query,
                 {

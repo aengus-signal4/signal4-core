@@ -38,7 +38,8 @@ from tabulate import tabulate
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))))
 
 from dotenv import load_dotenv
-load_dotenv(override=True)
+from src.utils.paths import get_env_path
+load_dotenv(get_env_path(), override=True)
 
 from sqlalchemy import create_engine, func, desc
 from sqlalchemy.orm import sessionmaker

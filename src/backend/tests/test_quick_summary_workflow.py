@@ -32,12 +32,13 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 # Add project root to path for imports
-project_root = Path(__file__).parent.parent.parent.parent.parent
+project_root = Path(__file__).parent.parent.parent.parent  # core/
 sys.path.insert(0, str(project_root))
 
 # Load environment variables
 from dotenv import load_dotenv
-load_dotenv(project_root / ".env", override=True)
+from src.utils.paths import get_env_path
+load_dotenv(get_env_path(), override=True)
 
 from httpx import AsyncClient, ASGITransport
 

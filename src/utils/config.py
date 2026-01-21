@@ -32,8 +32,8 @@ def _ensure_env_loaded():
     """Ensure .env file is loaded (once)."""
     global _env_loaded
     if not _env_loaded:
-        from .paths import get_project_root
-        env_path = get_project_root() / '.env'
+        from .paths import get_env_path
+        env_path = get_env_path()
         if env_path.exists():
             load_dotenv(env_path, override=True)
             logger.debug(f"Loaded environment from {env_path}")

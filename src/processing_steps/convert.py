@@ -28,7 +28,8 @@ sys.path.append(str(get_project_root()))
 
 # Load environment variables (only S3 vars needed for convert)
 from dotenv import load_dotenv
-load_dotenv(get_project_root() / '.env')
+from src.utils.paths import get_env_path
+load_dotenv(get_env_path())
 
 # Import required modules
 from src.utils.logger import setup_worker_logger

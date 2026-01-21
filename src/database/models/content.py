@@ -73,7 +73,7 @@ class Content(Base):
     Relationships:
         transcriptions: Legacy transcription records
         chunks: ContentChunk records for parallel processing
-        speaker_transcriptions: Final speaker-attributed segments
+        sentences: Atomic transcript units with speaker attribution
         embedding_segments: Retrieval-optimized segments
 
     Standard Paths:
@@ -144,7 +144,6 @@ class Content(Base):
     channel = relationship("Channel", back_populates="content")
     transcriptions = relationship("Transcription", back_populates="content", cascade="all, delete-orphan", overlaps="transcription")
     chunks = relationship("ContentChunk", back_populates="content", cascade="all, delete-orphan")
-    speaker_transcriptions = relationship("SpeakerTranscription", back_populates="content", cascade="all, delete-orphan")
     sentences = relationship("Sentence", back_populates="content", cascade="all, delete-orphan")
     embedding_segments = relationship("EmbeddingSegment", back_populates="content", cascade="all, delete-orphan")
 

@@ -41,8 +41,8 @@ logger = logging.getLogger(__name__)
 def _get_db_config():
     """Get database config from environment variables."""
     from dotenv import load_dotenv
-    from pathlib import Path
-    env_path = Path(__file__).parents[3] / '.env'
+    from src.utils.paths import get_env_path
+    env_path = get_env_path()
     if env_path.exists():
         load_dotenv(env_path)
 

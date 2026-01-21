@@ -19,7 +19,7 @@ from .base import Base
 
 class EmbeddingSegment(Base):
     """
-    Represents an embedding-optimized segment derived from one or more SpeakerTranscriptions.
+    Represents an embedding-optimized segment derived from one or more Sentences.
     Each segment is designed for optimal retrieval performance.
     """
     __tablename__ = 'embedding_segments'
@@ -39,11 +39,10 @@ class EmbeddingSegment(Base):
     # Segment type describes how it was created
     segment_type = Column(String(20), nullable=False)  # 'single', 'combined', 'split'
 
-    # References to source SpeakerTranscription records
-    # For 'single': [id] - one source
-    # For 'combined': [id1, id2, ...] - multiple sources
-    # For 'split': [id] - one source (but only part of it)
-    source_transcription_ids = Column(ARRAY(Integer), nullable=False)
+    # DEPRECATED: Legacy references to SpeakerTranscription records
+    # This column is no longer populated for new content (since Jan 2026)
+    # Use source_sentence_ids instead for sentence-level tracking
+    source_transcription_ids = Column(ARRAY(Integer), nullable=True)  # DEPRECATED
 
     # For split segments, store character offsets into source text
     source_start_char = Column(Integer, nullable=True)  # Start character in source text
@@ -71,7 +70,7 @@ class EmbeddingSegment(Base):
     # Each speaker_id maps to list of [start_char, end_char] ranges in segment text
     speaker_positions = Column(JSONB, nullable=True)
 
-    # Sentence-level source tracking (replaces source_transcription_ids for new content)
+    # Sentence-level source tracking (PRIMARY - replaces source_transcription_ids)
     # Array of sentence.sentence_index values that comprise this segment
     source_sentence_ids = Column(ARRAY(Integer), nullable=True)
 

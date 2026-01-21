@@ -97,8 +97,8 @@ class SearchCandidate:
     
     # Speaker attribution
     speaker_attributed_text: Optional[str] = None
-    source_transcription_ids: Optional[List[int]] = None
-    transcription_texts: Optional[List[str]] = None
+    source_sentence_ids: Optional[List[int]] = None  # Sentence indices from sentences table
+    sentence_texts: Optional[List[str]] = None  # Sentence texts from sentences table
     speaker_ids: Optional[List[int]] = None
     
     # LLM validation results
@@ -382,7 +382,7 @@ class EmbeddingThemeClassifier:
                 # Search with both language embeddings
                 for lang, embedding in [('en', theme_embeddings['en']), ('fr', theme_embeddings['fr'])]:
                     query = text(f"""
-                        SELECT 
+                        SELECT
                             es.id as segment_id,
                             es.content_id,
                             es.text,
@@ -392,17 +392,17 @@ class EmbeddingThemeClassifier:
                             c.title as episode_title,
                             c.channel_name as episode_channel,
                             1 - (es.embedding_alt <=> CAST(:embedding AS vector)) as similarity,
-                            es.source_transcription_ids,
-                            array_agg(st.text ORDER BY array_position(es.source_transcription_ids, st.id)) as transcription_texts,
-                            array_agg(st.speaker_id ORDER BY array_position(es.source_transcription_ids, st.id)) as speaker_ids
+                            es.source_sentence_ids,
+                            array_agg(s.text ORDER BY array_position(es.source_sentence_ids, s.sentence_index)) as sentence_texts,
+                            array_agg(s.speaker_id ORDER BY array_position(es.source_sentence_ids, s.sentence_index)) as speaker_ids
                         FROM embedding_segments es
                         JOIN content c ON es.content_id = c.id
-                        LEFT JOIN speaker_transcriptions st ON st.id = ANY(es.source_transcription_ids)
+                        LEFT JOIN sentences s ON s.sentence_index = ANY(es.source_sentence_ids) AND s.content_id = es.content_id
                         WHERE es.embedding_alt IS NOT NULL
                         AND 1 - (es.embedding_alt <=> CAST(:embedding AS vector)) >= :threshold
                         {project_condition}
                         GROUP BY es.id, es.content_id, es.text, es.start_time, es.end_time,
-                                 es.segment_index, es.source_transcription_ids,
+                                 es.segment_index, es.source_sentence_ids,
                                  c.title, c.channel_name, es.embedding_alt
                         ORDER BY similarity DESC
                         {limit_clause}
@@ -425,12 +425,12 @@ class EmbeddingThemeClassifier:
                         seen_segments.add(segment_id)
                         
                         # Format speaker attribution
-                        transcription_texts = row[10] if row[10] else []
+                        sentence_texts = row[10] if row[10] else []
                         speaker_ids = row[11] if row[11] else []
                         speaker_attributed_text = self._format_speaker_attributed_text(
-                            row[2], transcription_texts, speaker_ids
+                            row[2], sentence_texts, speaker_ids
                         )
-                        
+
                         candidate = SearchCandidate(
                             segment_id=segment_id,
                             content_id=row[1],
@@ -441,8 +441,8 @@ class EmbeddingThemeClassifier:
                             episode_title=row[6] or "Unknown",
                             episode_channel=row[7] or "Unknown",
                             speaker_attributed_text=speaker_attributed_text,
-                            source_transcription_ids=row[9],
-                            transcription_texts=transcription_texts,
+                            source_sentence_ids=row[9],
+                            sentence_texts=sentence_texts,
                             speaker_ids=speaker_ids
                         )
                         

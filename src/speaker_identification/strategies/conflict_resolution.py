@@ -211,16 +211,16 @@ class ConflictResolutionStrategy:
                 samples['hours'] = float(result.hours or 0)
                 samples['episodes'] = int(result.episodes or 0)
 
-            # Get a sample transcript
+            # Get a sample transcript from sentences table
             if speaker_ids:
                 sample_result = session.execute(text("""
-                    SELECT st.text
-                    FROM speaker_transcriptions st
-                    JOIN content c ON st.content_id = c.id
-                    JOIN speakers s ON c.content_id = s.content_id AND st.speaker_id = s.id
+                    SELECT sent.text
+                    FROM sentences sent
+                    JOIN content c ON sent.content_id = c.id
+                    JOIN speakers s ON c.content_id = s.content_id AND sent.speaker_id = s.id
                     WHERE s.id = ANY(:speaker_ids)
-                      AND LENGTH(st.text) > 50
-                    ORDER BY st.end_time - st.start_time DESC
+                      AND LENGTH(sent.text) > 50
+                    ORDER BY sent.end_time - sent.start_time DESC
                     LIMIT 1
                 """), {'speaker_ids': speaker_ids[:10]}).fetchone()
 

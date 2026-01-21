@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import sys
 from pathlib import Path
-from src.utils.paths import get_project_root, get_config_path
+from src.utils.paths import get_project_root, get_config_path, get_env_path
 import argparse
 import logging
 import yaml
@@ -9,7 +9,7 @@ import asyncio
 from dotenv import load_dotenv
 
 # Load environment variables
-load_dotenv(get_project_root() / '.env')
+load_dotenv(get_env_path())
 from typing import Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass, field
 from collections import defaultdict

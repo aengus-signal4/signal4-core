@@ -20,9 +20,9 @@ from sqlalchemy import text
 from sqlalchemy.orm.attributes import flag_modified
 import time
 
-# Load environment variables from core/.env
-_env_path = Path(__file__).parent.parent.parent / '.env'
-load_dotenv(_env_path)
+# Load environment variables from signal4/.env
+from src.utils.paths import get_env_path
+load_dotenv(get_env_path())
 
 # Lazy import for thumbnail downloader to avoid circular imports
 _youtube_thumbnail_downloader = None

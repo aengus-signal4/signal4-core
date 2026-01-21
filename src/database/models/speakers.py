@@ -205,7 +205,6 @@ class Speaker(Base):
     identification_details = Column(JSONB, default=dict)
 
     # Relationships
-    transcriptions = relationship("SpeakerTranscription", back_populates="speaker")
     sentences = relationship("Sentence", back_populates="speaker")
 
     # Identity relationships
@@ -424,39 +423,28 @@ class Speaker(Base):
 
 class SpeakerTranscription(Base):
     """
-    Speaker-attributed transcript segments (speaker turns).
+    DEPRECATED: Speaker-attributed transcript segments (speaker turns).
 
-    This is the primary model for storing transcribed content with speaker
-    attribution. Created by the diarize step, these records represent
-    continuous speech segments by a single speaker.
+    This model has been superseded by the Sentence model. New content uses
+    Sentence records exclusively. This class is retained only for reference
+    during the transition period.
 
-    Attributes:
-        id: Primary key
-        content_id: Foreign key to Content
-        speaker_id: Foreign key to global Speaker
-        start_time: Start time in seconds
-        end_time: End time in seconds
-        text: Transcribed text for this turn
-        turn_index: Sequential index within the content
-        stitch_version: Version of algorithm that created this
-        created_at: When this record was created
-        updated_at: Last update timestamp
+    DEPRECATION NOTICE (January 2026):
+    - The speaker_transcriptions table will be DROPPED in an upcoming migration
+    - All 348,579 legacy content items have been migrated to the sentences table
+    - New content (75,992+ items) only has sentence records, not speaker_transcriptions
+    - Use Sentence model for all new code
 
-    Relationships:
-        content: The Content this belongs to
-        speaker: The global Speaker record
+    S3 FILE CLEANUP NOTE:
+    Some legacy content may still have speaker_turns.json files in S3:
+    - Location: content/{content_id}/speaker_turns.json
+    - These are OUTPUT files from the old stitch pipeline, not source data
+    - Safe to delete after verifying sentences exist for the content
+    - The word_table.pkl.gz files are the authoritative source for re-migration
 
-    Usage Patterns:
-        - Query by content_id to get full transcript
-        - Query by speaker_id to get all utterances by a speaker
-        - Use turn_index for ordered playback
-        - Use start_time/end_time for temporal queries
-
-    Context Methods:
-        - get_context_turns(): Get surrounding turns
-        - get_context_window(): Get turns by index range
-        - get_time_window(): Get turns by time range
-        - search_with_context(): Search text with context
+    REPLACEMENT:
+    - Speaker turns can be reconstructed from sentences by grouping on (content_id, turn_index)
+    - Use: SELECT turn_index, string_agg(text, ' ' ORDER BY sentence_in_turn) FROM sentences GROUP BY turn_index
     """
     __tablename__ = 'speaker_transcriptions'
 
@@ -472,9 +460,9 @@ class SpeakerTranscription(Base):
     created_at = Column(DateTime(timezone=True), default=func.now()) # Use func.now() for DB time
     updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
 
-    # Relationships
-    content = relationship("Content", back_populates="speaker_transcriptions")
-    speaker = relationship("Speaker", back_populates="transcriptions")
+    # Relationships - DEPRECATED: These relationships are commented out as the model is deprecated
+    # content = relationship("Content", back_populates="speaker_transcriptions")
+    # speaker = relationship("Speaker", back_populates="transcriptions")
 
     # Indexes
     __table_args__ = (

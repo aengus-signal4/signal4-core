@@ -6,9 +6,8 @@ import os
 
 # Load .env file for credentials (S3_ACCESS_KEY, POSTGRES_PASSWORD, etc.)
 from dotenv import load_dotenv
-from pathlib import Path
-_env_path = Path(__file__).resolve().parents[2] / '.env'
-load_dotenv(_env_path)
+from src.utils.paths import get_env_path
+load_dotenv(get_env_path())
 
 # Standard library imports
 import asyncio

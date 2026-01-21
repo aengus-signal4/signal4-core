@@ -25,13 +25,13 @@ platforms (YouTube, podcasts, etc.) using a distributed worker architecture.
    - stitch.py: Combines chunks into final speaker-attributed transcript with LLM post-processing
 
 5. **Embedding & Retrieval** (processing_steps/)
-   - segment_embeddings.py: Creates retrieval-optimized segments with embeddings
+   - stitch_steps/stage14_segment.py: Creates retrieval-optimized segments with embeddings
 
 ## Model Relationships:
 
 ### Content Models:
 - **Content**: Central model representing a piece of media (video/podcast)
-  - Has many: ContentChunks, SpeakerTranscriptions, EmbeddingSegments
+  - Has many: ContentChunks, Sentences, EmbeddingSegments
   - Tracks processing state through boolean flags (is_downloaded, is_transcribed, etc.)
 
 - **ContentChunk**: Represents audio chunks created during conversion
@@ -45,14 +45,15 @@ platforms (YouTube, podcasts, etc.) using a distributed worker architecture.
 - **Transcription**: Stores raw transcription output (legacy, being phased out)
   - Belongs to: Content
 
-- **SpeakerTranscription**: Speaker-attributed transcript segments
+- **Sentence**: Atomic unit for transcript data (PRIMARY)
   - Belongs to: Content, Speaker
-  - Created by diarize.py, represents speaker turns
+  - Created by stitch pipeline stage 12
+  - Speaker turns can be reconstructed by grouping on (content_id, turn_index)
 
 - **EmbeddingSegment**: Retrieval-optimized segments with embeddings
   - Belongs to: Content
-  - References: SpeakerTranscription records via source_transcription_ids
-  - Created by segment_embeddings.py for optimal retrieval
+  - References: Sentence records via source_sentence_ids
+  - Created by stitch_steps/stage14_segment.py for optimal retrieval
 
 ### Speaker Models:
 - **Speaker**: Unified speaker table with embeddings
@@ -101,7 +102,6 @@ from src.database.models.speakers import (
     Speaker,
     SpeakerIdentity,
     SpeakerAssignment,
-    SpeakerTranscription,
     Sentence,
 )
 
@@ -158,7 +158,6 @@ __all__ = [
     "Speaker",
     "SpeakerIdentity",
     "SpeakerAssignment",
-    "SpeakerTranscription",
     "Sentence",
     # Embeddings
     "EmbeddingSegment",

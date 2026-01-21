@@ -144,18 +144,18 @@ def enrich_segments_with_metadata(candidates: List[SearchCandidate], batch_size:
             # Get unique content_ids in this batch for bulk transcript fetch
             content_ids = list(set(m['content_id'] for m in metadata_lookup.values()))
 
-            # Bulk fetch all transcripts for these content_ids
+            # Bulk fetch all sentences for these content_ids
             transcript_query = text("""
                 SELECT
-                    st.content_id,
+                    sent.content_id,
                     COALESCE(s.display_name, s.local_speaker_id) as speaker,
-                    st.text,
-                    st.start_time,
-                    st.end_time
-                FROM speaker_transcriptions st
-                JOIN speakers s ON s.id = st.speaker_id
-                WHERE st.content_id = ANY(:content_ids)
-                ORDER BY st.content_id, st.start_time
+                    sent.text,
+                    sent.start_time,
+                    sent.end_time
+                FROM sentences sent
+                JOIN speakers s ON s.id = sent.speaker_id
+                WHERE sent.content_id = ANY(:content_ids)
+                ORDER BY sent.content_id, sent.start_time
             """)
             transcript_result = session.execute(transcript_query, {'content_ids': content_ids})
 

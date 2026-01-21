@@ -135,9 +135,9 @@ class SearchCandidate:
     speaker_attributed_text: str = None
     speaker_segments: List[SpeakerSegment] = None
     speaker_info: Dict[str, Any] = None
-    source_transcription_ids: List[int] = None
-    transcription_texts: List[str] = None  # Transcription texts from speaker_transcriptions
-    speaker_ids: List[int] = None  # Speaker IDs from speaker_transcriptions
+    source_sentence_ids: List[int] = None  # Sentence indices from sentences table
+    sentence_texts: List[str] = None  # Sentence texts from sentences table
+    speaker_ids: List[int] = None  # Speaker IDs from sentences table
     
     # LLM classification results (filled later)
     theme_ids: List[int] = None
@@ -1434,16 +1434,16 @@ class UnifiedThemeClassifier:
                         es.segment_index,
                         c.title as episode_title,
                         c.channel_name as episode_channel,
-                        es.source_transcription_ids,
-                        array_agg(st.text ORDER BY array_position(es.source_transcription_ids, st.id)) as transcription_texts,
-                        array_agg(st.speaker_id ORDER BY array_position(es.source_transcription_ids, st.id)) as speaker_ids,
+                        es.source_sentence_ids,
+                        array_agg(s.text ORDER BY array_position(es.source_sentence_ids, s.sentence_index)) as sentence_texts,
+                        array_agg(s.speaker_id ORDER BY array_position(es.source_sentence_ids, s.sentence_index)) as speaker_ids,
                         c.meta_data->>'webpage_url' as original_url
                     FROM embedding_segments es
                     JOIN content c ON es.content_id = c.id
-                    LEFT JOIN speaker_transcriptions st ON st.id = ANY(es.source_transcription_ids)
+                    LEFT JOIN sentences s ON s.sentence_index = ANY(es.source_sentence_ids) AND s.content_id = es.content_id
                     WHERE es.id = ANY(:segment_ids)
                     GROUP BY es.id, es.content_id, es.text, es.start_time, es.end_time,
-                             es.segment_index, es.source_transcription_ids,
+                             es.segment_index, es.source_sentence_ids,
                              c.title, c.channel_name, c.meta_data->>'webpage_url'
                 """)
 
@@ -1468,10 +1468,10 @@ class UnifiedThemeClassifier:
                         matched_keywords = []
 
                     # Format speaker attribution
-                    transcription_texts = row[9] if row[9] else []
+                    sentence_texts = row[9] if row[9] else []
                     speaker_ids = row[10] if row[10] else []
                     speaker_attributed_text = self._format_speaker_attributed_text(
-                        row[2], transcription_texts, speaker_ids
+                        row[2], sentence_texts, speaker_ids
                     )
 
                     candidate = SearchCandidate(
@@ -1487,8 +1487,8 @@ class UnifiedThemeClassifier:
                         matched_via=matched_via,
                         matched_keywords=matched_keywords,
                         matching_themes=[theme_desc] if theme_desc else [],
-                        source_transcription_ids=row[8],
-                        transcription_texts=transcription_texts,
+                        source_sentence_ids=row[8],
+                        sentence_texts=sentence_texts,
                         speaker_ids=speaker_ids,
                         speaker_attributed_text=speaker_attributed_text,
                         original_url=row[11]
@@ -1573,7 +1573,7 @@ class UnifiedThemeClassifier:
                 
                 # Single query with optional limit
                 keyword_query = text(f"""
-                    SELECT 
+                    SELECT
                         es.id as segment_id,
                         es.content_id,
                         es.text,
@@ -1583,19 +1583,19 @@ class UnifiedThemeClassifier:
                         c.title as episode_title,
                         c.channel_name as episode_channel,
                         es.embedding_alt,
-                        es.source_transcription_ids,
-                        array_agg(st.text ORDER BY array_position(es.source_transcription_ids, st.id)) as transcription_texts,
-                        array_agg(st.speaker_id ORDER BY array_position(es.source_transcription_ids, st.id)) as speaker_ids,
+                        es.source_sentence_ids,
+                        array_agg(s.text ORDER BY array_position(es.source_sentence_ids, s.sentence_index)) as sentence_texts,
+                        array_agg(s.speaker_id ORDER BY array_position(es.source_sentence_ids, s.sentence_index)) as speaker_ids,
                         c.meta_data->>'webpage_url' as original_url
                     FROM embedding_segments es
                     JOIN content c ON es.content_id = c.id
-                    LEFT JOIN speaker_transcriptions st ON st.id = ANY(es.source_transcription_ids)
+                    LEFT JOIN sentences s ON s.sentence_index = ANY(es.source_sentence_ids) AND s.content_id = es.content_id
                     WHERE ({keyword_where})
                     AND es.embedding_alt IS NOT NULL
                     {exclude_condition}
                     {project_condition}
                     GROUP BY es.id, es.content_id, es.text, es.start_time, es.end_time,
-                             es.segment_index, es.source_transcription_ids,
+                             es.segment_index, es.source_sentence_ids,
                              c.title, c.channel_name, es.embedding_alt, c.meta_data->>'webpage_url'
                     {limit_clause}
                 """)
@@ -1668,12 +1668,12 @@ class UnifiedThemeClassifier:
                             # Only add if meets threshold
                             if matching_themes:
                                 # Extract speaker data and format attribution
-                                transcription_texts = row[10] if row[10] else []
+                                sentence_texts = row[10] if row[10] else []
                                 speaker_ids = row[11] if row[11] else []
                                 speaker_attributed_text = self._format_speaker_attributed_text(
-                                    row[2], transcription_texts, speaker_ids
+                                    row[2], sentence_texts, speaker_ids
                                 )
-                                
+
                                 candidate = SearchCandidate(
                                     segment_id=row[0],
                                     content_id=row[1],
@@ -1687,8 +1687,8 @@ class UnifiedThemeClassifier:
                                     matched_via='keyword',
                                     matched_keywords=self._find_matching_keywords(row[2], keywords_to_use),
                                     matching_themes=matching_themes,
-                                    source_transcription_ids=row[9],
-                                    transcription_texts=transcription_texts,
+                                    source_sentence_ids=row[9],
+                                    sentence_texts=sentence_texts,
                                     speaker_ids=speaker_ids,
                                     speaker_attributed_text=speaker_attributed_text,
                                     original_url=row[12]  # Original URL from meta_data
@@ -1785,7 +1785,7 @@ class UnifiedThemeClassifier:
                         
                         # Single query with optional limit
                         semantic_query = text(f"""
-                            SELECT 
+                            SELECT
                                 es.id as segment_id,
                                 es.content_id,
                                 es.text,
@@ -1795,18 +1795,18 @@ class UnifiedThemeClassifier:
                                 c.title as episode_title,
                                 c.channel_name as episode_channel,
                                 1 - (es.embedding_alt <=> CAST(:embedding AS vector)) as similarity,
-                                es.source_transcription_ids,
-                                array_agg(st.text ORDER BY array_position(es.source_transcription_ids, st.id)) as transcription_texts,
-                                array_agg(st.speaker_id ORDER BY array_position(es.source_transcription_ids, st.id)) as speaker_ids,
+                                es.source_sentence_ids,
+                                array_agg(s.text ORDER BY array_position(es.source_sentence_ids, s.sentence_index)) as sentence_texts,
+                                array_agg(s.speaker_id ORDER BY array_position(es.source_sentence_ids, s.sentence_index)) as speaker_ids,
                                 c.meta_data->>'webpage_url' as original_url
                             FROM embedding_segments es
                             JOIN content c ON es.content_id = c.id
-                            LEFT JOIN speaker_transcriptions st ON st.id = ANY(es.source_transcription_ids)
+                            LEFT JOIN sentences s ON s.sentence_index = ANY(es.source_sentence_ids) AND s.content_id = es.content_id
                             WHERE es.embedding_alt IS NOT NULL
                             AND 1 - (es.embedding_alt <=> CAST(:embedding AS vector)) >= :threshold
                             {project_condition}
                             GROUP BY es.id, es.content_id, es.text, es.start_time, es.end_time,
-                                     es.segment_index, es.source_transcription_ids,
+                                     es.segment_index, es.source_sentence_ids,
                                      c.title, c.channel_name, es.embedding_alt, c.meta_data->>'webpage_url'
                             {limit_clause}
                         """)
@@ -1832,12 +1832,12 @@ class UnifiedThemeClassifier:
                                 break
                             
                             # Extract speaker data and format attribution
-                            transcription_texts = row[10] if row[10] else []
+                            sentence_texts = row[10] if row[10] else []
                             speaker_ids = row[11] if row[11] else []
                             speaker_attributed_text = self._format_speaker_attributed_text(
-                                row[2], transcription_texts, speaker_ids
+                                row[2], sentence_texts, speaker_ids
                             )
-                            
+
                             candidate = SearchCandidate(
                                 segment_id=row[0],
                                 content_id=row[1],
@@ -1851,8 +1851,8 @@ class UnifiedThemeClassifier:
                                 matched_via='semantic',
                                 matched_keywords=[],
                                 matching_themes=[desc],
-                                source_transcription_ids=row[9],
-                                transcription_texts=transcription_texts,
+                                source_sentence_ids=row[9],
+                                sentence_texts=sentence_texts,
                                 speaker_ids=speaker_ids,
                                 speaker_attributed_text=speaker_attributed_text,
                                 original_url=row[12]  # Original URL from meta_data
@@ -2489,8 +2489,8 @@ RESPONSE:"""
                         speaker_attributed_text=row['speaker_attributed_text'],
                         original_url=row['original_url'] if row['original_url'] else None,
                         # Fields that will be populated later
-                        source_transcription_ids=None,
-                        transcription_texts=None,
+                        source_sentence_ids=None,
+                        sentence_texts=None,
                         speaker_ids=None
                     )
                     candidates.append(candidate)

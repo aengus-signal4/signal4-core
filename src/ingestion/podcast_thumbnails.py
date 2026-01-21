@@ -31,9 +31,9 @@ from pathlib import Path
 from PIL import Image
 from dotenv import load_dotenv
 
-# Load environment variables from core/.env
-_env_path = Path(__file__).parent.parent.parent / '.env'
-load_dotenv(_env_path)
+# Load environment variables from signal4/.env
+from src.utils.paths import get_env_path
+load_dotenv(get_env_path())
 
 from src.database.session import get_session
 from src.database.models import Channel

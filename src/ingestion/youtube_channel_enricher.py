@@ -33,7 +33,8 @@ from src.utils.project_utils import normalize_language_code
 logger = setup_worker_logger('youtube_channel_enricher')
 
 # Load environment variables
-load_dotenv()
+from src.utils.paths import get_env_path
+load_dotenv(get_env_path())
 
 
 class YouTubeChannelEnricher:

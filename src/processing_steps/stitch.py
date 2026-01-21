@@ -91,7 +91,8 @@ sys.path.append(str(get_project_root()))
 
 # Load environment variables (S3 credentials, etc.)
 from dotenv import load_dotenv
-load_dotenv(get_project_root() / '.env')
+from src.utils.paths import get_env_path
+load_dotenv(get_env_path())
 
 from src.utils.logger import setup_worker_logger
 from src.storage.s3_utils import S3StorageConfig, S3Storage, create_s3_storage_from_config

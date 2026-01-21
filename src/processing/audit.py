@@ -22,13 +22,15 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime as dt
 from tqdm import tqdm
 
+from src.utils.paths import get_project_root
+
 # Add project root to path
 sys.path.insert(0, str(get_project_root()))
 
 from src.processing.pipeline_manager import PipelineManager
 from src.database.session import get_session
 from src.database.models import (
-    Content, TaskQueue, ContentChunk, SpeakerTranscription, EmbeddingSegment,
+    Content, TaskQueue, ContentChunk, EmbeddingSegment,
     AlternativeTranscription, Sentence
 )
 
@@ -1373,7 +1375,6 @@ class ContentAuditor:
         - alternative_transcriptions (for this content's segments)
         - embedding_segments
         - sentences
-        - speaker_transcriptions
         - S3 transcript files
 
         Then resets content state and creates high-priority transcribe task.
@@ -1395,7 +1396,6 @@ class ContentAuditor:
                 'alternative_transcriptions': 0,
                 'embedding_segments': 0,
                 'sentences': 0,
-                'speaker_transcriptions': 0,
                 's3_files': 0
             },
             'reset_flags': [],
@@ -1494,14 +1494,7 @@ class ContentAuditor:
                 results['deleted']['sentences'] = sent_deleted
                 logger.info(f"[{content_id_str}] Deleted {sent_deleted} sentences")
 
-                # 5. Delete speaker_transcriptions
-                st_deleted = session.query(SpeakerTranscription).filter_by(
-                    content_id=content_id_int
-                ).delete(synchronize_session=False)
-                results['deleted']['speaker_transcriptions'] = st_deleted
-                logger.info(f"[{content_id_str}] Deleted {st_deleted} speaker_transcriptions")
-
-                # 6. Delete S3 transcript files
+                # 5. Delete S3 transcript files
                 s3_deleted = 0
                 prefix = f"content/{content_id_str}/chunks/"
                 try:
@@ -1516,7 +1509,7 @@ class ContentAuditor:
                 results['deleted']['s3_files'] = s3_deleted
                 logger.info(f"[{content_id_str}] Deleted {s3_deleted} S3 transcript files")
 
-                # 7. Reset content_chunks transcription status
+                # 6. Reset content_chunks transcription status
                 chunks_reset = session.query(ContentChunk).filter_by(
                     content_id=content_id_int
                 ).update({
@@ -1529,7 +1522,7 @@ class ContentAuditor:
                 }, synchronize_session=False)
                 logger.info(f"[{content_id_str}] Reset {chunks_reset} chunks to pending")
 
-                # 8. Reset content flags
+                # 7. Reset content flags
                 content.is_transcribed = False
                 content.is_stitched = False
                 content.is_embedded = False
@@ -1537,14 +1530,14 @@ class ContentAuditor:
                 content.last_updated = dt.now()
                 results['reset_flags'] = ['is_transcribed', 'is_stitched', 'is_embedded']
 
-                # 9. Delete ALL existing transcribe/stitch/embed tasks (unique constraint includes completed)
+                # 8. Delete ALL existing transcribe/stitch/embed tasks (unique constraint includes completed)
                 deleted_tasks = session.query(TaskQueue).filter(
                     TaskQueue.content_id == content_id_str,
                     TaskQueue.task_type.in_(['transcribe', 'stitch', 'embed'])
                 ).delete(synchronize_session=False)
                 logger.info(f"[{content_id_str}] Deleted {deleted_tasks} existing tasks (all statuses)")
 
-                # 10. Create transcribe task for each chunk with proper priority
+                # 9. Create transcribe task for each chunk with proper priority
                 from src.utils.priority import calculate_priority_by_date
                 project_priority = 1
                 if content.projects:

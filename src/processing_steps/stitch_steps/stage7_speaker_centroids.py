@@ -377,60 +377,68 @@ class SpeakerCentroidProcessor:
             
             matches.append(match)
         
-        # Fix speaker_transcriptions linkage for all speakers
-        self._fix_speaker_transcriptions_linkage(session, content_id, matches)
-        
+        # Fix sentences linkage for all speakers
+        self._fix_sentences_linkage(session, content_id, matches)
+
         return matches
-    
-    def _fix_speaker_transcriptions_linkage(self, session, content_id: str, matches: List[SpeakerMatch]):
-        """Fix speaker_transcriptions table to point to correct speaker IDs based on hash matching.
-        
+
+    def _fix_sentences_linkage(self, session, content_id: str, matches: List[SpeakerMatch]):
+        """Fix sentences table to point to correct speaker IDs based on speaker hash matching.
+
         This handles the case where speakers were deleted and recreated, leaving
-        speaker_transcriptions with orphaned speaker_id references. We match by
-        speaker_hash which is stable across recreations.
+        sentences with orphaned speaker_id references. We match via the speakers table
+        using speaker_hash which is stable across recreations.
         """
         try:
-            # Get content integer ID for speaker_transcriptions table
+            # Get content integer ID for sentences table
             content_result = session.execute(
                 text("SELECT id FROM content WHERE content_id = :content_id"),
                 {'content_id': content_id}
             ).fetchone()
-            
+
             if not content_result:
-                logger.warning(f"[{content_id}] Content not found in database, skipping transcriptions fix")
+                logger.warning(f"[{content_id}] Content not found in database, skipping sentences fix")
                 return
-            
+
             content_int_id = content_result.id
-            
-            # Update speaker_transcriptions for each speaker based on hash
+
+            # Update sentences for each speaker - sentences doesn't have speaker_hash,
+            # so we need to find sentences by old speaker_id and update to new speaker_id
             fixed_count = 0
             for match in matches:
+                # Find old speaker IDs that have same content_id and local_speaker_id
+                # but different id than the current match
                 result = session.execute(
                     text("""
-                        UPDATE speaker_transcriptions 
+                        UPDATE sentences
                         SET speaker_id = :new_speaker_id
-                        WHERE content_id = :content_int_id 
-                          AND speaker_hash = :speaker_hash
-                          AND speaker_id != :new_speaker_id
+                        WHERE content_id = :content_int_id
+                          AND speaker_id IN (
+                              SELECT id FROM speakers
+                              WHERE content_id = :content_id_str
+                                AND local_speaker_id = :local_speaker_id
+                                AND id != :new_speaker_id
+                          )
                     """),
                     {
                         'new_speaker_id': match.speaker_db_id,
                         'content_int_id': content_int_id,
-                        'speaker_hash': match.global_speaker_id
+                        'content_id_str': content_id,
+                        'local_speaker_id': match.local_speaker_id
                     }
                 )
-                
+
                 if result.rowcount > 0:
                     fixed_count += result.rowcount
-                    logger.info(f"[{content_id}] Fixed {result.rowcount} speaker_transcriptions for {match.global_speaker_id}")
-            
+                    logger.info(f"[{content_id}] Fixed {result.rowcount} sentences for {match.global_speaker_id}")
+
             if fixed_count > 0:
-                logger.info(f"[{content_id}] Total fixed speaker_transcriptions: {fixed_count}")
-                
+                logger.info(f"[{content_id}] Total fixed sentences: {fixed_count}")
+
         except Exception as e:
-            logger.warning(f"[{content_id}] Failed to fix speaker_transcriptions linkage: {e}")
-            # Don't fail the whole process if fixing transcriptions fails
-        
+            logger.warning(f"[{content_id}] Failed to fix sentences linkage: {e}")
+            # Don't fail the whole process if fixing sentences fails
+
         return matches
     
     # DEPRECATED: No longer used with new temporary speaker approach

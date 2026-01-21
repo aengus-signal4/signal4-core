@@ -37,8 +37,8 @@ import os
 import asyncio
 
 from dotenv import load_dotenv
-env_path = os.path.join(os.path.dirname(__file__), '../../../.env')
-load_dotenv(env_path)
+from src.utils.paths import get_env_path
+load_dotenv(get_env_path())
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

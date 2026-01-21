@@ -348,20 +348,22 @@ class NameStandardizationStrategy:
                     continue
                 seen_content.add(content_id)
 
+                # Query sentences table - aggregate turn for 5-30 second duration
                 result = session.execute(text("""
                     SELECT
-                        st.start_time,
-                        st.end_time,
-                        st.text,
+                        MIN(sent.start_time) as start_time,
+                        MAX(sent.end_time) as end_time,
+                        string_agg(sent.text, ' ' ORDER BY sent.sentence_in_turn) as text,
                         c.title as episode_title,
                         c.channel_id
-                    FROM speaker_transcriptions st
-                    JOIN content c ON st.content_id = c.id
+                    FROM sentences sent
+                    JOIN content c ON sent.content_id = c.id
                     WHERE c.content_id = :content_id
-                      AND st.speaker_id = :speaker_id
-                      AND st.end_time - st.start_time BETWEEN 5 AND 30
-                      AND LENGTH(st.text) > 50
-                    ORDER BY st.end_time - st.start_time DESC
+                      AND sent.speaker_id = :speaker_id
+                    GROUP BY sent.turn_index, c.title, c.channel_id
+                    HAVING MAX(sent.end_time) - MIN(sent.start_time) BETWEEN 5 AND 30
+                       AND LENGTH(string_agg(sent.text, ' ' ORDER BY sent.sentence_in_turn)) > 50
+                    ORDER BY MAX(sent.end_time) - MIN(sent.start_time) DESC
                     LIMIT 1
                 """), {
                     'content_id': content_id,

@@ -37,7 +37,7 @@ from src.processing.content import process_content_pipeline
 from src.distributed.task_queue import TaskQueueManager
 from src.database.manager import DatabaseManager
 from src.database.session import get_session
-from src.database.models import TaskQueue, WorkerConfig, Content, ContentChunk, SpeakerTranscription, Channel, ChannelProject, ChannelSource
+from src.database.models import TaskQueue, WorkerConfig, Content, ContentChunk, Channel, ChannelProject, ChannelSource
 from src.ingestion.youtube_indexer import YouTubeIndexer
 from src.ingestion.podcast_indexer import PodcastIndexer
 from src.ingestion.rumble_indexer import RumbleIndexer

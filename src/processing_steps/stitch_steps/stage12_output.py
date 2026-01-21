@@ -8,8 +8,8 @@ Final stage of the stitch pipeline that generates outputs and saves results to d
 Key Responsibilities:
 - Generate readable transcript with speaker labels and timestamps
 - Create detailed word-by-word analysis showing assignment methods and confidence
-- Generate speaker turns for database storage with proper speaker mappings
-- Save transcription results to SpeakerTranscription database table
+- Generate speaker turns for file output (debugging only)
+- Generate sentences (atomic unit) and save to database
 - Create assignment history reports and visualizations for debugging
 
 Input:
@@ -20,16 +20,17 @@ Input:
 Output:
 - Readable transcript: [30s] [00:30] [SPEAKER_00]: {speaker text}
 - Detailed transcript: Word-by-word breakdown with timing, methods, confidence
-- Speaker turns: Database-ready speaker segments with database IDs
+- Speaker turns: For file output/debugging (not saved to database)
+- Sentences: Atomic units saved to sentences table
 - Assignment history: Complete debugging report of all assignments
-- Database records: SpeakerTranscription entries for content
 
 Key Components:
 - format_timestamp(): Dual timestamp formatting ([30s] [00:30])
 - generate_readable_transcript(): Clean speaker-labeled transcript
 - generate_detailed_transcript(): Technical word-by-word analysis
-- generate_speaker_turns(): Database-ready speaker segments
-- save_speaker_turns_to_database(): Database persistence
+- generate_speaker_turns(): Speaker turns for file output
+- generate_sentences(): Sentence-level atomic units
+- save_sentences_to_database(): Database persistence for sentences
 
 Methods:
 - stage12_output(): Main entry point called by stitch pipeline
@@ -66,7 +67,7 @@ import json
 from src.utils.logger import setup_worker_logger
 from src.utils.config import load_config
 from .stage3_tables import WordTable
-from src.database.models import SpeakerTranscription, Content, Sentence
+from src.database.models import Content, Sentence
 from src.database.session import get_session
 from .util_stitch import smart_join_words
 
@@ -1031,110 +1032,6 @@ def _update_speaker_metrics(mappings: Dict[str, Dict], word_table: WordTable, co
     except Exception as e:
         logger.error(f"[{content_id}] Error updating speaker metrics: {e}")
         logger.error(f"[{content_id}] Speaker metrics update error details:", exc_info=True)
-
-def save_speaker_turns_to_database(speaker_turns: List[Dict[str, Any]], content_id: str, test_mode: bool = False) -> int:
-    """
-    Save speaker turns to the database.
-    
-    In test mode, only logs what would be saved without actually writing to the database.
-    
-    Returns the number of turns saved.
-    """
-    if not speaker_turns:
-        logger.warning(f"[{content_id}] No speaker turns to save")
-        return 0
-    
-    if test_mode:
-        logger.info(f"[{content_id}] TEST MODE: Would save {len(speaker_turns)} speaker turns to database")
-        for i, turn in enumerate(speaker_turns[:5]):  # Log first 5 turns as examples
-            logger.info(f"[{content_id}] TEST MODE: Turn {i}: speaker_id={turn['speaker_id']}, "
-                       f"time={turn['start_time']:.1f}-{turn['end_time']:.1f}s, "
-                       f"text='{turn['text'][:50]}...'")
-        if len(speaker_turns) > 5:
-            logger.info(f"[{content_id}] TEST MODE: ... and {len(speaker_turns) - 5} more turns")
-        return 0
-    
-    saved_count = 0
-    
-    try:
-        with get_session() as session:
-            # Get the content record
-            content = session.query(Content).filter_by(content_id=content_id).first()
-            if not content:
-                logger.error(f"[{content_id}] Content not found in database for content_id: {content_id}")
-                logger.error(f"[{content_id}] This may indicate the content_id is the platform ID, not the database ID")
-                return 0
-            
-            # Delete existing speaker transcriptions for this content
-            existing_count = session.query(SpeakerTranscription).filter_by(
-                content_id=content.id
-            ).count()
-            
-            if existing_count > 0:
-                logger.info(f"[{content_id}] Deleting {existing_count} existing speaker transcriptions")
-                # Get versions before deletion for logging
-                existing_versions = session.query(SpeakerTranscription.stitch_version).filter_by(
-                    content_id=content.id
-                ).distinct().all()
-                version_list = [v[0] for v in existing_versions] if existing_versions else []
-                logger.info(f"[{content_id}] Existing versions to be deleted: {version_list}")
-                
-                deleted = session.query(SpeakerTranscription).filter_by(
-                    content_id=content.id
-                ).delete()
-                logger.info(f"[{content_id}] Actually deleted {deleted} speaker transcriptions")
-                
-                # Verify deletion
-                remaining = session.query(SpeakerTranscription).filter_by(
-                    content_id=content.id
-                ).count()
-                if remaining > 0:
-                    logger.error(f"[{content_id}] WARNING: {remaining} speaker transcriptions still exist after deletion!")
-                    raise Exception(f"Failed to delete all existing speaker transcriptions - {remaining} remain")
-            
-            # Create new speaker transcription records
-            for turn in speaker_turns:
-                speaker_transcription = SpeakerTranscription(
-                    content_id=content.id,  # Use the primary key, not the platform content_id
-                    speaker_id=turn['speaker_id'],
-                    start_time=turn['start_time'],
-                    end_time=turn['end_time'],
-                    text=turn['text'],
-                    turn_index=turn['turn_index'],
-                    stitch_version=turn['stitch_version'],
-                    speaker_hash=turn.get('global_id', turn.get('universal_name'))  # Store speaker hash
-                )
-                session.add(speaker_transcription)
-                saved_count += 1
-            
-            # Update content flags
-            content.is_stitched = True
-            content.stitch_version = get_current_stitch_version()
-            content.last_updated = datetime.now(timezone.utc)
-            session.add(content)
-
-            session.commit()
-            logger.info(f"[{content_id}] Successfully saved {saved_count} speaker turns to database")
-            
-    except Exception as e:
-        logger.error(f"[{content_id}] Failed to save speaker turns to database: {e}")
-        logger.error(f"[{content_id}] Error type: {type(e).__name__}")
-        logger.error(f"[{content_id}] Error details:", exc_info=True)
-        # Log more details about the failure
-        logger.error(f"[{content_id}] Failed while processing {len(speaker_turns)} turns")
-        if len(speaker_turns) > 0:
-            logger.error(f"[{content_id}] First turn sample: speaker_id={speaker_turns[0].get('speaker_id')}, "
-                        f"stitch_version={speaker_turns[0].get('stitch_version')}")
-        # Try to rollback if session is still active
-        try:
-            session.rollback()
-            logger.error(f"[{content_id}] Database transaction rolled back")
-        except:
-            pass
-        saved_count = 0
-    
-    return saved_count
-
 
 def save_sentences_to_database(sentences: List[Dict[str, Any]], content_id: str, test_mode: bool = False) -> int:
     """

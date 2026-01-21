@@ -392,24 +392,25 @@ class LabelPropagationStrategy:
                     continue
                 seen_content.add(content_id)
 
-                # Get a representative segment for this speaker
-                # Note: speaker_transcriptions.content_id is integer FK to content.id
+                # Get a representative segment for this speaker from sentences table
+                # Query sentences and aggregate turn for 5-30 second duration
                 result = session.execute(text("""
                     SELECT
-                        st.id as transcription_id,
-                        st.start_time,
-                        st.end_time,
-                        st.text,
+                        MIN(sent.id) as transcription_id,
+                        MIN(sent.start_time) as start_time,
+                        MAX(sent.end_time) as end_time,
+                        string_agg(sent.text, ' ' ORDER BY sent.sentence_in_turn) as text,
                         c.title as episode_title,
                         c.channel_id,
                         c.content_id as content_id_str
-                    FROM speaker_transcriptions st
-                    JOIN content c ON st.content_id = c.id
+                    FROM sentences sent
+                    JOIN content c ON sent.content_id = c.id
                     WHERE c.content_id = :content_id
-                      AND st.speaker_id = :speaker_id
-                      AND st.end_time - st.start_time BETWEEN 5 AND 30
-                      AND LENGTH(st.text) > 50
-                    ORDER BY st.end_time - st.start_time DESC
+                      AND sent.speaker_id = :speaker_id
+                    GROUP BY sent.turn_index, c.title, c.channel_id, c.content_id
+                    HAVING MAX(sent.end_time) - MIN(sent.start_time) BETWEEN 5 AND 30
+                       AND LENGTH(string_agg(sent.text, ' ' ORDER BY sent.sentence_in_turn)) > 50
+                    ORDER BY MAX(sent.end_time) - MIN(sent.start_time) DESC
                     LIMIT 1
                 """), {
                     'content_id': content_id,

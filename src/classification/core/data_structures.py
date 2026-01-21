@@ -107,8 +107,8 @@ class SearchCandidate:
     speaker_attributed_text: str = None
     speaker_segments: List[SpeakerSegment] = None
     speaker_info: Dict[str, Any] = None
-    source_transcription_ids: List[int] = None
-    transcription_texts: List[str] = None
+    source_sentence_ids: List[int] = None  # Sentence indices from sentences table
+    sentence_texts: List[str] = None  # Sentence texts from sentences table
     speaker_ids: List[int] = None
 
     # LLM classification results (filled later)
