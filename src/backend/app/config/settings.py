@@ -6,6 +6,7 @@ Loads configuration from environment variables.
 """
 
 import os
+from pathlib import Path
 from src.utils.paths import get_project_root, get_config_path, get_env_path
 from dotenv import load_dotenv
 
