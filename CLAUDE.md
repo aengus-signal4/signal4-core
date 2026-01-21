@@ -239,12 +239,14 @@ See `config/config.yaml` for:
 - `database:` - Database connection
 - `processing.llm_server:` - LLM server configuration
 
-**Credentials:** All secrets are in `.env` (copied from `.env.example`):
+**Credentials:** All secrets are in `~/signal4/.env` (parent directory, not `core/.env`):
 - `POSTGRES_PASSWORD`
 - `S3_ACCESS_KEY`, `S3_SECRET_KEY`
 - `HF_TOKEN` (HuggingFace)
 
 Config values can reference env vars using `${VAR}` syntax (e.g., `password: "${POSTGRES_PASSWORD}"`).
+
+**Important:** Use `get_env_path()` from `src.utils.paths` to get the `.env` path - never hardcode paths.
 
 **Loading config in code:**
 ```python
@@ -294,6 +296,20 @@ Workers are Mac machines on local network:
 - worker0: 10.0.0.34 (MLX tier-1)
 - worker1-5: Various IPs
 - Each has eth (primary) and wifi (fallback) interfaces
+
+### Worker Logs
+
+Logs are stored at `/Users/signal4/logs/content_processing/` with per-worker files:
+
+```bash
+# Task processor logs (main worker log)
+tail -f /Users/signal4/logs/content_processing/worker4_task_processor.log
+
+# All log files for a worker
+ls -la /Users/signal4/logs/content_processing/worker4_*.log
+```
+
+Log file naming pattern: `{worker_name}_{component}.log`
 
 ## Quick Investigation Commands
 
