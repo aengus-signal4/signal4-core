@@ -183,6 +183,7 @@ class CodeDeploymentManager:
                     '--exclude=.git',
                     '--exclude=*.pyc',
                     '--exclude=.next',
+                    '--exclude=.build',  # Swift build artifacts - workers build locally
                     '--exclude=core/scripts',  # Large model weights, not needed on workers
                     '-e', f'ssh -o StrictHostKeyChecking=no -i {self.ssh_key_path}',
                     f'{self.project_root}/',
