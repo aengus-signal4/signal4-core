@@ -128,7 +128,7 @@ services:
           - "mlx-community/Qwen3-30B-A3B-4bit"
         default_model: "mlx-community/Qwen3-30B-A3B-4bit"
       worker5:
-        enabled: true
+        enabled: false  # Host is down
         host: "10.0.0.209" # worker5 IP
         port: 8004
         tiers: ["tier_3"]
