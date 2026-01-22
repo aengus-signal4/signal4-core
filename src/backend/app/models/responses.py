@@ -384,6 +384,7 @@ class ChannelDetailsResponse(BaseModel):
     primary_url: Optional[str] = None
     language: Optional[str] = None
     status: Optional[str] = None
+    image_url: Optional[str] = None
 
     # Stats
     episode_count: int = 0

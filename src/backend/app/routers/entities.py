@@ -55,6 +55,21 @@ def _get_youtube_thumbnail(content_id: str) -> str | None:
     return None
 
 
+def _get_channel_image_url(channel: Channel) -> str | None:
+    """Get channel thumbnail URL via image proxy.
+
+    Returns a proxy URL that the frontend can use to fetch the thumbnail.
+    The proxy serves from S3 with caching headers.
+    """
+    if not channel or not channel.channel_key:
+        return None
+    # Only return URL if we have an image stored
+    if not channel.platform_metadata or not channel.platform_metadata.get('image_url'):
+        return None
+    # Return proxy URL - channel_key is URL-safe
+    return f"/api/images/channels/{channel.channel_key}.jpg"
+
+
 def _get_source_url(content: Content) -> str | None:
     """Extract source URL from content metadata"""
     if content.meta_data and isinstance(content.meta_data, dict):
@@ -329,6 +344,7 @@ async def get_channel_details(
                 primary_url=channel.primary_url,
                 language=channel.language,
                 status=channel.status,
+                image_url=_get_channel_image_url(channel),
                 episode_count=episode_count,
                 date_range=date_range,
                 publishing_frequency=None,  # TODO: Calculate from episode dates
