@@ -49,7 +49,7 @@ class EpisodeCard(BaseModel):
     platform: str
     description_short: Optional[str] = None  # Truncated to ~200 chars
     thumbnail_url: Optional[str] = None
-    segment_count: Optional[int] = None
+    importance_score: Optional[float] = None  # Channel importance (for ranking)
 
 
 class RecentEpisodesResponse(BaseModel):
@@ -68,6 +68,21 @@ class ProjectStatsResponse(BaseModel):
     stats: ProjectStats
 
 
+class HeatmapDataPoint(BaseModel):
+    """Single data point for release heatmap"""
+    date: str  # YYYY-MM-DD
+    hour: int  # 0-23
+    count: int
+
+
+class HeatmapResponse(BaseModel):
+    """Response for release heatmap data"""
+    success: bool = True
+    project: str
+    data: List[HeatmapDataPoint]
+    processing_time_ms: float
+
+
 # ============================================================================
 # Helper Functions
 # ============================================================================
@@ -83,12 +98,16 @@ def _get_thumbnail_url(content_id: str, platform: str, channel_key: Optional[str
     """Generate thumbnail URL based on platform.
 
     For YouTube: Uses img.youtube.com URL pattern.
-    For podcasts: Uses image proxy URL if channel has an image stored.
+    For podcasts: Uses frontend proxy to backend images API.
     """
     if platform == 'youtube' and content_id and not content_id.startswith('pod_'):
         return f"https://img.youtube.com/vi/{content_id}/mqdefault.jpg"
     if platform == 'podcast' and channel_key and has_channel_image:
-        return f"/api/images/channels/{channel_key}.jpg"
+        # URL-encode the channel_key to handle spaces and special characters
+        from urllib.parse import quote
+        encoded_key = quote(channel_key, safe='')
+        # Route through frontend image proxy (no auth required)
+        return f"/api/images/channels/{encoded_key}.jpg"
     return None
 
 
@@ -212,70 +231,155 @@ async def get_project_stats(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/recent/{project}", response_model=RecentEpisodesResponse)
-async def get_recent_episodes(
+@router.get("/heatmap/{project}", response_model=HeatmapResponse)
+async def get_release_heatmap(
     project: str,
-    time_window_days: int = Query(default=30, ge=1, le=90, description="Time window in days (1-90)"),
-    limit: int = Query(default=20, ge=1, le=100, description="Number of episodes to return"),
-    offset: int = Query(default=0, ge=0, description="Offset for pagination")
+    days: int = Query(default=7, ge=1, le=30, description="Number of days (1-30)")
 ):
     """
-    Get recent episodes for a project, sorted by publish date descending.
+    Get episode release counts by hour for heatmap visualization.
 
-    Returns episode cards with title, channel, date, thumbnail, and short description.
+    Returns hourly counts for the specified number of days.
     """
     start_time = time.time()
 
     try:
         with get_session() as session:
-            # Get total count first
-            count_query = text("""
-                SELECT COUNT(DISTINCT c.id) as total
-                FROM content c
-                WHERE c.projects @> ARRAY[:project]::varchar[]
-                AND c.publish_date >= NOW() - INTERVAL ':days days'
-                AND c.is_embedded = true
-            """)
-
-            count_result = session.execute(
-                count_query,
-                {"project": project, "days": time_window_days}
-            ).fetchone()
-
-            total_available = count_result.total if count_result else 0
-
-            # Get episodes with segment counts and channel info for thumbnails
-            episodes_query = text("""
+            heatmap_query = text("""
                 SELECT
-                    c.id,
-                    c.content_id,
-                    c.title,
-                    c.channel_name,
-                    c.channel_id,
-                    c.publish_date,
-                    c.duration,
-                    c.platform,
-                    c.description,
-                    COUNT(es.id) as segment_count,
-                    ch.channel_key,
-                    CASE WHEN ch.platform_metadata->>'image_url' IS NOT NULL
-                         AND ch.platform_metadata->>'image_url' != ''
-                         THEN true ELSE false END as has_channel_image
-                FROM content c
-                LEFT JOIN embedding_segments es ON c.id = es.content_id
-                LEFT JOIN channels ch ON c.channel_id = ch.id
-                WHERE c.projects @> ARRAY[:project]::varchar[]
-                AND c.publish_date >= NOW() - INTERVAL ':days days'
-                AND c.is_embedded = true
-                GROUP BY c.id, ch.channel_key, ch.platform_metadata
-                ORDER BY c.publish_date DESC
-                LIMIT :limit OFFSET :offset
+                    DATE(publish_date) as date,
+                    EXTRACT(HOUR FROM publish_date)::int as hour,
+                    COUNT(*) as count
+                FROM content
+                WHERE publish_date >= CURRENT_DATE - INTERVAL ':days days'
+                    AND publish_date < CURRENT_DATE + INTERVAL '1 day'
+                    AND projects @> ARRAY[:project]::varchar[]
+                    AND is_embedded = true
+                GROUP BY DATE(publish_date), EXTRACT(HOUR FROM publish_date)
+                ORDER BY date, hour
             """)
 
             results = session.execute(
-                episodes_query,
-                {"project": project, "days": time_window_days, "limit": limit, "offset": offset}
+                heatmap_query,
+                {"project": project, "days": days}
             ).fetchall()
+
+            data = [
+                HeatmapDataPoint(
+                    date=str(row.date),
+                    hour=row.hour,
+                    count=row.count
+                )
+                for row in results
+            ]
+
+            processing_time = (time.time() - start_time) * 1000
+
+            return HeatmapResponse(
+                success=True,
+                project=project,
+                data=data,
+                processing_time_ms=processing_time
+            )
+
+    except Exception as e:
+        logger.error(f"Error fetching heatmap data for {project}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/recent/{project}", response_model=RecentEpisodesResponse)
+async def get_recent_episodes(
+    project: str,
+    time_window_days: int = Query(default=30, ge=1, le=90, description="Time window in days (1-90)"),
+    limit: int = Query(default=20, ge=1, le=100, description="Number of episodes to return"),
+    offset: int = Query(default=0, ge=0, description="Offset for pagination"),
+    channel_id: Optional[int] = Query(default=None, description="Filter by channel ID"),
+    start_date: Optional[str] = Query(default=None, description="Filter by start date (ISO format)"),
+    end_date: Optional[str] = Query(default=None, description="Filter by end date (ISO format)"),
+    search: Optional[str] = Query(default=None, max_length=200, description="Search in title or description")
+):
+    """
+    Get recent episodes for a project, sorted by publish date descending.
+
+    Returns episode cards with title, channel, date, thumbnail, and short description.
+    Supports filtering by channel, date range, and keyword search.
+    """
+    start_time = time.time()
+
+    try:
+        with get_session() as session:
+            # Build dynamic WHERE clause
+            where_clauses = [
+                "c.projects @> ARRAY[:project]::varchar[]",
+                "c.is_embedded = true"
+            ]
+            params = {"project": project, "limit": limit, "offset": offset}
+
+            # Date filtering - use time_window_days OR explicit date range
+            if start_date and end_date:
+                where_clauses.append("c.publish_date >= :start_date::timestamp")
+                where_clauses.append("c.publish_date <= :end_date::timestamp")
+                params["start_date"] = start_date
+                params["end_date"] = end_date
+            elif start_date:
+                where_clauses.append("c.publish_date >= :start_date::timestamp")
+                params["start_date"] = start_date
+            elif end_date:
+                where_clauses.append("c.publish_date <= :end_date::timestamp")
+                params["end_date"] = end_date
+            else:
+                # Default: use time_window_days
+                where_clauses.append("c.publish_date >= NOW() - INTERVAL ':days days'")
+                params["days"] = time_window_days
+
+            # Channel filter
+            if channel_id is not None:
+                where_clauses.append("c.channel_id = :channel_id")
+                params["channel_id"] = channel_id
+
+            # Keyword search (title or description)
+            if search:
+                where_clauses.append("(c.title ILIKE :search OR c.description ILIKE :search)")
+                params["search"] = f"%{search}%"
+
+            where_sql = " AND ".join(where_clauses)
+
+            # Optimized query with recency + importance weighting
+            # Only shows most recent episode per channel (DISTINCT ON channel_id)
+            # Score = importance_score * recency_factor
+            # recency_factor decays: 1.0 at day 0, ~0.35 at day 7, ~0.01 at day 30
+            episodes_query = text(f"""
+                SELECT * FROM (
+                    SELECT DISTINCT ON (c.channel_id)
+                        c.id,
+                        c.content_id,
+                        c.title,
+                        c.channel_name,
+                        c.channel_id,
+                        c.publish_date,
+                        c.duration,
+                        c.platform,
+                        c.description,
+                        ch.channel_key,
+                        ch.importance_score,
+                        CASE WHEN ch.platform_metadata->>'image_url' IS NOT NULL
+                             AND ch.platform_metadata->>'image_url' <> ''
+                             THEN true ELSE false END as has_channel_image,
+                        COALESCE(ch.importance_score, 1000) *
+                            EXP(-0.15 * EXTRACT(EPOCH FROM (NOW() - c.publish_date)) / 86400) as weighted_score
+                    FROM content c
+                    LEFT JOIN channels ch ON c.channel_id = ch.id
+                    WHERE {where_sql}
+                    ORDER BY c.channel_id, c.publish_date DESC
+                ) sub
+                ORDER BY weighted_score DESC
+                LIMIT :limit OFFSET :offset
+            """)
+
+            results = session.execute(episodes_query, params).fetchall()
+
+            # For top episodes view, total_available = number returned (not paginated)
+            total_available = len(results)
 
             episodes = []
             for row in results:
@@ -290,7 +394,7 @@ async def get_recent_episodes(
                     platform=row.platform or "unknown",
                     description_short=_truncate_description(row.description),
                     thumbnail_url=_get_thumbnail_url(row.content_id, row.platform or "", row.channel_key, row.has_channel_image),
-                    segment_count=row.segment_count
+                    importance_score=float(row.importance_score) if row.importance_score else None
                 ))
 
             processing_time = (time.time() - start_time) * 1000
