@@ -268,6 +268,11 @@ STEP_REGISTRY: Dict[str, StepMetadata] = {
                 "type": "integer",
                 "default": 30,
                 "description": "Time window for recency normalization"
+            },
+            "similarity_floor": {
+                "type": "number",
+                "default": 0.0,
+                "description": "Minimum similarity threshold to include segment (0 = no floor)"
             }
         },
         method_name="rerank_segments"
@@ -580,9 +585,14 @@ def build_pipeline_from_steps(
 
         # Merge global filters for retrieval and analysis steps
         # Global filters should override workflow defaults (so config goes first, then global_filters override)
+        # Note: rerank_segments only needs time_window_days, not project/language/channel filters
         if step_name in ["retrieve_segments", "quantitative_analysis", "retrieve_segments_by_search",
-                         "retrieve_all_segments", "rerank_segments"]:
+                         "retrieve_all_segments"]:
             config = {**config, **global_filters}
+        elif step_name == "rerank_segments":
+            # Only pass time_window_days to reranker (it operates on already-filtered segments)
+            if "time_window_days" in global_filters:
+                config = {**config, "time_window_days": global_filters["time_window_days"]}
 
         # Pass use_local_llm to LLM generation steps (summaries and query expansion)
         if step_name in ["generate_summary", "generate_summaries", "expand_query"] and global_filters.get("use_local_llm"):

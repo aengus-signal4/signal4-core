@@ -640,29 +640,34 @@ class CachedWorkflowExecutor:
                 )
 
             # Workflow result cache
+            # Only cache if we have actual segments - don't cache empty results
             if query and 'selected_segments' in final_context and 'summaries' in final_context:
-                workflow_cache = WorkflowResultCache(self.dashboard_id)
-
-                selected_segments = final_context['selected_segments']
-                selected_segment_ids = self._extract_segment_ids(selected_segments)
-
                 all_segments = final_context.get('segments', [])
-                all_segment_ids = self._extract_segment_ids(all_segments)
 
-                workflow_cache.put(
-                    query=query,
-                    time_window=global_filters["time_window_days"],
-                    projects=global_filters.get("projects"),
-                    languages=global_filters.get("languages"),
-                    data={
-                        'selected_segments': selected_segments,
-                        'summaries': final_context['summaries'],
-                        'selected_segment_ids': selected_segment_ids,
-                        'all_segment_ids': all_segment_ids
-                    }
-                )
-                ttl = workflow_cache.get_ttl_for_time_window(global_filters['time_window_days'])
-                logger.debug(f"Cached workflow result (ttl={ttl}h)")
+                # Skip caching if no segments were retrieved (likely a transient error)
+                if not all_segments:
+                    logger.warning("Skipping workflow cache - no segments retrieved (possible transient error)")
+                else:
+                    workflow_cache = WorkflowResultCache(self.dashboard_id)
+
+                    selected_segments = final_context['selected_segments']
+                    selected_segment_ids = self._extract_segment_ids(selected_segments)
+                    all_segment_ids = self._extract_segment_ids(all_segments)
+
+                    workflow_cache.put(
+                        query=query,
+                        time_window=global_filters["time_window_days"],
+                        projects=global_filters.get("projects"),
+                        languages=global_filters.get("languages"),
+                        data={
+                            'selected_segments': selected_segments,
+                            'summaries': final_context['summaries'],
+                            'selected_segment_ids': selected_segment_ids,
+                            'all_segment_ids': all_segment_ids
+                        }
+                    )
+                    ttl = workflow_cache.get_ttl_for_time_window(global_filters['time_window_days'])
+                    logger.debug(f"Cached workflow result (ttl={ttl}h)")
 
         except Exception as cache_error:
             logger.error(f"Failed to cache results: {cache_error}", exc_info=True)
