@@ -381,17 +381,27 @@ class MLXManager:
 
                     # Clean completion log
                     model_used = response_data.get('model_used', 'unknown')
-                    # Extract short model name
-                    if '80B' in model_used:
-                        model_short = 'tier_1'
-                    elif '30B' in model_used or '4B' in model_used:
-                        model_short = 'tier_2'
-                    elif '8B' in model_used:
-                        model_short = 'tier_3'
-                    else:
-                        model_short = model_used.split('/')[-1][:20]
+                    model_requested = request.model
 
-                    logger.info(f"[{request_id}] Completed in {processing_time:5.2f}s ({model_short})")
+                    # Extract short model names
+                    def get_tier(model_name):
+                        if '80B' in model_name:
+                            return 'tier_1'
+                        elif '30B' in model_name or '4B' in model_name:
+                            return 'tier_2'
+                        elif '8B' in model_name:
+                            return 'tier_3'
+                        elif model_name.startswith('tier_'):
+                            return model_name
+                        return model_name.split('/')[-1][:20]
+
+                    tier_used = get_tier(model_used)
+                    tier_requested = get_tier(model_requested)
+
+                    if tier_used != tier_requested:
+                        logger.info(f"[{request_id}] Completed in {processing_time:5.2f}s ({tier_used} for {tier_requested})")
+                    else:
+                        logger.info(f"[{request_id}] Completed in {processing_time:5.2f}s ({tier_used})")
 
                     self.total_requests += 1
                     self.requests_by_task_type[request.task_type.value] += 1
