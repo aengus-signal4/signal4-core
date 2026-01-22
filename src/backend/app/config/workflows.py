@@ -158,11 +158,23 @@ WORKFLOWS: Dict[str, List[Dict[str, Any]]] = {
             }
         },
         {
+            "step": "rerank_segments",
+            "config": {
+                "best_per_episode": True,
+                "similarity_weight": 0.40,
+                "popularity_weight": 0.25,
+                "recency_weight": 0.20,
+                "single_speaker_weight": 0.08,
+                "named_speaker_weight": 0.07,
+                "similarity_floor": 0.55
+            }
+        },
+        {
             "step": "quick_cluster_check",
             "config": {
                 "method": "hdbscan",
                 "min_cluster_size": 10,
-                "min_silhouette_score": 0.15,
+                "min_silhouette_score": 0.25,
                 "skip_if_few_segments": 30,
                 "max_themes": 4,
                 "force_split": True
@@ -179,7 +191,7 @@ WORKFLOWS: Dict[str, List[Dict[str, Any]]] = {
             "step": "select_segments",
             "config": {
                 "strategy": "balanced",
-                "n": 18,
+                "n": 30,
                 "n_unclustered": 10
             }
         },
