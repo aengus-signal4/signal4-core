@@ -1313,7 +1313,7 @@ class EmbeddingHydrator:
         }
 
 
-    async def embed_descriptions(self, batch_size: int = 100, limit: Optional[int] = None, max_per_run: Optional[int] = None) -> dict:
+    async def embed_descriptions(self, batch_size: int = 32, limit: Optional[int] = None, max_per_run: Optional[int] = 1000) -> dict:
         """
         Embed descriptions for all content that has is_embedded=True but no description_embedding.
         Content is processed in descending order by publish_date (newest first).
@@ -1419,13 +1419,13 @@ class EmbeddingHydrator:
                             torch.mps.empty_cache()
                         gc.collect()
 
-                        # Use local model
+                        # Use local model with small batch size to avoid MPS OOM
                         with torch.no_grad():
                             embeddings = self.primary_model.encode(
                                 descriptions,
                                 convert_to_numpy=True,
                                 show_progress_bar=False,
-                                batch_size=32
+                                batch_size=8
                             )
 
                         embeddings = np.asarray(embeddings, dtype=np.float32)
@@ -1456,6 +1456,10 @@ class EmbeddingHydrator:
                 # Check if we've hit the limit
                 if effective_limit and total_embedded >= effective_limit:
                     break
+
+                # Wait between batches to let MPS memory settle
+                import time
+                time.sleep(1)
 
         logger.info(f"Description embedding complete: {total_embedded} embedded, {total_skipped} skipped")
 

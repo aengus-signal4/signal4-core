@@ -813,16 +813,16 @@ scheduled_tasks:
 
     embedding_hydration:
       name: "Embedding Hydration"
-      description: "Generate segment embeddings first, then description embeddings (newest first), up to 10k per run"
+      description: "Generate segment embeddings first, then description embeddings (newest first), up to 1k total per run"
       enabled: true  # Runs on worker6/head, loads embedding model directly
       schedule:
         type: run_then_wait
-        wait_seconds: 600  # Wait 10 minutes after completion
+        wait_seconds: 120  # Wait 2 minutes after completion
       executor:
         type: cli
         host: "10.0.0.4"  # Run on worker6/head/local
         command: "python"
-        args: ["-m", "src.utils.embedding_hydrator", "--batch-size", "32", "--max-per-run", "10000"]
+        args: ["-m", "src.utils.embedding_hydrator", "--batch-size", "32", "--max-per-run", "1000"]
         use_screen: true
         screen_name: "embedding_hydration"
       timeout_seconds: 14400
