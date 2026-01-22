@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-MLX-based LLM Server for Stitch Processing
-===========================================
+MLX Model Server for LLM Processing
+====================================
 
-FastAPI server that provides LLM access using MLX for Apple Silicon acceleration.
-Orchestrates requests across multiple MLX instances on the local network.
+FastAPI server that provides local LLM inference using MLX for Apple Silicon acceleration.
+This server processes requests locally - the LLM balancer handles routing across nodes.
 
 PREREQUISITES:
 - MLX installed: `pip install mlx-lm`
@@ -14,13 +14,9 @@ PREREQUISITES:
 Key features:
 1. Native MLX acceleration for Apple Silicon
 2. Three-tier model system (tier_1/tier_2/tier_3) - automatically upgrades to better model if loaded
-3. Priority-based queuing (1-99, lower numbers = higher priority, default=1)
-4. Task-type routing (stitch->worker0 first, others->any endpoint)
-5. Distributed orchestration across multiple MLX servers
-6. Per-worker model restrictions (e.g., 80B only on worker0)
-7. Intelligent routing based on model capabilities
-8. Health check and status endpoints with queue analytics
-9. Keeps models warm in memory (configurable timeout)
+3. Priority-based queuing (1-99, lower numbers = higher priority)
+4. Per-worker model restrictions based on config
+5. Keeps models warm in memory (configurable timeout)
 
 Three-tier model system:
 - Tier 1 (best):    mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit  (aliases: tier_1, tier1, best, 80b)
@@ -28,9 +24,9 @@ Three-tier model system:
 - Tier 3 (fastest):  mlx-community/LFM2-8B-A1B-4bit                  (aliases: tier_3, tier3, fastest, 8b)
 
 Usage examples:
-  request = {"model": "tier_1", "messages": [...]}  # Request tier 1, may get tier 1 if loaded
-  request = {"model": "tier_2", "messages": [...]}  # Request tier 2, may get tier 1 if loaded
-  request = {"model": "tier_3", "messages": [...]}  # Request tier 3, may get tier 1/2 if loaded
+  request = {"model": "tier_1", "messages": [...]}  # Request tier 1
+  request = {"model": "tier_2", "messages": [...]}  # Request tier 2
+  request = {"model": "tier_3", "messages": [...]}  # Request tier 3
 
 Response includes "model_used" field showing actual model that processed the request.
 """
@@ -39,26 +35,21 @@ import asyncio
 import logging
 import os
 import time
-import json
-import random
 import heapq
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from pathlib import Path
 from enum import Enum
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-import httpx
 import uvicorn
 
 from src.utils.logger import setup_worker_logger
 from src.utils.config import load_config
 
-logger = setup_worker_logger('llm_server_mlx')
+logger = setup_worker_logger('mlx_model_server')
 logger.setLevel(logging.INFO)
 
 # MLX imports
@@ -92,37 +83,9 @@ MODEL_CONFIGS = {
 }
 
 
-async def check_mlx_endpoint(endpoint: str, timeout: float = 5.0) -> bool:
-    """Check if an MLX endpoint is available."""
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.get(f"http://{endpoint}:8003/health")
-            if response.status_code == 200:
-                return True
-            else:
-                logger.warning(f"MLX endpoint {endpoint} returned status {response.status_code}")
-                return False
-    except Exception as e:
-        logger.warning(f"MLX endpoint {endpoint} not available: {e}")
-        return False
-
-
-async def get_available_models(endpoint: str, timeout: float = 10.0) -> List[str]:
-    """Get list of available models from an MLX endpoint."""
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.get(f"http://{endpoint}:8003/status")
-            if response.status_code == 200:
-                data = response.json()
-                return data.get('models_loaded', [])
-    except Exception as e:
-        logger.warning(f"Failed to get models from {endpoint}: {e}")
-    return []
-
-
 # Request/Response models
 class TaskType(str, Enum):
-    """Supported task types for routing."""
+    """Supported task types."""
     STITCH = "stitch"
     TEXT = "text"
     ANALYSIS = "analysis"
@@ -140,14 +103,14 @@ class LLMRequest(BaseModel):
     messages: List[LLMMessage] = Field(..., description="List of messages")
     model: str = Field(
         default="tier_2",
-        description="Model to use - supports tier_1 (80B, best), tier_2 (4B, balanced), tier_3 (1.7B, fastest) or full model names"
+        description="Model to use - supports tier_1 (80B), tier_2 (4B), tier_3 (8B) or full model names"
     )
     temperature: float = Field(default=0.1, ge=0.0, le=2.0)
     max_tokens: Optional[int] = Field(default=None, description="Max tokens for response")
     top_p: float = Field(default=0.9, ge=0.0, le=1.0, description="Top-p sampling")
     seed: Optional[int] = Field(default=42, description="Random seed for reproducibility")
     priority: int = Field(default=1, ge=1, le=99, description="Request priority (1-99, lower = higher priority)")
-    task_type: TaskType = Field(default=TaskType.STITCH, description="Task type for endpoint routing")
+    task_type: TaskType = Field(default=TaskType.TEXT, description="Task type")
 
 
 class LLMResponse(BaseModel):
@@ -161,42 +124,24 @@ class LLMResponse(BaseModel):
     task_type: str
 
 
-class ClassificationRequest(BaseModel):
-    """Single classification request for batch processing"""
-    segment_id: int = Field(..., description="Unique segment identifier")
-    text: str = Field(..., description="Text to classify")
-    prompt: Optional[str] = Field(default=None, description="Pre-generated prompt to use")
-    context: Optional[Dict[str, Any]] = Field(default=None, description="Additional context")
-
-
-class BatchClassifyRequest(BaseModel):
-    """Batch classification request optimized for theme classification"""
-    phase: str = Field(..., description="Classification phase: 'theme' or 'subtheme'")
-    batch_idx: int = Field(..., description="Batch index for tracking")
-    requests: List[ClassificationRequest] = Field(..., description="List of classification requests")
-    theme_id: Optional[int] = Field(default=None, description="Theme ID for subtheme classification")
-    model: str = Field(default="tier_2", description="Model to use for classification")
-
-
 class ServerStatus(BaseModel):
     """Server status information."""
     status: str
     models_loaded: List[str]
-    model_status: Dict[str, Dict[str, Any]] = Field(default_factory=dict, description="Detailed status for each model")
+    model_status: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    allowed_models: List[str]
     active_requests: int
     queued_requests: int
     total_requests_processed: int
     max_concurrent_requests: int
     max_queue_size: int
-    model_keep_warm_seconds: int = Field(description="Seconds to keep models warm after last use")
+    model_keep_warm_seconds: int
     uptime_seconds: float
-    queue_by_priority: Dict[int, int] = Field(default_factory=dict, description="Queue count by priority level")
-    queue_by_task_type: Dict[str, int] = Field(default_factory=dict, description="Queue count by task type")
-    requests_by_task_type: Dict[str, int] = Field(default_factory=dict, description="Total requests processed by task type")
+    requests_by_task_type: Dict[str, int] = Field(default_factory=dict)
 
 
 class MLXManager:
-    """Manages MLX models and request processing across multiple MLX endpoints."""
+    """Manages local MLX model loading and request processing."""
 
     def __init__(self, max_concurrent: int = 5, max_queue_size: int = 100):
         self.max_concurrent = max_concurrent
@@ -221,7 +166,7 @@ class MLXManager:
         self.start_time = time.time()
         self.request_lock = asyncio.Lock()
 
-        # Priority queue: (priority, timestamp, request, future, request_id)
+        # Priority queue: (priority, counter, request, future, request_id)
         self.request_queue = []
         self.queue_lock = asyncio.Lock()
         self.request_counter = 0
@@ -230,45 +175,21 @@ class MLXManager:
         self.unload_task = None
         self.queue_processors = []
 
-        # Distributed MLX endpoints
-        self.mlx_endpoints = ["10.0.0.34", "localhost"]  # Default: worker0 + localhost
-        self.endpoint_status = {}
-        self.endpoint_last_check = {}
-        self.endpoint_models = {}  # Track which models are available on each endpoint
-        self.health_check_interval = 30
-
-        # Separate queues per endpoint
-        self.endpoint_queues = {}
-        self.endpoint_processors = {}
-        self.endpoint_active_requests = {}
-
-        # Task type routing configuration
-        self.task_routing = {
-            TaskType.STITCH: ["localhost", "10.0.0.34"],  # Prefer localhost, fallback to worker0
-            TaskType.TEXT: None,  # Any available endpoint
-            TaskType.ANALYSIS: None,
-            TaskType.EMBEDDING: None,
-        }
-
         # Statistics
         self.requests_by_task_type = {task_type.value: 0 for task_type in TaskType}
 
-        # HTTP client for peer communication
-        self.http_client = None
-
     async def initialize(self):
-        """Initialize MLX Manager with lazy loading."""
-        logger.info("=== MLX LLM Server Initialization ===")
+        """Initialize MLX Manager."""
+        logger.info("=== MLX Model Server Initialization ===")
         logger.info("Using MLX for Apple Silicon acceleration")
 
         if not MLX_AVAILABLE:
             raise RuntimeError("MLX not available - install with: pip install mlx-lm")
 
-        # Load config to get endpoints and model restrictions
+        # Load config to get model restrictions
         try:
             config = load_config()
             workers = config.get('processing', {}).get('workers', {})
-            mlx_config = config.get('processing', {}).get('llm_server_mlx', {})
 
             # Detect local IP address
             import socket
@@ -310,57 +231,11 @@ class MLXManager:
                 self.default_model = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
                 logger.warning(f"No model_server config found for {self.local_ip}, allowing all models")
 
-            # Discover MLX endpoints from model_server instances config
-            discovered_endpoints = []
-            for instance_name, instance_config in model_server_instances.items():
-                if not instance_config.get('enabled', False):
-                    continue
-                instance_host = instance_config.get('host')
-                if instance_host:
-                    discovered_endpoints.append(instance_host)
-                    # Store allowed models for this endpoint
-                    self.endpoint_models[instance_host] = instance_config.get('allowed_models', list(MODEL_CONFIGS.keys()))
-
-            # Add localhost
-            self.mlx_endpoints = list(set(discovered_endpoints + ["localhost"]))
-
-            # Set localhost models
-            self.endpoint_models["localhost"] = self.allowed_models
-
-            logger.info(f"Discovered MLX endpoints: {self.mlx_endpoints}")
-            logger.info(f"Endpoint model capabilities: {self.endpoint_models}")
-
         except Exception as e:
-            logger.warning(f"Could not load endpoint config: {e}, using localhost only")
-            self.mlx_endpoints = ["localhost"]
+            logger.warning(f"Could not load config: {e}, allowing all models")
             self.allowed_models = list(MODEL_CONFIGS.keys())
             self.default_model = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
 
-        # Initialize HTTP client
-        self.http_client = httpx.AsyncClient(timeout=30.0)
-
-        # Check available MLX endpoints
-        logger.info("Checking MLX endpoints...")
-        available_endpoints = []
-        for endpoint in self.mlx_endpoints:
-            if endpoint == "localhost":
-                # Local endpoint is always available
-                available_endpoints.append(endpoint)
-                self.endpoint_status[endpoint] = True
-                logger.info(f"MLX endpoint localhost is available (local)")
-            else:
-                if await check_mlx_endpoint(endpoint):
-                    available_endpoints.append(endpoint)
-                    self.endpoint_status[endpoint] = True
-                    logger.info(f"MLX endpoint {endpoint} is available")
-                else:
-                    self.endpoint_status[endpoint] = False
-                    logger.warning(f"MLX endpoint {endpoint} is not available")
-
-        if not available_endpoints:
-            raise RuntimeError("No MLX endpoints are available")
-
-        logger.info(f"Available MLX endpoints: {available_endpoints}")
         logger.info("Models will be loaded on first use and kept warm for {} seconds".format(self.model_keep_warm_seconds))
         logger.info(f"MLX supports up to {self.max_concurrent} concurrent requests with queue size {self.max_queue_size}")
 
@@ -368,25 +243,11 @@ class MLXManager:
         self.unload_task = asyncio.create_task(self._model_unloader())
         logger.info("Model unloader task started")
 
-        # Initialize endpoint queues and processors
-        for endpoint in self.mlx_endpoints:
-            if self.endpoint_status.get(endpoint, False):
-                self.endpoint_queues[endpoint] = []
-                self.endpoint_active_requests[endpoint] = 0
-
-                # Start processors per endpoint
-                endpoint_processors = []
-                for i in range(5):
-                    processor = asyncio.create_task(self._endpoint_queue_processor(endpoint, i))
-                    endpoint_processors.append(processor)
-                    self.queue_processors.append(processor)
-
-                self.endpoint_processors[endpoint] = endpoint_processors
-                logger.info(f"Started 5 queue processors for endpoint {endpoint}")
-
-        total_processors = sum(len(procs) for procs in self.endpoint_processors.values())
-        logger.info(f"Started {total_processors} total queue processor tasks")
-        logger.info(f"Task routing configuration: {dict(self.task_routing)}")
+        # Start queue processors
+        for i in range(self.max_concurrent):
+            processor = asyncio.create_task(self._queue_processor(i))
+            self.queue_processors.append(processor)
+        logger.info(f"Started {self.max_concurrent} queue processor tasks")
 
     async def _model_unloader(self):
         """Background task to unload models that haven't been used recently."""
@@ -496,38 +357,32 @@ class MLXManager:
                 logger.error(f"Failed to load model {model_name}: {e}")
                 raise
 
-    async def _endpoint_queue_processor(self, endpoint: str, processor_id: int):
-        """Process requests from a specific endpoint's queue."""
-        logger.info(f"Endpoint {endpoint} queue processor {processor_id} started")
+    async def _queue_processor(self, processor_id: int):
+        """Process requests from the priority queue."""
+        logger.info(f"Queue processor {processor_id} started")
         while True:
             try:
-                request_item = await self._get_next_endpoint_request(endpoint)
+                request_item = await self._get_next_request()
                 if not request_item:
                     await asyncio.sleep(0.1)
                     continue
 
-                priority, timestamp, request, future, request_id = request_item
+                priority, counter, request, future, request_id = request_item
 
                 async with self.request_lock:
                     self.active_requests += 1
                     self.queued_requests -= 1
-                    self.endpoint_active_requests[endpoint] += 1
 
-                logger.debug(f"[{request_id}] Processing request (endpoint {endpoint}, processor {processor_id}, priority {priority})")
+                logger.debug(f"[{request_id}] Processing request (processor {processor_id}, priority {priority})")
                 start_time = time.time()
 
                 try:
-                    # Process locally if this is localhost, otherwise forward
-                    if endpoint == "localhost":
-                        response_data = await self._process_llm_request_local(request, request_id)
-                    else:
-                        response_data = await self._process_llm_request_remote(request, request_id, endpoint)
-
+                    response_data = await self._process_llm_request(request, request_id)
                     processing_time = time.time() - start_time
 
                     # Clean completion log
                     model_used = response_data.get('model_used', 'unknown')
-                    # Extract short model name (e.g., "80B" from full path)
+                    # Extract short model name
                     if '80B' in model_used:
                         model_short = 'tier_1'
                     elif '30B' in model_used or '4B' in model_used:
@@ -545,31 +400,28 @@ class MLXManager:
 
                 except Exception as e:
                     processing_time = time.time() - start_time
-                    logger.error(f"[{request_id}] LLM Request on {endpoint} failed after {processing_time:.2f}s: {e}")
+                    logger.error(f"[{request_id}] Request failed after {processing_time:.2f}s: {e}")
                     future.set_exception(e)
 
                 finally:
                     async with self.request_lock:
                         self.active_requests -= 1
-                        self.endpoint_active_requests[endpoint] -= 1
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error in endpoint {endpoint} queue processor {processor_id}: {e}")
+                logger.error(f"Error in queue processor {processor_id}: {e}")
 
-    async def _get_next_endpoint_request(self, endpoint: str) -> Optional[Tuple]:
-        """Get the next highest priority request from an endpoint's queue."""
+    async def _get_next_request(self) -> Optional[Tuple]:
+        """Get the next highest priority request from the queue."""
         async with self.queue_lock:
-            endpoint_queue = self.endpoint_queues.get(endpoint, [])
-            if endpoint_queue:
-                return heapq.heappop(endpoint_queue)
+            if self.request_queue:
+                return heapq.heappop(self.request_queue)
             return None
 
-    async def _process_llm_request_local(self, request: LLMRequest, request_id: str) -> Dict[str, Any]:
+    async def _process_llm_request(self, request: LLMRequest, request_id: str) -> Dict[str, Any]:
         """Process LLM request locally using MLX."""
         # Choose best model based on hierarchy
-        requested_model = self._resolve_model_name(request.model)
         best_model = self._choose_best_model(request.model)
 
         # Ensure model is loaded
@@ -651,95 +503,6 @@ class MLXManager:
             logger.error(f"MLX generation error: {e}")
             raise
 
-    async def _process_llm_request_remote(self, request: LLMRequest, request_id: str, endpoint: str) -> Dict[str, Any]:
-        """Forward request to remote MLX endpoint."""
-        try:
-            response = await self.http_client.post(
-                f"http://{endpoint}:8003/llm-request",
-                json=request.dict(),
-                timeout=120.0
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                return {
-                    "response": data['response'],
-                    "model_used": data.get('model_used', request.model),
-                    "endpoint_used": endpoint,
-                    "priority": request.priority,
-                    "task_type": request.task_type.value,
-                    "mlx_stats": data.get('mlx_stats', {})
-                }
-            else:
-                raise Exception(f"Remote endpoint returned {response.status_code}: {response.text}")
-
-        except Exception as e:
-            logger.error(f"Error forwarding to {endpoint}: {e}")
-            self.endpoint_status[endpoint] = False
-            raise
-
-    async def _choose_best_endpoint(self, request: LLMRequest) -> Optional[str]:
-        """Choose the best endpoint for this request considering model capabilities."""
-        # Resolve the requested model
-        requested_model = self._resolve_model_name(request.model)
-
-        # Get healthy endpoints
-        healthy_endpoints = [ep for ep in self.mlx_endpoints if self.endpoint_status.get(ep, False)]
-        logger.debug(f"Healthy endpoints: {healthy_endpoints}")
-
-        if not healthy_endpoints:
-            logger.warning("No healthy endpoints available")
-            return None
-
-        # Filter endpoints that support the requested model or better
-        requested_rank = MODEL_CONFIGS[requested_model]['rank']
-        capable_endpoints = []
-
-        for endpoint in healthy_endpoints:
-            endpoint_allowed_models = self.endpoint_models.get(endpoint, [])
-            # Check if endpoint has the exact model or a better model
-            for model in endpoint_allowed_models:
-                if model in MODEL_CONFIGS:
-                    model_rank = MODEL_CONFIGS[model]['rank']
-                    if model_rank <= requested_rank:  # Can handle this or better
-                        capable_endpoints.append(endpoint)
-                        break
-
-        logger.debug(f"Capable endpoints for {requested_model}: {capable_endpoints}")
-
-        if not capable_endpoints:
-            logger.warning(f"No endpoints capable of handling model {requested_model}, using any available")
-            capable_endpoints = healthy_endpoints
-
-        # Apply task-type preferences within capable endpoints
-        preferred_endpoints = self.task_routing.get(request.task_type, None)
-        logger.debug(f"Task routing preference for {request.task_type}: {preferred_endpoints}")
-
-        if preferred_endpoints:
-            healthy_preferred = [ep for ep in preferred_endpoints if ep in capable_endpoints]
-            logger.debug(f"Healthy preferred endpoints: {healthy_preferred}")
-            if healthy_preferred:
-                chosen = self._choose_least_loaded_endpoint(healthy_preferred)
-                logger.info(f"Chose endpoint {chosen} for {request.task_type} task (model: {requested_model})")
-                return chosen
-
-        chosen = self._choose_least_loaded_endpoint(capable_endpoints)
-        logger.info(f"Chose endpoint {chosen} for {request.task_type} task (no preference match)")
-        return chosen
-
-    def _choose_least_loaded_endpoint(self, endpoints: List[str]) -> str:
-        """Choose the endpoint with the least current load."""
-        if not endpoints:
-            return None
-
-        load_scores = {}
-        for endpoint in endpoints:
-            active_requests = self.endpoint_active_requests.get(endpoint, 0)
-            queue_length = len(self.endpoint_queues.get(endpoint, []))
-            load_scores[endpoint] = active_requests + queue_length
-
-        return min(load_scores, key=load_scores.get)
-
     async def process_llm_request(self, request: LLMRequest) -> Dict[str, Any]:
         """Process a generic LLM request via priority queue."""
         timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -749,7 +512,7 @@ class MLXManager:
 
         # Check if queue is full
         async with self.queue_lock:
-            current_queue_size = sum(len(q) for q in self.endpoint_queues.values())
+            current_queue_size = len(self.request_queue)
 
         if current_queue_size >= self.max_queue_size:
             logger.warning(f"[{request_id}] Queue full, rejecting request")
@@ -761,17 +524,10 @@ class MLXManager:
         # Create future for response
         future = asyncio.Future()
 
-        # Choose best endpoint
-        chosen_endpoint = await self._choose_best_endpoint(request)
-        if not chosen_endpoint:
-            raise HTTPException(status_code=503, detail="No healthy MLX endpoints available")
-
-        # Add to endpoint's priority queue
+        # Add to priority queue
         async with self.queue_lock:
             priority_item = (request.priority, self.request_counter, request, future, request_id)
-            if chosen_endpoint not in self.endpoint_queues:
-                self.endpoint_queues[chosen_endpoint] = []
-            heapq.heappush(self.endpoint_queues[chosen_endpoint], priority_item)
+            heapq.heappush(self.request_queue, priority_item)
             self.request_counter += 1
 
         async with self.request_lock:
@@ -780,71 +536,6 @@ class MLXManager:
         logger.debug(f"[{request_id}] Request queued with priority {request.priority} (active: {self.active_requests}, queued: {self.queued_requests})")
 
         return await future
-
-    async def process_classification_batch(self, requests: List[ClassificationRequest], phase: str, batch_idx: int) -> List[Dict[str, Any]]:
-        """Process a batch of classification requests."""
-        logger.info(f"Processing classification batch {batch_idx} with {len(requests)} {phase} requests")
-
-        tasks = []
-        for idx, req in enumerate(requests):
-            prompt = req.prompt if req.prompt else f"Analyze the following text:\n{req.text[:2000]}\n\nProvide your response:"
-
-            if phase == 'validation':
-                system_msg = "You are a precise classification assistant. Respond only with a number between 0.0 and 1.0."
-                max_tokens = 10
-                priority = 3
-            else:
-                system_msg = "You are a precise classification assistant. Respond only with the requested numbers."
-                max_tokens = 50
-                priority = 2
-
-            llm_request = LLMRequest(
-                messages=[
-                    LLMMessage(role="system", content=system_msg),
-                    LLMMessage(role="user", content=prompt)
-                ],
-                model=request.model,
-                temperature=0.1,
-                max_tokens=max_tokens,
-                priority=priority,
-                task_type=TaskType.TEXT
-            )
-
-            task = asyncio.create_task(self._process_single_classification(llm_request, req.segment_id, idx))
-            tasks.append(task)
-
-        results = await asyncio.gather(*tasks)
-        logger.info(f"Completed batch {batch_idx}: processed {len(results)} {phase} classifications")
-        return results
-
-    async def _process_single_classification(self, llm_request: LLMRequest, segment_id: int, idx: int) -> Dict[str, Any]:
-        """Process a single classification request."""
-        try:
-            result = await self.process_llm_request(llm_request)
-
-            response_text = result['response'].strip()
-            ids = []
-            if response_text != "0":
-                import re
-                numbers = re.findall(r'\d+', response_text)
-                ids = [int(num) for num in numbers if num.isdigit()]
-
-            return {
-                'segment_id': segment_id,
-                'index': idx,
-                'ids': ids,
-                'response': response_text,
-                'processing_time': result.get('processing_time', 0)
-            }
-        except Exception as e:
-            logger.error(f"Error processing classification for segment {segment_id}: {e}")
-            return {
-                'segment_id': segment_id,
-                'index': idx,
-                'ids': [],
-                'response': 'ERROR',
-                'error': str(e)
-            }
 
     def get_status(self) -> Dict[str, Any]:
         """Get current server status."""
@@ -862,18 +553,11 @@ class MLXManager:
                 "rank": MODEL_CONFIGS[model_name]['rank']
             }
 
-        endpoint_info = {}
-        for endpoint in self.mlx_endpoints:
-            endpoint_info[endpoint] = {
-                "healthy": self.endpoint_status.get(endpoint, False),
-                "active_requests": self.endpoint_active_requests.get(endpoint, 0),
-                "queued_requests": len(self.endpoint_queues.get(endpoint, [])),
-            }
-
         return {
             "status": "healthy",
             "models_loaded": list(self.loaded_models.keys()),
             "model_status": model_status,
+            "allowed_models": self.allowed_models,
             "active_requests": self.active_requests,
             "queued_requests": self.queued_requests,
             "total_requests_processed": self.total_requests,
@@ -881,8 +565,6 @@ class MLXManager:
             "max_queue_size": self.max_queue_size,
             "model_keep_warm_seconds": self.model_keep_warm_seconds,
             "uptime_seconds": time.time() - self.start_time,
-            "mlx_endpoints": self.mlx_endpoints,
-            "endpoint_status": endpoint_info,
             "requests_by_task_type": dict(self.requests_by_task_type),
         }
 
@@ -897,7 +579,7 @@ async def lifespan(app: FastAPI):
     global mlx_manager
 
     logger.info("=" * 60)
-    logger.info("Starting MLX LLM Server (Apple Silicon acceleration)")
+    logger.info("Starting MLX Model Server (Apple Silicon acceleration)")
     logger.info("=" * 60)
 
     max_concurrent = int(os.environ.get('LLM_MAX_CONCURRENT', 5))
@@ -907,11 +589,11 @@ async def lifespan(app: FastAPI):
 
     mlx_manager = MLXManager(max_concurrent=max_concurrent, max_queue_size=max_queue_size)
     await mlx_manager.initialize()
-    logger.info("MLX LLM Server ready")
+    logger.info("MLX Model Server ready")
 
     yield
 
-    logger.info("Shutting down MLX LLM Server...")
+    logger.info("Shutting down MLX Model Server...")
     if mlx_manager:
         if mlx_manager.unload_task:
             mlx_manager.unload_task.cancel()
@@ -922,17 +604,15 @@ async def lifespan(app: FastAPI):
         for processor in mlx_manager.queue_processors:
             processor.cancel()
         await asyncio.gather(*mlx_manager.queue_processors, return_exceptions=True)
-        if mlx_manager.http_client:
-            await mlx_manager.http_client.aclose()
         mlx_manager.executor.shutdown(wait=True)
-    logger.info("MLX LLM Server shutdown complete")
+    logger.info("MLX Model Server shutdown complete")
 
 
 # Create FastAPI app
 app = FastAPI(
-    title="MLX LLM Server for Stitch Processing",
-    description="Provides LLM access using MLX for Apple Silicon acceleration",
-    version="1.0.0",
+    title="MLX Model Server",
+    description="Local LLM inference using MLX for Apple Silicon acceleration",
+    version="2.0.0",
     lifespan=lifespan
 )
 
@@ -952,7 +632,7 @@ async def get_status():
 
 
 @app.post("/llm-request", response_model=LLMResponse)
-async def llm_request(request: LLMRequest, request_obj: Request):
+async def llm_request(request: LLMRequest):
     """Process LLM request with messages."""
     if not mlx_manager:
         raise HTTPException(status_code=503, detail="Server not initialized")
@@ -964,9 +644,6 @@ async def llm_request(request: LLMRequest, request_obj: Request):
     try:
         response_data = await mlx_manager.process_llm_request(request)
         total_time = time.time() - start_time
-
-        if mlx_manager.total_requests % 20 == 0:
-            logger.info(f"[{timestamp}] BATCH PROGRESS - Completed: {mlx_manager.total_requests}, Time: {total_time:.3f}s")
 
         return LLMResponse(
             response=response_data['response'],
@@ -984,51 +661,24 @@ async def llm_request(request: LLMRequest, request_obj: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/batch-classify")
-async def batch_classify(request: BatchClassifyRequest):
-    """Process batch of classification requests."""
-    if not mlx_manager:
-        raise HTTPException(status_code=503, detail="Server not initialized")
-
-    start_time = time.time()
-    batch_size = len(request.requests)
-
-    logger.info(f"Received batch {request.batch_idx} with {batch_size} {request.phase} requests")
-
-    try:
-        results = await mlx_manager.process_classification_batch(
-            request.requests,
-            request.phase,
-            request.batch_idx
-        )
-
-        results.sort(key=lambda x: x['index'])
-        total_time = time.time() - start_time
-        logger.info(f"Completed batch {request.batch_idx} in {total_time:.2f}s")
-
-        return {
-            'batch_idx': request.batch_idx,
-            'phase': request.phase,
-            'total_requests': batch_size,
-            'processing_time': total_time,
-            'results': results
-        }
-    except Exception as e:
-        logger.error(f"Error processing batch {request.batch_idx}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description='MLX Model Server')
+    parser.add_argument('--port', type=int, default=8004, help='Port to listen on')
+    parser.add_argument('--host', type=str, default='0.0.0.0', help='Host to bind to')
+    args = parser.parse_args()
+
     log_config = uvicorn.config.LOGGING_CONFIG
     log_config["loggers"]["uvicorn"]["level"] = "WARNING"
     log_config["loggers"]["uvicorn.error"]["level"] = "WARNING"
     log_config["loggers"]["uvicorn.access"]["level"] = "WARNING"
 
-    logger.info("Starting MLX LLM Server on port 8003")
+    logger.info(f"Starting MLX Model Server on {args.host}:{args.port}")
 
     uvicorn.run(
-        "llm_server_mlx:app",
-        host="0.0.0.0",
-        port=8003,
+        app,
+        host=args.host,
+        port=args.port,
         log_config=log_config
     )
