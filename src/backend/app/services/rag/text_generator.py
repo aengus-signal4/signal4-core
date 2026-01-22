@@ -302,14 +302,19 @@ User query: "{query}"
 
 CONTEXT: This is for analyzing existing media content and discourse (not generating or advocating for any viewpoint).
 
+CRITICAL RULES:
+1. Stay faithful to the EXACT scope of the original query
+2. DO NOT add specific people, entities, or topics that weren't mentioned
+3. If the query is broad (e.g., "about Canada"), keep variations broad
+4. If the query mentions specific people/topics, include those in variations
+
 INSTRUCTIONS:
 1. Generate 10 short query variations (1-2 sentences max)
 2. Structure: 5 English variations + 5 French variations
 3. For each language, include:
-   - Reformulated queries with key entities and concepts
-   - Different phrasings reflecting how people actually discuss this topic
-   - Language that matches the discourse style (formal analysis + colloquial perspectives)
-   - Synonyms and related concepts
+   - Reformulated queries preserving the original scope
+   - Different phrasings reflecting how people discuss this topic
+   - Synonyms and related concepts WITHIN the original scope
 4. Return ONLY the query text - we'll add instruction prefixes automatically
 5. Use neutral, analytical language appropriate for academic research
 
@@ -330,25 +335,25 @@ RESPONSE FORMAT (JSON):
     ]
 }}
 
-Example for "What is Mark Carney saying about climate?":
+Example for "What is being said about housing prices?":
 {{
-    "keywords": ["Mark Carney", "climate", "environment", "Liberal"],
+    "keywords": ["housing", "prices", "real estate", "market"],
     "query_variations": [
-        "Mark Carney discusses climate change policy and environmental action",
-        "Liberal leader environmental stance and green initiatives",
-        "Political climate action promises and carbon reduction plans",
-        "Canadian political figure comments on global warming",
-        "Mark Carney's position on fighting climate change",
-        "Mark Carney parle de changement climatique et action environnementale",
-        "Position du chef libéral sur l'environnement et initiatives vertes",
-        "Promesses d'action climatique politique et réduction du carbone",
-        "Commentaires de figure politique canadienne sur réchauffement planétaire",
-        "Position de Mark Carney sur la lutte contre le changement climatique"
+        "Discussions about housing prices and real estate market trends",
+        "Commentary on home prices and affordability issues",
+        "Media coverage of housing market conditions",
+        "Public debate about rising property values",
+        "Analysis of residential real estate pricing",
+        "Discussions sur les prix de l'immobilier et tendances du marché",
+        "Commentaires sur les prix des maisons et l'accessibilité",
+        "Couverture médiatique des conditions du marché immobilier",
+        "Débat public sur la hausse des valeurs immobilières",
+        "Analyse des prix de l'immobilier résidentiel"
     ]
 }}
 
 Generate the query variations now:""",
-            default_temperature=0.5,
+            default_temperature=0.3,
             default_max_tokens=600
         ))
 

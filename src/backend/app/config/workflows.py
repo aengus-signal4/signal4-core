@@ -161,12 +161,12 @@ WORKFLOWS: Dict[str, List[Dict[str, Any]]] = {
             "step": "rerank_segments",
             "config": {
                 "best_per_episode": True,
-                "similarity_weight": 0.40,
+                "similarity_weight": 0.35,
                 "popularity_weight": 0.25,
-                "recency_weight": 0.20,
+                "recency_weight": 0.25,
                 "single_speaker_weight": 0.08,
                 "named_speaker_weight": 0.07,
-                "similarity_floor": 0.55
+                "similarity_floor": 0.48
             }
         },
         {
