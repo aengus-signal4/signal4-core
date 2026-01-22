@@ -840,7 +840,7 @@ class EmbeddingHydrator:
 
         if total_needing == 0:
             embedding_type = "alternative (4B)" if (generate_alternative and not generate_primary) else "primary (0.6B)"
-            logger.info(f"✓ No {embedding_type} embeddings needed")
+            logger.info(f"No {embedding_type} embeddings needed")
             return {
                 'status': 'success',
                 'primary_generated': 0,
@@ -851,12 +851,12 @@ class EmbeddingHydrator:
         # Determine how many to process this run
         segments_to_process = total_needing
         if max_per_run and total_needing > max_per_run:
-            logger.info(f"📊 Found {total_needing:,} segments needing {embedding_type} embeddings, limiting to {max_per_run:,}")
+            logger.info(f"Found {total_needing:,} segments needing {embedding_type} embeddings, limiting to {max_per_run:,}")
             segments_to_process = max_per_run
         else:
-            logger.info(f"📊 Found {total_needing:,} segments needing {embedding_type} embeddings")
+            logger.info(f"Found {total_needing:,} segments needing {embedding_type} embeddings")
 
-        logger.info(f"📦 Processing up to {segments_to_process:,} segments in batches of {batch_size}")
+        logger.info(f"Processing up to {segments_to_process:,} segments in batches of {batch_size}")
 
         # Process segments in batches using streaming pagination
         # Fetch batches directly from DB instead of pre-loading all IDs
@@ -1225,7 +1225,7 @@ class EmbeddingHydrator:
 
                 # Explicit memory cleanup after EVERY batch to avoid accumulation
                 cleanup_start = time.time()
-                del batch_texts, segments, update_data
+                del batch_texts, segments
                 # Embeddings already deleted before database operations
                 # Note: values, cursor, connection already deleted in database block
                 gc.collect()
@@ -1245,34 +1245,34 @@ class EmbeddingHydrator:
                 # AGGRESSIVE MEMORY MANAGEMENT: Reload model every N batches to force complete memory reset
                 # MPS has memory fragmentation issues that empty_cache() doesn't fully resolve
                 batches_processed = (total_primary_generated + total_alternative_generated) // batch_size
-                    if batches_processed > 0 and batches_processed % 20 == 0:  # Every 20 batches
-                        logger.info(f"Reloading model after {batches_processed} batches to reset MPS memory...")
-                        if generate_primary and self.primary_model:
-                            del self.primary_model
-                            self.primary_model = None
-                            gc.collect()
-                            if torch.backends.mps.is_available():
-                                torch.mps.synchronize()
-                                torch.mps.empty_cache()
-                            gc.collect()
-                            # CRITICAL: Wait for MPS to fully release memory before reloading
-                            logger.info("Waiting 5s for MPS memory release...")
-                            time.sleep(5)
-                            self._init_primary_model()
-                            logger.info("Primary model reloaded")
-                        if generate_alternative and self.alternative_model_obj:
-                            del self.alternative_model_obj
-                            self.alternative_model_obj = None
-                            gc.collect()
-                            if torch.backends.mps.is_available():
-                                torch.mps.synchronize()
-                                torch.mps.empty_cache()
-                            gc.collect()
-                            # CRITICAL: Wait for MPS to fully release memory before reloading
-                            logger.info("Waiting 5s for MPS memory release...")
-                            time.sleep(5)
-                            self._init_alternative_model()
-                            logger.info("Alternative model reloaded")
+                if batches_processed > 0 and batches_processed % 20 == 0:  # Every 20 batches
+                    logger.info(f"Reloading model after {batches_processed} batches to reset MPS memory...")
+                    if generate_primary and self.primary_model:
+                        del self.primary_model
+                        self.primary_model = None
+                        gc.collect()
+                        if torch.backends.mps.is_available():
+                            torch.mps.synchronize()
+                            torch.mps.empty_cache()
+                        gc.collect()
+                        # CRITICAL: Wait for MPS to fully release memory before reloading
+                        logger.info("Waiting 5s for MPS memory release...")
+                        time.sleep(5)
+                        self._init_primary_model()
+                        logger.info("Primary model reloaded")
+                    if generate_alternative and self.alternative_model_obj:
+                        del self.alternative_model_obj
+                        self.alternative_model_obj = None
+                        gc.collect()
+                        if torch.backends.mps.is_available():
+                            torch.mps.synchronize()
+                            torch.mps.empty_cache()
+                        gc.collect()
+                        # CRITICAL: Wait for MPS to fully release memory before reloading
+                        logger.info("Waiting 5s for MPS memory release...")
+                        time.sleep(5)
+                        self._init_alternative_model()
+                        logger.info("Alternative model reloaded")
 
         logger.info(f"Hydration complete: {total_primary_generated} primary embeddings, {total_alternative_generated} alternative embeddings")
 
@@ -1368,7 +1368,7 @@ class EmbeddingHydrator:
                 total_count = min(total_count, effective_limit)
 
             if total_count == 0:
-                logger.info("✓ No content needs description embeddings")
+                logger.info("No content needs description embeddings")
                 return {
                     'status': 'success',
                     'embedded': 0,
@@ -1376,7 +1376,7 @@ class EmbeddingHydrator:
                     'total': 0
                 }
 
-            logger.info(f"📊 Found {total_count:,} content items needing description embeddings")
+            logger.info(f"Found {total_count:,} content items needing description embeddings")
 
         # Process in batches
         offset = 0
@@ -1501,7 +1501,7 @@ IMPORTANT:
         ''',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--batch-size", type=int, default=128, help="Batch size for embedding generation (default: 128)")
+    parser.add_argument("--batch-size", type=int, default=32, help="Batch size for embedding generation (default: 32)")
     parser.add_argument("--project", type=str, default=None, help="Filter to specific project")
     parser.add_argument("--primary-only", action="store_true", help="Only generate primary (0.6B) embeddings")
     parser.add_argument("--alternative-only", action="store_true", help="Only generate alternative (4B) embeddings")
