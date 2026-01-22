@@ -13,6 +13,7 @@ from sqlalchemy import (
     Text, Boolean, Index, ARRAY, UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from typing import Dict
@@ -93,6 +94,7 @@ class Content(Base):
     channel_url = Column(String, nullable=False)
     title = Column(String)
     description = Column(Text)
+    description_embedding = Column(Vector(1024), nullable=True)  # Embedding of description for semantic similarity
     publish_date = Column(DateTime)
     download_date = Column(DateTime, default=datetime.utcnow)
     duration = Column(Float)  # in seconds

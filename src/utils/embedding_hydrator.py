@@ -812,7 +812,8 @@ class EmbeddingHydrator:
                           alternative_only: bool = False,
                           alt_first: bool = False,
                           force_reembed: bool = False,
-                          stitch_versions: Optional[dict] = None) -> dict:
+                          stitch_versions: Optional[dict] = None,
+                          max_per_run: Optional[int] = None) -> dict:
         """Hydrate embeddings for a batch of segments.
 
         Args:
@@ -823,9 +824,10 @@ class EmbeddingHydrator:
             alt_first: Prioritize alternative embeddings for projects that need them
             force_reembed: Re-generate embeddings even if version exists
             stitch_versions: Dict with 'exact' and 'prefix' lists for version filtering
+            max_per_run: Maximum embeddings to generate in this run (None = unlimited)
         """
         logger.info(f"Starting batch hydration (batch_size={batch_size}, project={project}, "
-                   f"alt_first={alt_first}, force_reembed={force_reembed}, stitch_versions={stitch_versions})")
+                   f"alt_first={alt_first}, force_reembed={force_reembed}, stitch_versions={stitch_versions}, max_per_run={max_per_run})")
 
         # Determine what to generate based on flags and mode
         if alt_first and not primary_only:
@@ -888,8 +890,16 @@ class EmbeddingHydrator:
             }
 
         embedding_type = "alternative (4B)" if (generate_alternative and not generate_primary) else "primary (0.6B)"
-        logger.info(f"📊 Found {len(all_segment_ids):,} segments needing {embedding_type} embeddings")
-        logger.info(f"📦 Processing in batches of {batch_size}")
+        total_needing = len(all_segment_ids)
+
+        # Apply max_per_run limit if specified
+        if max_per_run and len(all_segment_ids) > max_per_run:
+            logger.info(f"📊 Found {total_needing:,} segments needing {embedding_type} embeddings, limiting to {max_per_run:,}")
+            all_segment_ids = all_segment_ids[:max_per_run]
+        else:
+            logger.info(f"📊 Found {total_needing:,} segments needing {embedding_type} embeddings")
+
+        logger.info(f"📦 Processing {len(all_segment_ids):,} segments in batches of {batch_size}")
 
         # Process segments in batches using the ID list
         total_primary_generated = 0
@@ -1425,35 +1435,199 @@ class EmbeddingHydrator:
         }
 
 
+    async def embed_descriptions(self, batch_size: int = 100, limit: Optional[int] = None, max_per_run: Optional[int] = None) -> dict:
+        """
+        Embed descriptions for all content that has is_embedded=True but no description_embedding.
+        Content is processed in descending order by publish_date (newest first).
+
+        Args:
+            batch_size: Number of content items to process per batch
+            limit: Optional limit on total items to process (for testing)
+            max_per_run: Maximum embeddings to generate in this run (None = unlimited)
+
+        Returns:
+            Dictionary with status and counts
+        """
+        # Use max_per_run as effective limit if provided
+        effective_limit = limit
+        if max_per_run:
+            if effective_limit:
+                effective_limit = min(effective_limit, max_per_run)
+            else:
+                effective_limit = max_per_run
+
+        logger.info(f"Starting description embedding (batch_size={batch_size}, limit={effective_limit})")
+
+        # Initialize primary model (we use the same model as segment embeddings)
+        self._init_primary_model()
+
+        total_embedded = 0
+        total_skipped = 0
+
+        with get_session() as session:
+            # Build query for content needing description embeddings
+            # Order by publish_date DESC (newest first) to prioritize recent content
+            query = session.query(Content).filter(
+                Content.is_embedded == True,
+                Content.description.isnot(None),
+                Content.description != '',
+                Content.description_embedding.is_(None)
+            ).order_by(Content.publish_date.desc().nulls_last())
+
+            if effective_limit:
+                query = query.limit(effective_limit)
+
+            # Get total count
+            count_query = session.query(Content).filter(
+                Content.is_embedded == True,
+                Content.description.isnot(None),
+                Content.description != '',
+                Content.description_embedding.is_(None)
+            )
+            total_count = count_query.count()
+
+            if effective_limit:
+                total_count = min(total_count, effective_limit)
+
+            if total_count == 0:
+                logger.info("✓ No content needs description embeddings")
+                return {
+                    'status': 'success',
+                    'embedded': 0,
+                    'skipped': 0,
+                    'total': 0
+                }
+
+            logger.info(f"📊 Found {total_count:,} content items needing description embeddings")
+
+        # Process in batches
+        offset = 0
+        with tqdm(total=total_count, desc="Embedding descriptions", unit="item") as pbar:
+            while True:
+                with get_session() as session:
+                    # Fetch batch - order by publish_date DESC (newest first)
+                    query = session.query(Content).filter(
+                        Content.is_embedded == True,
+                        Content.description.isnot(None),
+                        Content.description != '',
+                        Content.description_embedding.is_(None)
+                    ).order_by(Content.publish_date.desc().nulls_last()).limit(batch_size)
+
+                    content_items = query.all()
+
+                    if not content_items:
+                        break
+
+                    # Prepare texts for embedding
+                    descriptions = []
+                    content_ids = []
+                    for content in content_items:
+                        desc = content.description.strip() if content.description else ''
+                        if desc:
+                            descriptions.append(desc)
+                            content_ids.append(content.id)
+                        else:
+                            total_skipped += 1
+
+                    if not descriptions:
+                        pbar.update(len(content_items))
+                        continue
+
+                    # Generate embeddings
+                    try:
+                        # Clear MPS cache before embedding
+                        if torch.backends.mps.is_available():
+                            torch.mps.synchronize()
+                            torch.mps.empty_cache()
+                        gc.collect()
+
+                        if self.use_server:
+                            # Use embedding server
+                            embeddings = self._generate_embeddings_via_server(descriptions)
+                        else:
+                            # Use local model
+                            with torch.no_grad():
+                                embeddings = self.primary_model.encode(
+                                    descriptions,
+                                    convert_to_numpy=True,
+                                    show_progress_bar=False,
+                                    batch_size=32
+                                )
+
+                        embeddings = np.asarray(embeddings, dtype=np.float32)
+
+                        # Update database
+                        for idx, content_id in enumerate(content_ids):
+                            content = session.query(Content).filter(Content.id == content_id).first()
+                            if content:
+                                content.description_embedding = embeddings[idx].tolist()
+                                total_embedded += 1
+
+                        session.commit()
+
+                        # Clear memory
+                        del embeddings, descriptions
+                        gc.collect()
+                        if torch.backends.mps.is_available():
+                            torch.mps.empty_cache()
+
+                    except Exception as e:
+                        logger.error(f"Error embedding batch: {e}", exc_info=True)
+                        session.rollback()
+                        # Continue to next batch
+                        continue
+
+                    pbar.update(len(content_items))
+
+                # Check if we've hit the limit
+                if effective_limit and total_embedded >= effective_limit:
+                    break
+
+        logger.info(f"Description embedding complete: {total_embedded} embedded, {total_skipped} skipped")
+
+        return {
+            'status': 'success',
+            'embedded': total_embedded,
+            'skipped': total_skipped,
+            'total': total_embedded + total_skipped
+        }
+
+
 # CLI entry point for scheduled task execution
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description='Batch generate embeddings for segments',
         epilog='''
 Examples:
-  # Default: Generate ALL primary (0.6B) embeddings, then ALL alternative (4B)
+  # Default: Generate up to 10,000 embeddings total
+  # Order: segment embeddings first, then description embeddings (newest content first)
   uv run python -m src.utils.embedding_hydrator
 
-  # Use centralized embedding server for primary embeddings (shares model with backend)
-  uv run python -m src.utils.embedding_hydrator --use-server --primary-only
-
-  # Alternative first: Generate 4B embeddings first, then 0.6B
-  uv run python -m src.utils.embedding_hydrator --alt-first
-
-  # Only primary (0.6B) embeddings
+  # Only segment embeddings (primary 0.6B model, no descriptions)
   uv run python -m src.utils.embedding_hydrator --primary-only
 
-  # Only alternative (4B) embeddings for configured projects
+  # Only segment embeddings (alternative 4B model for configured projects)
   uv run python -m src.utils.embedding_hydrator --alternative-only
 
-  # Larger batches for faster processing
-  uv run python -m src.utils.embedding_hydrator --batch-size 256
+  # Only description embeddings (skip segments)
+  uv run python -m src.utils.embedding_hydrator --embed-descriptions
+
+  # Process more embeddings per run
+  uv run python -m src.utils.embedding_hydrator --max-per-run 20000
+
+  # Process unlimited embeddings (no cap)
+  uv run python -m src.utils.embedding_hydrator --max-per-run 0
+
+  # Use local model instead of server (not recommended)
+  uv run python -m src.utils.embedding_hydrator --no-server
 
 IMPORTANT:
-  - Default: Runs BOTH phases (primary 0.6B, then alternative 4B)
-  - --alt-first: Just changes order (4B first, then 0.6B)
-  - --primary-only or --alternative-only: Run only one phase
-  - --use-server: Use centralized embedding server (recommended when backend is running)
+  - Default max-per-run is 10,000 embeddings (use --max-per-run 0 for unlimited)
+  - Default order: segment embeddings FIRST, then description embeddings (by publish_date DESC)
+  - The 10k budget is shared across both phases
+  - --primary-only or --alternative-only: Only segment embeddings (skips descriptions)
+  - --embed-descriptions: Only description embeddings (skips segments)
+  - --no-server: Use local model instead of embedding server
         ''',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -1464,7 +1638,10 @@ IMPORTANT:
     parser.add_argument("--alt-first", action="store_true", help="Generate alternative (4B) embeddings first, then primary (0.6B)")
     parser.add_argument("--force-reembed", action="store_true", help="Re-generate embeddings even if version exists")
     parser.add_argument("--stitch-version", type=str, default=None, help="Filter to specific stitch version prefix (e.g., 'stitch_v14')")
-    parser.add_argument("--use-server", action="store_true", help="Use centralized embedding server for primary (0.6B) embeddings")
+    parser.add_argument("--no-server", action="store_true", help="Use local model instead of embedding server (server is used by default)")
+    parser.add_argument("--embed-descriptions", action="store_true", help="Embed content descriptions (for semantic related episodes)")
+    parser.add_argument("--limit", type=int, default=None, help="Limit number of items to process (for testing)")
+    parser.add_argument("--max-per-run", type=int, default=10000, help="Maximum embeddings to generate per run cycle (default: 10000)")
 
     args = parser.parse_args()
 
@@ -1473,100 +1650,116 @@ IMPORTANT:
     if args.stitch_version:
         stitch_versions = {'prefix': [args.stitch_version]}
 
-    # Run hydration
-    hydrator = EmbeddingHydrator(use_server=args.use_server)
+    # Handle max_per_run: 0 means unlimited (None)
+    max_per_run = args.max_per_run if args.max_per_run > 0 else None
 
-    # Default behavior: do primary first, then alternative
-    # --alt-first: do alternative first, then primary
-    # --primary-only: only do primary
-    # --alternative-only: only do alternative
+    # Run hydration - use server by default unless --no-server is specified
+    use_server = not args.no_server
+    hydrator = EmbeddingHydrator(use_server=use_server)
+
+    # Track total embeddings generated across all phases
+    total_generated = 0
+    remaining_budget = max_per_run
+
+    # Handle --embed-descriptions ONLY mode (skip segments)
+    if args.embed_descriptions:
+        logger.info("Running description embedding mode (only)...")
+        result = asyncio.run(hydrator.embed_descriptions(
+            batch_size=args.batch_size,
+            limit=args.limit,
+            max_per_run=max_per_run
+        ))
+        logger.info(f"Description embedding result: {result}")
+
+        # Print machine-readable summary for orchestrator
+        import json
+        summary = {
+            'description_embeddings_generated': result.get('embedded', 0),
+            'skipped': result.get('skipped', 0),
+            'total_processed': result.get('total', 0)
+        }
+        print(f"TASK_SUMMARY: {json.dumps(summary)}")
+
+        # Exit with appropriate code
+        sys.exit(0 if result.get('status') == 'success' else 1)
+
+    # Default behavior: segments first, then descriptions (all within max_per_run budget)
+    # --primary-only: only do primary segment embeddings
+    # --alternative-only: only do alternative segment embeddings
+
+    result_primary = {'primary_generated': 0, 'total_segments': 0}
+    result_alt = {'alternative_generated': 0, 'total_segments': 0}
+    result_desc = {'embedded': 0}
 
     if args.primary_only:
-        # Only primary
-        result = asyncio.run(hydrator.hydrate_batch(
+        # Only primary segment embeddings
+        logger.info("Generating primary (0.6B) segment embeddings...")
+        result_primary = asyncio.run(hydrator.hydrate_batch(
             batch_size=args.batch_size,
             project=args.project,
             primary_only=True,
             alternative_only=False,
             alt_first=False,
             force_reembed=args.force_reembed,
-            stitch_versions=stitch_versions
+            stitch_versions=stitch_versions,
+            max_per_run=remaining_budget
         ))
+        total_generated += result_primary.get('primary_generated', 0)
+
     elif args.alternative_only:
-        # Only alternative
-        result = asyncio.run(hydrator.hydrate_batch(
+        # Only alternative segment embeddings
+        logger.info("Generating alternative (4B) segment embeddings...")
+        result_alt = asyncio.run(hydrator.hydrate_batch(
             batch_size=args.batch_size,
             project=args.project,
             primary_only=False,
             alternative_only=True,
             alt_first=True,
             force_reembed=args.force_reembed,
-            stitch_versions=stitch_versions
+            stitch_versions=stitch_versions,
+            max_per_run=remaining_budget
         ))
+        total_generated += result_alt.get('alternative_generated', 0)
+
     else:
-        # Do both: order depends on --alt-first
-        if args.alt_first:
-            # Alternative first
-            logger.info("Phase 1: Generating alternative (4B) embeddings...")
-            result_alt = asyncio.run(hydrator.hydrate_batch(
-                batch_size=args.batch_size,
-                project=args.project,
-                primary_only=False,
-                alternative_only=True,
-                alt_first=True,
-                force_reembed=args.force_reembed,
-                stitch_versions=stitch_versions
-            ))
+        # Default: segments first, then descriptions
+        # Phase 1: Primary segment embeddings
+        logger.info("Phase 1: Generating primary (0.6B) segment embeddings...")
+        result_primary = asyncio.run(hydrator.hydrate_batch(
+            batch_size=args.batch_size,
+            project=args.project,
+            primary_only=True,
+            alternative_only=False,
+            alt_first=False,
+            force_reembed=args.force_reembed,
+            stitch_versions=stitch_versions,
+            max_per_run=remaining_budget
+        ))
+        total_generated += result_primary.get('primary_generated', 0)
 
-            logger.info("Phase 2: Generating primary (0.6B) embeddings...")
-            result_primary = asyncio.run(hydrator.hydrate_batch(
-                batch_size=args.batch_size,
-                project=args.project,
-                primary_only=True,
-                alternative_only=False,
-                alt_first=False,
-                force_reembed=args.force_reembed,
-                stitch_versions=stitch_versions
-            ))
+        # Update remaining budget
+        if remaining_budget:
+            remaining_budget = max(0, remaining_budget - result_primary.get('primary_generated', 0))
+            if remaining_budget == 0:
+                logger.info(f"Budget exhausted after segment embeddings ({total_generated:,} generated)")
 
-            # Combine results
-            result = {
-                'status': 'success',
-                'primary_generated': result_primary.get('primary_generated', 0),
-                'alternative_generated': result_alt.get('alternative_generated', 0),
-                'total_segments': result_primary.get('total_segments', 0) + result_alt.get('total_segments', 0)
-            }
-        else:
-            # Primary first (default)
-            logger.info("Phase 1: Generating primary (0.6B) embeddings...")
-            result_primary = asyncio.run(hydrator.hydrate_batch(
+        # Phase 2: Description embeddings (if budget remains)
+        if remaining_budget is None or remaining_budget > 0:
+            logger.info("Phase 2: Generating content description embeddings (newest first)...")
+            result_desc = asyncio.run(hydrator.embed_descriptions(
                 batch_size=args.batch_size,
-                project=args.project,
-                primary_only=True,
-                alternative_only=False,
-                alt_first=False,
-                force_reembed=args.force_reembed,
-                stitch_versions=stitch_versions
+                max_per_run=remaining_budget
             ))
+            total_generated += result_desc.get('embedded', 0)
 
-            logger.info("Phase 2: Generating alternative (4B) embeddings...")
-            result_alt = asyncio.run(hydrator.hydrate_batch(
-                batch_size=args.batch_size,
-                project=args.project,
-                primary_only=False,
-                alternative_only=True,
-                alt_first=True,
-                force_reembed=args.force_reembed,
-                stitch_versions=stitch_versions
-            ))
-
-            # Combine results
-            result = {
-                'status': 'success',
-                'primary_generated': result_primary.get('primary_generated', 0),
-                'alternative_generated': result_alt.get('alternative_generated', 0),
-                'total_segments': result_primary.get('total_segments', 0) + result_alt.get('total_segments', 0)
-            }
+    # Combine results
+    result = {
+        'status': 'success',
+        'primary_generated': result_primary.get('primary_generated', 0),
+        'alternative_generated': result_alt.get('alternative_generated', 0),
+        'description_embeddings': result_desc.get('embedded', 0),
+        'total_embeddings': total_generated
+    }
 
     logger.info(f"Hydration result: {result}")
 
@@ -1575,7 +1768,8 @@ IMPORTANT:
     summary = {
         'primary_embeddings_generated': result.get('primary_generated', 0),
         'alternative_embeddings_generated': result.get('alternative_generated', 0),
-        'total_segments_processed': result.get('total_segments', 0)
+        'description_embeddings_generated': result.get('description_embeddings', 0),
+        'total_embeddings_generated': result.get('total_embeddings', 0)
     }
     print(f"TASK_SUMMARY: {json.dumps(summary)}")
 
