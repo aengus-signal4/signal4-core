@@ -2,8 +2,11 @@
 Embedding Service
 =================
 
-Client for the centralized Embedding Server.
+Client for the centralized Embedding Server with local fallback.
 Sends embedding requests to the server with high priority (1) for interactive queries.
+
+If the embedding server is unavailable, falls back to loading the model locally.
+This ensures the backend can still function even if the embedding server isn't running.
 
 Separated from LLMService to maintain single responsibility principle:
 - EmbeddingService: Query -> embedding vectors (semantic search)
@@ -20,20 +23,95 @@ import httpx
 import numpy as np
 
 from ..utils.backend_logger import get_logger
+from src.utils.config import load_config
 
 logger = get_logger("embedding_service")
 
-# Embedding server configuration
-EMBEDDING_SERVER_HOST = os.getenv('EMBEDDING_SERVER_HOST', '127.0.0.1')
-EMBEDDING_SERVER_PORT = int(os.getenv('EMBEDDING_SERVER_PORT', '8005'))
+# Load embedding server configuration from config.yaml
+_config = load_config()
+_embedding_config = _config.get('services', {}).get('embedding_server', {})
+EMBEDDING_SERVER_HOST = _embedding_config.get('host', '127.0.0.1') or '127.0.0.1'
+EMBEDDING_SERVER_PORT = _embedding_config.get('port', 8005)
 EMBEDDING_SERVER_URL = f"http://{EMBEDDING_SERVER_HOST}:{EMBEDDING_SERVER_PORT}"
+
+# Log the resolved embedding server URL at module load time
+logger.info(f"Embedding server configured at: {EMBEDDING_SERVER_URL}")
 
 # Backend requests get highest priority (1) to jump ahead of batch hydration (5)
 BACKEND_PRIORITY = 1
 
+# Qwen instruction prefix for query embeddings
+QWEN_QUERY_INSTRUCTION = "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: "
+
+# Global local model instance (shared across all EmbeddingService instances)
+_local_model = None
+_local_model_lock = asyncio.Lock()
+
+
+async def _get_local_model(model_name: str = 'Qwen/Qwen3-Embedding-0.6B'):
+    """
+    Get or initialize the local embedding model (singleton pattern).
+
+    Only loads the model if the embedding server is unavailable.
+    """
+    global _local_model
+
+    async with _local_model_lock:
+        if _local_model is not None:
+            return _local_model
+
+        logger.info(f"Loading local embedding model: {model_name}...")
+        start_time = time.time()
+
+        try:
+            # Set environment variables for optimal performance
+            os.environ.setdefault('OMP_NUM_THREADS', '1')
+            os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
+            os.environ.setdefault('PYTORCH_MPS_HIGH_WATERMARK_RATIO', '0.0')
+            os.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
+
+            import torch
+            from sentence_transformers import SentenceTransformer
+
+            # Determine device
+            if torch.backends.mps.is_available():
+                device = torch.device("mps")
+                logger.info("Using MPS (Apple Silicon GPU) for local model")
+            elif torch.cuda.is_available():
+                device = torch.device("cuda")
+                logger.info("Using CUDA GPU for local model")
+            else:
+                device = torch.device("cpu")
+                logger.info("Using CPU for local model")
+
+            # Load model
+            model = SentenceTransformer(
+                model_name,
+                trust_remote_code=True,
+                local_files_only=True
+            )
+            model = model.to(device)
+
+            # Warm up
+            _ = model.encode(["warmup test"], convert_to_numpy=True)
+
+            load_time = time.time() - start_time
+            logger.info(f"✓ Local embedding model loaded in {load_time:.1f}s (device: {device})")
+
+            _local_model = model
+            return _local_model
+
+        except Exception as e:
+            logger.error(f"Failed to load local embedding model: {e}", exc_info=True)
+            raise RuntimeError(f"Failed to load local embedding model: {e}") from e
+
 
 class EmbeddingService:
-    """Service for converting text queries to embeddings via the centralized Embedding Server."""
+    """
+    Service for converting text queries to embeddings.
+
+    Tries the centralized Embedding Server first, falls back to local model if unavailable.
+    """
 
     def __init__(self, config, dashboard_id: str = 'unknown'):
         """
@@ -47,6 +125,7 @@ class EmbeddingService:
         self.dashboard_id = dashboard_id
         self._client: Optional[httpx.AsyncClient] = None
         self._server_healthy = False
+        self._use_local_fallback = False  # Set to True if server is unavailable
 
         logger.info(f"[{self.dashboard_id}] EmbeddingService initialized (server: {EMBEDDING_SERVER_URL})")
 
@@ -85,11 +164,46 @@ class EmbeddingService:
         logger.error(f"[{self.dashboard_id}] Embedding server not available after {timeout}s")
         return False
 
+    async def _encode_local(self, queries: List[str]) -> List[np.ndarray]:
+        """
+        Encode queries using the local embedding model (fallback).
+
+        Args:
+            queries: List of query strings
+
+        Returns:
+            List of embedding vectors (numpy arrays)
+        """
+        t_start = time.time()
+
+        model = await _get_local_model()
+
+        # Add Qwen instruction prefix for queries
+        prefixed_queries = [QWEN_QUERY_INSTRUCTION + q for q in queries]
+
+        # Run encoding in thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        embeddings = await loop.run_in_executor(
+            None,
+            lambda: model.encode(prefixed_queries, convert_to_numpy=True, normalize_embeddings=True)
+        )
+
+        t_end = time.time()
+        total_ms = (t_end - t_start) * 1000
+
+        logger.info(
+            f"[{self.dashboard_id}] Embedded {len(queries)} queries locally "
+            f"in {total_ms:.0f}ms"
+        )
+
+        return [np.array(emb, dtype=np.float32) for emb in embeddings]
+
     async def encode_queries(self, queries: List[str]) -> List[np.ndarray]:
         """
-        Convert multiple queries to embeddings via the Embedding Server.
+        Convert multiple queries to embeddings.
 
-        Backend requests use priority 1 to jump ahead of batch hydration requests.
+        Tries the Embedding Server first (priority 1 for backend requests).
+        Falls back to local model if server is unavailable.
 
         Args:
             queries: List of query strings
@@ -103,12 +217,24 @@ class EmbeddingService:
         if not queries:
             return []
 
+        # If we've already determined to use local fallback, skip server check
+        if self._use_local_fallback:
+            return await self._encode_local(queries)
+
         try:
             t_start = time.time()
 
-            # Ensure server is available
+            # Quick health check (5 second timeout)
             if not self._server_healthy:
-                await self._wait_for_server(timeout=30.0)
+                server_available = await self._wait_for_server(timeout=5.0)
+                if not server_available:
+                    # Server unavailable - switch to local fallback
+                    logger.warning(
+                        f"[{self.dashboard_id}] Embedding server unavailable, "
+                        f"falling back to local model"
+                    )
+                    self._use_local_fallback = True
+                    return await self._encode_local(queries)
 
             client = await self._get_client()
 
@@ -148,13 +274,16 @@ class EmbeddingService:
 
             return [np.array(emb, dtype=np.float32) for emb in embeddings]
 
-        except httpx.TimeoutException as e:
-            logger.error(f"[{self.dashboard_id}] Embedding server timeout: {e}")
-            raise RuntimeError(f"Embedding server timeout: {e}") from e
-        except httpx.ConnectError as e:
-            logger.error(f"[{self.dashboard_id}] Cannot connect to embedding server: {e}")
+        except (httpx.TimeoutException, httpx.ConnectError) as e:
+            # Server unavailable - switch to local fallback
+            logger.warning(
+                f"[{self.dashboard_id}] Embedding server connection failed ({type(e).__name__}), "
+                f"falling back to local model"
+            )
             self._server_healthy = False
-            raise RuntimeError(f"Cannot connect to embedding server at {EMBEDDING_SERVER_URL}: {e}") from e
+            self._use_local_fallback = True
+            return await self._encode_local(queries)
+
         except Exception as e:
             logger.error(f"[{self.dashboard_id}] Error generating embeddings: {e}", exc_info=True)
             raise RuntimeError(f"Failed to generate embeddings: {e}") from e

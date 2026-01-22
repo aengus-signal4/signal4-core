@@ -32,12 +32,23 @@ from src.database.session import get_session
 from src.database.models import Content, EmbeddingSegment
 from sentence_transformers import SentenceTransformer
 import torch
+from collections import namedtuple
 
 logger = setup_worker_logger('embedding_hydrator')
 
-# Embedding server configuration
-EMBEDDING_SERVER_HOST = os.getenv('EMBEDDING_SERVER_HOST', '127.0.0.1')
-EMBEDDING_SERVER_PORT = int(os.getenv('EMBEDDING_SERVER_PORT', '8005'))
+# Define namedtuple ONCE at module level (not inside loop)
+SegmentData = namedtuple('SegmentData', ['id', 'text', 'embedding_version', 'embedding_alt_model', 'meta_data'])
+
+# Load embedding server configuration from config.yaml
+# When running on worker5 (same host as embedding server), host will be the worker5 IP
+# but we connect to localhost since we're on the same machine
+from src.utils.config import load_config
+_config = load_config()
+_embedding_config = _config.get('services', {}).get('embedding_server', {})
+# For hydrator: if we're running on the same host as the embedding server, use localhost
+# The scheduled task runs on the same host as the embedding server (both on worker5)
+EMBEDDING_SERVER_HOST = '127.0.0.1'  # Always localhost - hydrator runs on same host as server
+EMBEDDING_SERVER_PORT = _embedding_config.get('port', 8005)
 EMBEDDING_SERVER_URL = f"http://{EMBEDDING_SERVER_HOST}:{EMBEDDING_SERVER_PORT}"
 
 # Hydration requests use lower priority (5) to allow backend queries (1) to jump ahead
@@ -105,6 +116,39 @@ class EmbeddingHydrator:
             logger.info(f"Primary model (will load on first use): {self.embedding_model}")
         if self.alternative_model:
             logger.info(f"Alternative model (will load on first use): {self.alternative_model}")
+
+    def cleanup(self):
+        """Release all resources - models, HTTP client, and clear caches."""
+        logger.info("Cleaning up embedding hydrator resources...")
+
+        # Close HTTP client if open
+        if self._http_client is not None and not self._http_client.is_closed:
+            self._http_client.close()
+            self._http_client = None
+            logger.info("HTTP client closed")
+
+        # Unload primary model
+        if self.primary_model is not None:
+            del self.primary_model
+            self.primary_model = None
+            logger.info("Primary model unloaded")
+
+        # Unload alternative model
+        if self.alternative_model_obj is not None:
+            del self.alternative_model_obj
+            self.alternative_model_obj = None
+            logger.info("Alternative model unloaded")
+
+        # Force garbage collection and clear GPU caches
+        gc.collect()
+        if torch.backends.mps.is_available():
+            torch.mps.synchronize()
+            torch.mps.empty_cache()
+        elif torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+
+        logger.info("Cleanup complete")
 
     def _get_http_client(self) -> httpx.Client:
         """Get or create synchronous HTTP client for embedding server."""
@@ -862,24 +906,32 @@ class EmbeddingHydrator:
                 generate_primary = True
                 generate_alternative = False
 
-        # Initialize models as needed
-        if generate_primary:
+        # Initialize models as needed (skip if using embedding server for primary)
+        if generate_primary and not self.use_server:
             self._init_primary_model()
+        elif generate_primary and self.use_server:
+            # Just verify server is healthy, don't load local model
+            if not self._check_server_health():
+                raise RuntimeError(f"Embedding server at {EMBEDDING_SERVER_URL} is not healthy")
+            logger.info(f"Using embedding server at {EMBEDDING_SERVER_URL} for primary embeddings")
         if generate_alternative:
+            # Alternative embeddings always use local model (4B not on server)
             self._init_alternative_model()
 
-        # Load all segment IDs into memory first (integers are small, ~8 bytes each)
-        # This replaces the separate count + fetch, doing just one query
-        logger.info("Loading segment IDs needing embeddings...")
-        all_segment_ids = self._get_segment_ids_needing_embeddings(
+        # Use streaming pagination instead of loading all IDs at once
+        # This dramatically reduces memory usage for large datasets
+        embedding_type = "alternative (4B)" if (generate_alternative and not generate_alternative) else "primary (0.6B)"
+
+        # First, get a count (fast query using index)
+        total_needing = self._count_missing_embeddings(
             project=project,
-            primary_only=(generate_primary and not generate_alternative),
-            alternative_only=(generate_alternative and not generate_primary),
-            force_reembed=force_reembed,
-            stitch_versions=stitch_versions
+            primary=(generate_primary and not generate_alternative),
+            alternative=(generate_alternative and not generate_primary),
+            stitch_versions=stitch_versions,
+            recent_content_days=30 if (generate_alternative and not generate_primary) else None
         )
 
-        if not all_segment_ids:
+        if total_needing == 0:
             embedding_type = "alternative (4B)" if (generate_alternative and not generate_primary) else "primary (0.6B)"
             logger.info(f"✓ No {embedding_type} embeddings needed")
             return {
@@ -889,49 +941,83 @@ class EmbeddingHydrator:
                 'total_segments': 0
             }
 
-        embedding_type = "alternative (4B)" if (generate_alternative and not generate_primary) else "primary (0.6B)"
-        total_needing = len(all_segment_ids)
-
-        # Apply max_per_run limit if specified
-        if max_per_run and len(all_segment_ids) > max_per_run:
+        # Determine how many to process this run
+        segments_to_process = total_needing
+        if max_per_run and total_needing > max_per_run:
             logger.info(f"📊 Found {total_needing:,} segments needing {embedding_type} embeddings, limiting to {max_per_run:,}")
-            all_segment_ids = all_segment_ids[:max_per_run]
+            segments_to_process = max_per_run
         else:
             logger.info(f"📊 Found {total_needing:,} segments needing {embedding_type} embeddings")
 
-        logger.info(f"📦 Processing {len(all_segment_ids):,} segments in batches of {batch_size}")
+        logger.info(f"📦 Processing up to {segments_to_process:,} segments in batches of {batch_size}")
 
-        # Process segments in batches using the ID list
+        # Process segments in batches using streaming pagination
+        # Fetch batches directly from DB instead of pre-loading all IDs
         total_primary_generated = 0
         total_alternative_generated = 0
+        last_processed_id = 0  # For keyset pagination
+        loop_iteration = 0
 
-        with tqdm(total=len(all_segment_ids), desc=f"Generating {embedding_type} embeddings", unit="segment") as pbar:
-            for batch_start in range(0, len(all_segment_ids), batch_size):
-                batch_end = min(batch_start + batch_size, len(all_segment_ids))
-                batch_ids = all_segment_ids[batch_start:batch_end]
-                loop_iteration = (batch_start // batch_size) + 1
+        with tqdm(total=segments_to_process, desc=f"Generating {embedding_type} embeddings", unit="segment") as pbar:
+            while total_primary_generated + total_alternative_generated < segments_to_process:
+                loop_iteration += 1
 
                 try:
-                    # Fetch segments by IDs
+                    # Fetch next batch using keyset pagination (much more efficient than OFFSET)
                     from sqlalchemy import text
                     with get_session() as session:
-                        sql = text("""
-                            SELECT id, text, embedding_version, embedding_alt_model, meta_data
-                            FROM public.embedding_segments
-                            WHERE id = ANY(:ids)
-                            ORDER BY id
+                        # Build WHERE clause for filtering
+                        if generate_primary and not generate_alternative:
+                            version_filter = """
+                                AND (es.embedding_version IS NULL
+                                     OR es.embedding_version != :target_version)
+                            """
+                            params = {
+                                'last_id': last_processed_id,
+                                'batch_size': batch_size,
+                                'target_version': self.primary_embedding_version
+                            }
+                        else:
+                            # Alternative embeddings
+                            version_filter = """
+                                AND es.embedding_version IS NOT NULL
+                                AND (es.embedding_alt_model IS NULL
+                                     OR es.embedding_alt_model != :target_version)
+                            """
+                            params = {
+                                'last_id': last_processed_id,
+                                'batch_size': batch_size,
+                                'target_version': self.alternative_embedding_version
+                            }
+
+                        # Add project filter if specified
+                        project_filter = ""
+                        if project:
+                            project_filter = "AND :project = ANY(c.projects)"
+                            params['project'] = project
+
+                        sql = text(f"""
+                            SELECT es.id, es.text, es.embedding_version, es.embedding_alt_model, es.meta_data
+                            FROM public.embedding_segments es
+                            JOIN public.content c ON c.id = es.content_id
+                            WHERE es.id > :last_id
+                            {version_filter}
+                            {project_filter}
+                            ORDER BY es.id
+                            LIMIT :batch_size
                         """)
-                        result = session.execute(sql, {'ids': batch_ids})
+                        result = session.execute(sql, params)
                         rows = result.fetchall()
 
                     if not rows:
-                        logger.warning(f"No segments found for batch {loop_iteration} (IDs {batch_ids[0]} to {batch_ids[-1]})")
-                        continue
+                        logger.info(f"No more segments to process after batch {loop_iteration}")
+                        break
 
-                    # Convert rows to simple objects
-                    from collections import namedtuple
-                    Segment = namedtuple('Segment', ['id', 'text', 'embedding_version', 'embedding_alt_model', 'meta_data'])
-                    segments = [Segment(*row) for row in rows]
+                    # Convert rows to simple objects using module-level namedtuple
+                    segments = [SegmentData(*row) for row in rows]
+
+                    # Update last_processed_id for next iteration
+                    last_processed_id = segments[-1].id
 
                     # Clean up database result objects
                     del rows
@@ -1145,121 +1231,57 @@ class EmbeddingHydrator:
                     continue
 
                 # Save to database using raw SQL bulk update with psycopg2
+                # MEMORY OPTIMIZATION: Use generator to avoid building intermediate lists
                 try:
                     logger.info(f"About to save {len(segments)} segments to database")
                     import time
                     import json as json_module
-                    from sqlalchemy import text
-                    from datetime import datetime, timezone
+                    from psycopg2.extras import execute_values
 
-                    primary_count = 0
-                    alternative_count = 0
-                    prep_start = time.time()
-
-                    # Prepare data for bulk update - convert embeddings in streaming fashion to avoid memory copies
-                    update_data = []
-                    timestamp = datetime.now(timezone.utc).isoformat()
-
-                    for idx, seg in enumerate(segments):
-                        # Update metadata
-                        if seg.meta_data:
-                            meta = dict(seg.meta_data)
-                        else:
-                            meta = {}
-                        meta['embeddings_pending'] = False
-                        meta['embeddings_generated_at'] = timestamp
-                        if primary_embeddings is not None:
-                            meta['primary_embedding_model'] = self.embedding_model
-                            primary_count += 1
-                        if alternative_embeddings is not None:
-                            meta['alternative_embedding_model'] = self.alternative_model
-                            alternative_count += 1
-
-                        # Convert embeddings to pgvector format string (minimize memory copies)
-                        emb_str = None
-                        if primary_embeddings is not None:
-                            # Use direct numpy array access to avoid creating intermediate lists
-                            emb_str = '[' + ','.join(f'{x:.6f}' for x in primary_embeddings[idx]) + ']'
-
-                        emb_alt_str = None
-                        if alternative_embeddings is not None:
-                            # Use direct numpy array access to avoid creating intermediate lists
-                            emb_alt_str = '[' + ','.join(f'{x:.6f}' for x in alternative_embeddings[idx]) + ']'
-
-                        update_data.append({
-                            'id': seg.id,
-                            'embedding': emb_str,
-                            'embedding_version': self.primary_embedding_version if primary_embeddings is not None else None,
-                            'embedding_alt': emb_alt_str,
-                            'embedding_alt_model': self.alternative_embedding_version if alternative_embeddings is not None else None,
-                            'meta_data': json_module.dumps(meta)
-                        })
-
-                        # Periodically collect garbage during large loops to prevent buildup
-                        if idx > 0 and idx % 50 == 0:
-                            gc.collect()
-
-                    prep_time = time.time() - prep_start
-                    logger.info(f"Prepared {len(update_data)} updates in {prep_time:.2f}s")
-
-                    # Store flags before freeing embeddings
+                    # Store flags before processing
                     has_primary = primary_embeddings is not None
                     has_alternative = alternative_embeddings is not None
+                    primary_count = len(segments) if has_primary else 0
+                    alternative_count = len(segments) if has_alternative else 0
+                    timestamp = datetime.now(timezone.utc).isoformat()
 
-                    # Free embeddings BEFORE database operations to reduce peak memory
-                    del primary_embeddings, alternative_embeddings
-                    primary_embeddings = None
-                    alternative_embeddings = None
-                    gc.collect()
+                    bulk_start = time.time()
 
-                    # Execute bulk update using raw SQL
+                    # Generator function to yield tuples directly without building list
+                    def generate_update_tuples():
+                        for idx, seg in enumerate(segments):
+                            # Build metadata
+                            if seg.meta_data:
+                                meta = dict(seg.meta_data)
+                            else:
+                                meta = {}
+                            meta['embeddings_pending'] = False
+                            meta['embeddings_generated_at'] = timestamp
+                            if has_primary:
+                                meta['primary_embedding_model'] = self.embedding_model
+                            if has_alternative:
+                                meta['alternative_embedding_model'] = self.alternative_model
+                            meta_json = json_module.dumps(meta)
+
+                            # Convert embeddings to pgvector format - yield immediately
+                            if has_primary and has_alternative:
+                                emb_str = '[' + ','.join(f'{x:.6f}' for x in primary_embeddings[idx]) + ']'
+                                emb_alt_str = '[' + ','.join(f'{x:.6f}' for x in alternative_embeddings[idx]) + ']'
+                                yield (seg.id, emb_str, self.primary_embedding_version,
+                                       emb_alt_str, self.alternative_embedding_version, meta_json)
+                            elif has_primary:
+                                emb_str = '[' + ','.join(f'{x:.6f}' for x in primary_embeddings[idx]) + ']'
+                                yield (seg.id, emb_str, self.primary_embedding_version, meta_json)
+                            elif has_alternative:
+                                emb_alt_str = '[' + ','.join(f'{x:.6f}' for x in alternative_embeddings[idx]) + ']'
+                                yield (seg.id, emb_alt_str, self.alternative_embedding_version, meta_json)
+
                     with get_session() as session:
-                        bulk_start = time.time()
-
-                        # Build SQL for bulk update
-                        if has_primary and has_alternative:
-                            # Update both embeddings
-                            sql = text("""
-                                UPDATE public.embedding_segments
-                                SET embedding = data.emb::vector(1024),
-                                    embedding_version = data.emb_ver,
-                                    embedding_alt = data.emb_alt::vector(2000),
-                                    embedding_alt_model = data.emb_alt_model,
-                                    meta_data = data.meta::json
-                                FROM (VALUES :values) AS data(id, emb, emb_ver, emb_alt, emb_alt_model, meta)
-                                WHERE embedding_segments.id = data.id::integer
-                            """)
-                            values = [(d['id'], d['embedding'], d['embedding_version'], d['embedding_alt'], d['embedding_alt_model'], d['meta_data']) for d in update_data]
-                        elif has_primary:
-                            # Update only primary embedding
-                            sql = text("""
-                                UPDATE public.embedding_segments
-                                SET embedding = data.emb::vector(1024),
-                                    embedding_version = data.emb_ver,
-                                    meta_data = data.meta::json
-                                FROM (VALUES :values) AS data(id, emb, emb_ver, meta)
-                                WHERE embedding_segments.id = data.id::integer
-                            """)
-                            values = [(d['id'], d['embedding'], d['embedding_version'], d['meta_data']) for d in update_data]
-                        elif has_alternative:
-                            # Update only alternative embedding
-                            sql = text("""
-                                UPDATE public.embedding_segments
-                                SET embedding_alt = data.emb_alt::vector(2000),
-                                    embedding_alt_model = data.emb_alt_model,
-                                    meta_data = data.meta::json
-                                FROM (VALUES :values) AS data(id, emb_alt, emb_alt_model, meta)
-                                WHERE embedding_segments.id = data.id::integer
-                            """)
-                            values = [(d['id'], d['embedding_alt'], d['embedding_alt_model'], d['meta_data']) for d in update_data]
-
                         # Use raw connection for execute_values
                         connection = session.connection().connection
                         cursor = connection.cursor()
 
-                        # Build VALUES string manually for psycopg2
-                        from psycopg2.extras import execute_values
-
+                        # Execute with generator (psycopg2 will iterate it)
                         if has_primary and has_alternative:
                             execute_values(
                                 cursor,
@@ -1273,7 +1295,7 @@ class EmbeddingHydrator:
                                 FROM (VALUES %s) AS data(id, emb, emb_ver, emb_alt, emb_alt_model, meta)
                                 WHERE embedding_segments.id = data.id
                                 """,
-                                values
+                                generate_update_tuples()
                             )
                         elif has_primary:
                             execute_values(
@@ -1286,7 +1308,7 @@ class EmbeddingHydrator:
                                 FROM (VALUES %s) AS data(id, emb, emb_ver, meta)
                                 WHERE embedding_segments.id = data.id
                                 """,
-                                values
+                                generate_update_tuples()
                             )
                         elif has_alternative:
                             execute_values(
@@ -1299,7 +1321,7 @@ class EmbeddingHydrator:
                                 FROM (VALUES %s) AS data(id, emb_alt, emb_alt_model, meta)
                                 WHERE embedding_segments.id = data.id
                                 """,
-                                values
+                                generate_update_tuples()
                             )
 
                         bulk_time = time.time() - bulk_start
@@ -1313,7 +1335,12 @@ class EmbeddingHydrator:
                         # Clean up database resources
                         cursor.close()
                         del cursor, connection
-                        gc.collect()
+
+                    # Free embeddings AFTER database operations complete
+                    del primary_embeddings, alternative_embeddings
+                    primary_embeddings = None
+                    alternative_embeddings = None
+                    gc.collect()
 
                     # Update progress bar
                     pbar.update(len(segments))
@@ -1376,25 +1403,37 @@ class EmbeddingHydrator:
 
                 # AGGRESSIVE MEMORY MANAGEMENT: Reload model every N batches to force complete memory reset
                 # MPS has memory fragmentation issues that empty_cache() doesn't fully resolve
-                batches_processed = (total_primary_generated + total_alternative_generated) // batch_size
-                if batches_processed > 0 and batches_processed % 20 == 0:  # Every 20 batches
-                    logger.info(f"Reloading model after {batches_processed} batches to reset MPS memory...")
-                    if generate_primary and self.primary_model:
-                        del self.primary_model
-                        self.primary_model = None
-                        gc.collect()
-                        if torch.backends.mps.is_available():
-                            torch.mps.empty_cache()
-                        self._init_primary_model()
-                        logger.info("Primary model reloaded")
-                    if generate_alternative and self.alternative_model_obj:
-                        del self.alternative_model_obj
-                        self.alternative_model_obj = None
-                        gc.collect()
-                        if torch.backends.mps.is_available():
-                            torch.mps.empty_cache()
-                        self._init_alternative_model()
-                        logger.info("Alternative model reloaded")
+                # Only applies when using local models (not embedding server)
+                if not self.use_server:
+                    batches_processed = (total_primary_generated + total_alternative_generated) // batch_size
+                    if batches_processed > 0 and batches_processed % 20 == 0:  # Every 20 batches
+                        logger.info(f"Reloading model after {batches_processed} batches to reset MPS memory...")
+                        if generate_primary and self.primary_model:
+                            del self.primary_model
+                            self.primary_model = None
+                            gc.collect()
+                            if torch.backends.mps.is_available():
+                                torch.mps.synchronize()
+                                torch.mps.empty_cache()
+                            gc.collect()
+                            # CRITICAL: Wait for MPS to fully release memory before reloading
+                            logger.info("Waiting 5s for MPS memory release...")
+                            time.sleep(5)
+                            self._init_primary_model()
+                            logger.info("Primary model reloaded")
+                        if generate_alternative and self.alternative_model_obj:
+                            del self.alternative_model_obj
+                            self.alternative_model_obj = None
+                            gc.collect()
+                            if torch.backends.mps.is_available():
+                                torch.mps.synchronize()
+                                torch.mps.empty_cache()
+                            gc.collect()
+                            # CRITICAL: Wait for MPS to fully release memory before reloading
+                            logger.info("Waiting 5s for MPS memory release...")
+                            time.sleep(5)
+                            self._init_alternative_model()
+                            logger.info("Alternative model reloaded")
 
         logger.info(f"Hydration complete: {total_primary_generated} primary embeddings, {total_alternative_generated} alternative embeddings")
 
@@ -1458,8 +1497,13 @@ class EmbeddingHydrator:
 
         logger.info(f"Starting description embedding (batch_size={batch_size}, limit={effective_limit})")
 
-        # Initialize primary model (we use the same model as segment embeddings)
-        self._init_primary_model()
+        # Initialize primary model or verify server (we use the same model as segment embeddings)
+        if self.use_server:
+            if not self._check_server_health():
+                raise RuntimeError(f"Embedding server at {EMBEDDING_SERVER_URL} is not healthy")
+            logger.info(f"Using embedding server at {EMBEDDING_SERVER_URL} for description embeddings")
+        else:
+            self._init_primary_model()
 
         total_embedded = 0
         total_skipped = 0
@@ -1653,6 +1697,9 @@ IMPORTANT:
     # Handle max_per_run: 0 means unlimited (None)
     max_per_run = args.max_per_run if args.max_per_run > 0 else None
 
+    # Import time for cleanup delays
+    import time
+
     # Run hydration - use server by default unless --no-server is specified
     use_server = not args.no_server
     hydrator = EmbeddingHydrator(use_server=use_server)
@@ -1670,6 +1717,9 @@ IMPORTANT:
             max_per_run=max_per_run
         ))
         logger.info(f"Description embedding result: {result}")
+
+        # Final cleanup
+        hydrator.cleanup()
 
         # Print machine-readable summary for orchestrator
         import json
@@ -1743,6 +1793,13 @@ IMPORTANT:
             if remaining_budget == 0:
                 logger.info(f"Budget exhausted after segment embeddings ({total_generated:,} generated)")
 
+        # MEMORY CLEANUP: Release resources between phases
+        if remaining_budget is None or remaining_budget > 0:
+            logger.info("Cleaning up between phases...")
+            hydrator.cleanup()
+            # Wait for memory to settle before next phase
+            time.sleep(2)
+
         # Phase 2: Description embeddings (if budget remains)
         if remaining_budget is None or remaining_budget > 0:
             logger.info("Phase 2: Generating content description embeddings (newest first)...")
@@ -1751,6 +1808,9 @@ IMPORTANT:
                 max_per_run=remaining_budget
             ))
             total_generated += result_desc.get('embedded', 0)
+
+    # Final cleanup
+    hydrator.cleanup()
 
     # Combine results
     result = {

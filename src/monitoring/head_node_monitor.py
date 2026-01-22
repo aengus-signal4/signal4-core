@@ -49,13 +49,15 @@ class HeadNodeServiceInfo(ExponentialBackoffMixin):
         port: int,
         health_endpoint: str = "/health",
         enabled: bool = True,
-        depends_on: Optional[str] = None
+        depends_on: Optional[str] = None,
+        host: Optional[str] = None  # Remote host IP (None for localhost)
     ):
         self.service_name = service_name
         self.port = port
         self.health_endpoint = health_endpoint
         self.enabled = enabled
         self.depends_on = depends_on  # Service dependency (e.g., backend depends on embedding_server)
+        self.host = host  # Remote host IP for services not running on head node
 
         # Status tracking
         self.status = ServiceStatus.HEALTHY if enabled else ServiceStatus.DISABLED
@@ -177,15 +179,17 @@ class HeadNodeServiceMonitor:
                 depends_on='embedding_server'  # Backend depends on embedding server
             )
 
-        # Embedding Server
+        # Embedding Server (may run on remote host)
         embedding_config = services_config.get('embedding_server', {})
         if embedding_config.get('enabled', True):
+            embedding_host = embedding_config.get('host')  # None means localhost
             self.services['embedding_server'] = HeadNodeServiceInfo(
                 service_name='embedding_server',
                 port=embedding_config.get('port', 8005),
                 health_endpoint='/health',
                 enabled=True,
-                depends_on=None
+                depends_on=None,
+                host=embedding_host
             )
 
         # LLM Server
@@ -235,6 +239,8 @@ class HeadNodeServiceMonitor:
         """
         Check health of a specific service via HTTP health endpoint.
 
+        Supports both local and remote services (uses service.host if configured).
+
         Returns True if healthy, False otherwise.
         """
         service = self.services.get(service_name)
@@ -243,7 +249,9 @@ class HeadNodeServiceMonitor:
 
         try:
             session = await self._get_session()
-            url = f"http://127.0.0.1:{service.port}{service.health_endpoint}"
+            # Use service.host if configured, otherwise localhost
+            host = service.host if service.host else "127.0.0.1"
+            url = f"http://{host}:{service.port}{service.health_endpoint}"
 
             async with session.get(url) as response:
                 is_healthy = response.status == 200
@@ -251,11 +259,11 @@ class HeadNodeServiceMonitor:
                 return is_healthy
 
         except asyncio.TimeoutError:
-            logger.warning(f"Health check timeout for service {service_name}")
+            logger.warning(f"Health check timeout for service {service_name}" + (f" at {service.host}" if service.host else ""))
             service.record_health_check(False)
             return False
         except aiohttp.ClientError as e:
-            logger.warning(f"Health check failed for service {service_name}: {e}")
+            logger.warning(f"Health check failed for service {service_name}" + (f" at {service.host}" if service.host else "") + f": {e}")
             service.record_health_check(False)
             return False
         except Exception as e:

@@ -110,6 +110,7 @@ services:
     port: 8010     # Port for Audio server
   embedding_server:
     enabled: true   # Enable centralized embedding server
+    host: "10.0.0.209"  # worker5 IP - run embedding server on worker5 to free head node memory
     port: 8005      # Port for embedding server
     model: "Qwen/Qwen3-Embedding-0.6B"  # Embedding model to serve
   model_servers:
@@ -490,7 +491,7 @@ processing:
       eth: 10.0.0.209
       wifi: 10.0.0.99
       enabled: true
-      task_types: ["stitch:2","diarize:1","convert:1"]
+      task_types: ["stitch:1","diarize:1","convert:1"]
       max_concurrent_tasks: 1
       type: "worker"
       services:
@@ -819,12 +820,13 @@ scheduled_tasks:
     embedding_hydration:
       name: "Embedding Hydration"
       description: "Generate segment embeddings first, then description embeddings (newest first), up to 10k per run"
-      enabled: true
+      enabled: true  # Re-enabled - now runs on worker5 to avoid head node memory issues
       schedule:
         type: run_then_wait
         wait_seconds: 600  # Wait 10 minutes after completion
       executor:
         type: cli
+        host: "10.0.0.209"  # Run on worker5 (same host as embedding server)
         command: "python"
         args: ["-m", "src.utils.embedding_hydrator", "--batch-size", "128", "--max-per-run", "10000"]
         use_screen: true
