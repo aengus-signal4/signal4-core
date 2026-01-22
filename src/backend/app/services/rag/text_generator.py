@@ -193,7 +193,7 @@ STYLE:
 
 CITATION RULES:
 - After EVERY factual claim or quote, cite the source using its citation ID, e.g. {{seg_3}}.
-- You may string multiple citations: {{seg_3}} {{seg_6}}.
+- You may string multiple citations, but NEVER more than 3 per sentence: {{seg_3}} {{seg_6}} {{seg_9}}.
 - ONLY use citation IDs provided above; do NOT invent new ones.
 
 FORMAT:
@@ -231,7 +231,7 @@ STYLE:
 CRITICAL CITATION RULES:
 - After EVERY factual claim, quote, or specific example, cite the source using its citation ID with the format {{citation}}.
 - ONLY use citation IDs provided in the transcripts above; do NOT create new ones.
-- You may attach multiple citations when needed: {{seg_3}} {{seg_7}}.
+- You may attach multiple citations, but NEVER more than 3 per sentence: {{seg_3}} {{seg_7}} {{seg_12}}.
 
 Be concise – this is one of several group summaries the user will see.
 """,
@@ -272,7 +272,7 @@ CITATION RULES:
 - After EVERY factual claim or quoted phrase, include at least one citation ID taken from the input, using its original format, e.g. {{seg_3}}.
 - You may reuse any citation IDs you see in the input summaries.
 - Do NOT invent new citation IDs.
-- If a sentence clearly draws on multiple pieces of evidence, you may string citations: {{seg_3}} {{seg_6}}.
+- If a sentence clearly draws on multiple pieces of evidence, you may string citations, but NEVER more than 3 per sentence: {{seg_3}} {{seg_6}} {{seg_9}}.
 - Do NOT introduce new facts that are not supported by the provided summaries.
 
 FORMAT:
