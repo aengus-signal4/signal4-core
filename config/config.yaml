@@ -852,7 +852,7 @@ scheduled_tasks:
       enabled: true
       schedule:
         type: run_then_wait
-        wait_seconds: 3600
+        wait_seconds: 600  # Wait 10 minutes after completion
       executor:
         type: cli
         command: "python"
