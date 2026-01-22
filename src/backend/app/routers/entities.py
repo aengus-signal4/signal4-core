@@ -9,6 +9,8 @@ These endpoints support the site-wide entity modals in the frontend.
 from fastapi import APIRouter, HTTPException, Path, Query
 from sqlalchemy import func, desc, distinct
 from sqlalchemy.orm import joinedload, selectinload
+from datetime import timedelta
+import math
 import time
 import logging
 
@@ -17,6 +19,8 @@ logger = get_logger("entities_router")
 
 from ..models.responses import (
     EpisodeDetailsResponse,
+    EpisodeTranscriptResponse,
+    TranscriptTurn,
     SpeakerDetailsResponse,
     ChannelDetailsResponse,
     EpisodePreview,
@@ -36,9 +40,51 @@ from src.database.models import (
     SpeakerIdentity,
     EmbeddingSegment,
     PodcastChart,
+    Sentence,
 )
 
 router = APIRouter(prefix="/api/entities", tags=["entities"])
+
+
+# Weights for related episodes scoring (inspired by SegmentReranker)
+SIMILARITY_WEIGHT = 0.5
+RECENCY_WEIGHT = 0.3
+POPULARITY_WEIGHT = 0.2
+
+
+def _compute_recency_score(candidate_date, target_date) -> float:
+    """
+    Compute recency score based on temporal proximity.
+
+    Uses exponential decay with -0.15/day rate (from SegmentReranker formula).
+    Episodes closer in time to the target get higher scores.
+
+    Returns a score between 0 and 1.
+    """
+    if not candidate_date or not target_date:
+        return 0.5  # Neutral score for missing dates
+
+    days_diff = abs((candidate_date - target_date).days)
+    # Exponential decay: score = exp(-0.15 * days)
+    # This gives ~0.86 at 1 day, ~0.22 at 10 days, ~0.05 at 20 days
+    return math.exp(-0.15 * days_diff)
+
+
+def _get_channel_popularity(channel) -> float:
+    """
+    Get normalized popularity score for a channel.
+
+    Uses channel.importance_score, log-normalized to 0-1 range.
+    Returns 0 if no importance_score is available.
+    """
+    if not channel or not channel.importance_score:
+        return 0.0
+
+    # importance_score is typically 0-100+ range
+    # Log-normalize to 0-1: log(1 + score) / log(1 + max_expected)
+    # Using 100 as max expected score for normalization
+    score = channel.importance_score
+    return min(1.0, math.log(1 + score) / math.log(101))
 
 
 def _format_date(dt) -> str | None:
@@ -123,9 +169,67 @@ async def get_episode_details(
                         image_url=None  # TODO: Add image URL when available
                     ))
 
-            # Get related episodes (same channel, excluding current)
+            # Get related episodes using semantic similarity
             related_episodes = []
-            if content.channel_id:
+            use_semantic = content.description_embedding is not None
+
+            if use_semantic and content.publish_date:
+                # Semantic k-NN approach: find similar episodes within 48h window
+                target_embedding = content.description_embedding
+
+                # Query candidates within 48h publish date window
+                related_query = session.query(Content)\
+                    .options(joinedload(Content.channel))\
+                    .filter(Content.id != content.id)\
+                    .filter(Content.is_embedded == True)\
+                    .filter(Content.description_embedding.isnot(None))\
+                    .filter(Content.publish_date.between(
+                        content.publish_date - timedelta(hours=48),
+                        content.publish_date + timedelta(hours=48)
+                    ))\
+                    .order_by(Content.description_embedding.cosine_distance(target_embedding))\
+                    .limit(20)\
+                    .all()
+
+                if related_query:
+                    # Compute composite scores and re-rank
+                    scored_candidates = []
+                    for ep in related_query:
+                        # Compute similarity (1 - cosine_distance)
+                        # Note: SQLAlchemy returns distance, we want similarity
+                        similarity = 1.0 - ep.description_embedding.cosine_distance(target_embedding) if hasattr(ep.description_embedding, 'cosine_distance') else 0.5
+
+                        # For efficiency, compute approximate similarity from query order
+                        # Top result is most similar, decay for later results
+                        rank_idx = related_query.index(ep)
+                        similarity = 1.0 - (rank_idx * 0.03)  # Top=1.0, 20th=0.4
+
+                        recency = _compute_recency_score(ep.publish_date, content.publish_date)
+                        popularity = _get_channel_popularity(ep.channel)
+
+                        score = (
+                            SIMILARITY_WEIGHT * similarity +
+                            RECENCY_WEIGHT * recency +
+                            POPULARITY_WEIGHT * popularity
+                        )
+                        scored_candidates.append((ep, score))
+
+                    # Sort by composite score and take top 5
+                    scored_candidates.sort(key=lambda x: x[1], reverse=True)
+                    for ep, _ in scored_candidates[:5]:
+                        related_episodes.append(EpisodePreview(
+                            content_id=ep.content_id,
+                            content_id_numeric=ep.id,
+                            title=ep.title or "Untitled",
+                            channel_name=ep.channel_name,
+                            channel_id=ep.channel_id,
+                            publish_date=_format_date(ep.publish_date),
+                            duration=int(ep.duration) if ep.duration else None,
+                            platform=ep.platform,
+                        ))
+
+            # Fallback to same-channel if semantic search returns no results or not available
+            if not related_episodes and content.channel_id:
                 related_query = session.query(Content)\
                     .filter(Content.channel_id == content.channel_id)\
                     .filter(Content.id != content.id)\
@@ -334,6 +438,11 @@ async def get_channel_details(
 
             processing_time = (time.time() - start_time) * 1000
 
+            # Extract website from platform_metadata (collected from RSS feed link element)
+            website = None
+            if channel.platform_metadata:
+                website = channel.platform_metadata.get('website')
+
             return ChannelDetailsResponse(
                 success=True,
                 channel_id=channel.id,
@@ -342,6 +451,7 @@ async def get_channel_details(
                 platform=channel.platform,
                 description=channel.description,
                 primary_url=channel.primary_url,
+                website=website,
                 language=channel.language,
                 status=channel.status,
                 image_url=_get_channel_image_url(channel),
@@ -623,4 +733,103 @@ async def get_speaker_details_by_name(
         raise
     except Exception as e:
         logger.error(f"Error fetching speaker details by name {speaker_name}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/episodes/{content_id}/transcript", response_model=EpisodeTranscriptResponse)
+async def get_episode_transcript(
+    content_id: str = Path(..., description="Content ID (string format, e.g., 'pod_abc123' or 'xyz789')")
+):
+    """
+    Get full transcript with speaker labels for an episode.
+
+    Returns transcript organized by speaker turns, with speaker names resolved
+    from speaker identities where available.
+    """
+    start_time = time.time()
+
+    try:
+        with get_session() as session:
+            # Look up content by content_id string
+            content = session.query(Content)\
+                .filter(Content.content_id == content_id)\
+                .first()
+
+            if not content:
+                raise HTTPException(status_code=404, detail=f"Episode not found: {content_id}")
+
+            # Get sentences grouped by turn, ordered by sentence_index
+            sentences = session.query(Sentence)\
+                .options(joinedload(Sentence.speaker).joinedload(Speaker.speaker_identity))\
+                .filter(Sentence.content_id == content.id)\
+                .order_by(Sentence.sentence_index)\
+                .all()
+
+            if not sentences:
+                # No transcript available
+                processing_time = (time.time() - start_time) * 1000
+                return EpisodeTranscriptResponse(
+                    success=True,
+                    content_id=content.id,
+                    content_id_string=content.content_id,
+                    title=content.title or "Untitled",
+                    turns=[],
+                    total_turns=0,
+                    duration=int(content.duration) if content.duration else None,
+                    processing_time_ms=processing_time,
+                )
+
+            # Group sentences by turn_index to reconstruct speaker turns
+            turns_dict: dict[int, list] = {}
+            for sentence in sentences:
+                turn_idx = sentence.turn_index
+                if turn_idx not in turns_dict:
+                    turns_dict[turn_idx] = []
+                turns_dict[turn_idx].append(sentence)
+
+            # Build transcript turns
+            turns = []
+            for turn_idx in sorted(turns_dict.keys()):
+                turn_sentences = turns_dict[turn_idx]
+                first_sentence = turn_sentences[0]
+                last_sentence = turn_sentences[-1]
+
+                # Get speaker info
+                speaker = first_sentence.speaker
+                speaker_name = speaker.display_name or f"Speaker {speaker.local_speaker_id}"
+                speaker_hash = speaker.speaker_hash
+
+                # Use identity name if available
+                if speaker.speaker_identity and speaker.speaker_identity.primary_name:
+                    speaker_name = speaker.speaker_identity.primary_name
+
+                # Combine all sentences in the turn
+                combined_text = " ".join(s.text for s in turn_sentences)
+
+                turns.append(TranscriptTurn(
+                    turn_index=turn_idx,
+                    speaker_name=speaker_name,
+                    speaker_id=speaker_hash,
+                    text=combined_text,
+                    start_time=first_sentence.start_time,
+                    end_time=last_sentence.end_time,
+                ))
+
+            processing_time = (time.time() - start_time) * 1000
+
+            return EpisodeTranscriptResponse(
+                success=True,
+                content_id=content.id,
+                content_id_string=content.content_id,
+                title=content.title or "Untitled",
+                turns=turns,
+                total_turns=len(turns),
+                duration=int(content.duration) if content.duration else None,
+                processing_time_ms=processing_time,
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching transcript for {content_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")

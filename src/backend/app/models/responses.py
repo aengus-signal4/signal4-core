@@ -326,6 +326,28 @@ class EpisodeDetailsResponse(BaseModel):
     processing_time_ms: float
 
 
+class TranscriptTurn(BaseModel):
+    """A speaker turn in the transcript"""
+    turn_index: int
+    speaker_name: str
+    speaker_id: Optional[str] = None  # speaker_hash for linking
+    text: str
+    start_time: float
+    end_time: float
+
+
+class EpisodeTranscriptResponse(BaseModel):
+    """Full transcript with speaker labels"""
+    success: bool = True
+    content_id: int
+    content_id_string: str
+    title: str
+    turns: List[TranscriptTurn] = Field(default_factory=list)
+    total_turns: int = 0
+    duration: Optional[int] = None
+    processing_time_ms: float
+
+
 class SpeakerDetailsResponse(BaseModel):
     """Full speaker details response"""
     success: bool = True
@@ -382,6 +404,7 @@ class ChannelDetailsResponse(BaseModel):
     platform: str
     description: Optional[str] = None
     primary_url: Optional[str] = None
+    website: Optional[str] = None  # Official website (from RSS feed link element)
     language: Optional[str] = None
     status: Optional[str] = None
     image_url: Optional[str] = None
