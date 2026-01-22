@@ -325,7 +325,6 @@ class MLXManager:
             if model_rank < best_rank:  # Lower rank = better model
                 best_model = model_name
                 best_rank = model_rank
-                logger.info(f"Using better loaded model {model_name} instead of requested {requested_model}")
 
         return best_model
 
