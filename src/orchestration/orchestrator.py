@@ -267,12 +267,15 @@ class TaskOrchestratorV2:
             startup_tasks.append((worker_id, task))
         
         logger.info(f"Waiting for {len(startup_tasks)} workers to start their services")
-        
-        # Wait for all services to start
+
+        # Timeout for each worker service startup (1 minute)
+        worker_startup_timeout = 60
+
+        # Wait for all services to start with timeout
         for worker_id, task in startup_tasks:
             try:
-                logger.info(f"Waiting for worker {worker_id} services")
-                success = await task
+                logger.info(f"Waiting for worker {worker_id} services (timeout: {worker_startup_timeout}s)")
+                success = await asyncio.wait_for(task, timeout=worker_startup_timeout)
                 if success:
                     worker = self.worker_pool.get_worker(worker_id)
                     if worker:
@@ -284,6 +287,11 @@ class TaskOrchestratorV2:
                     if worker:
                         worker.status = 'failed'
                     logger.error(f"Failed to start services for worker {worker_id}")
+            except asyncio.TimeoutError:
+                worker = self.worker_pool.get_worker(worker_id)
+                if worker:
+                    worker.status = 'failed'
+                logger.error(f"Timeout waiting for worker {worker_id} services to start (>{worker_startup_timeout}s)")
             except Exception as e:
                 worker = self.worker_pool.get_worker(worker_id)
                 if worker:

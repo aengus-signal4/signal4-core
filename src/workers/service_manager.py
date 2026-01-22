@@ -578,10 +578,19 @@ export MallocStackLoggingNoCompact=0
 # Create log directory
 mkdir -p logs/content_processing
 
-# Kill any existing task processor
-pkill -f "src.workers.processor" || true
-pkill -f "src/workers/processor" || true
-sleep 2
+# Kill any process holding port {port} (catches stale processors regardless of how they were started)
+PORT_PID=$(lsof -ti :{port} 2>/dev/null || true)
+if [ -n "$PORT_PID" ]; then
+    echo "[$(date)] Killing existing process(es) on port {port}: $PORT_PID"
+    echo "$PORT_PID" | xargs kill -9 2>/dev/null || true
+    sleep 2
+fi
+
+# Also kill by process name patterns (belt and suspenders)
+pkill -9 -f "src.workers.processor" 2>/dev/null || true
+pkill -9 -f "src/workers/processor" 2>/dev/null || true
+pkill -9 -f "uvicorn.*processor" 2>/dev/null || true
+sleep 1
 
 # Start task processor with uvicorn
 echo "[$(date)] Starting task processor on port {port}"
