@@ -143,6 +143,9 @@ from src.database.models.transcriptions import AlternativeTranscription
 # Query cache models
 from src.database.models.query_cache import QueryVariation, QueryExpansion
 
+# Bookmark models
+from src.database.models.bookmarks import Bookmark
+
 
 __all__ = [
     # Base
@@ -186,4 +189,6 @@ __all__ = [
     # Query Cache
     "QueryVariation",
     "QueryExpansion",
+    # Bookmarks
+    "Bookmark",
 ]
