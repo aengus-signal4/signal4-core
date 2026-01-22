@@ -159,32 +159,59 @@ class TaskProcessor:
 # Create global TaskProcessor instance
 task_processor = TaskProcessor()
 
-# Load config
-with open("config/config.yaml") as f:
-    config = yaml.safe_load(f)
+# Load config using ConfigManager for hot-reload support
+from src.orchestration.config_manager import ConfigManager
+config_manager = ConfigManager(config_path="config/config.yaml")
+config = config_manager.config
 
 # Log session manager configuration
 session_manager = config.get('processing', {}).get('session_manager', 'tmux')
 logger.info(f"Task Processor running under session manager: {session_manager}")
 
-# Load task type limits from config for this worker
+# Get hostname for worker identification
 import socket
 hostname = socket.gethostname()
-worker_configs = config.get('processing', {}).get('workers', {})
-for worker_id, worker_config in worker_configs.items():
-    # Check if this is the current worker by hostname match
-    # Match if worker_id is in hostname (e.g., "worker2" matches "s4-worker2")
-    if worker_id in hostname:
-        enabled_tasks = worker_config.get('task_types', [])
-        for task_spec in enabled_tasks:
-            if isinstance(task_spec, str):
-                parts = task_spec.split(':')
-                task_type = parts[0]
-                limit = int(parts[1]) if len(parts) > 1 else 1
-                task_type_limits[task_type] = limit
-                running_tasks_by_type[task_type] = 0
-        logger.info(f"Loaded task type limits for {worker_id}: {task_type_limits}")
-        break
+current_worker_id = None  # Track which worker we are
+
+def reload_task_type_limits(new_config: dict = None):
+    """Reload task type limits from config. Called on config change."""
+    global current_worker_id
+    cfg = new_config if new_config else config_manager.config
+    worker_configs = cfg.get('processing', {}).get('workers', {})
+
+    for worker_id, worker_config in worker_configs.items():
+        # Match if worker_id is in hostname (e.g., "worker2" matches "s4-worker2")
+        if worker_id in hostname:
+            current_worker_id = worker_id
+            enabled_tasks = worker_config.get('task_types', [])
+            new_limits = {}
+            for task_spec in enabled_tasks:
+                if isinstance(task_spec, str):
+                    parts = task_spec.split(':')
+                    task_type = parts[0]
+                    limit = int(parts[1]) if len(parts) > 1 else 1
+                    new_limits[task_type] = limit
+                    # Initialize running count if not exists
+                    if task_type not in running_tasks_by_type:
+                        running_tasks_by_type[task_type] = 0
+
+            # Check if limits changed
+            if new_limits != task_type_limits:
+                logger.info(f"Task type limits changed for {worker_id}: {task_type_limits} -> {new_limits}")
+                task_type_limits.clear()
+                task_type_limits.update(new_limits)
+            else:
+                logger.debug(f"Task type limits unchanged for {worker_id}: {task_type_limits}")
+            return
+
+    logger.warning(f"No worker config found matching hostname '{hostname}'")
+
+# Initial load of task type limits
+reload_task_type_limits()
+logger.info(f"Loaded task type limits for {current_worker_id}: {task_type_limits}")
+
+# Register reload callback
+config_manager.register_reload_callback(reload_task_type_limits)
 
 # Cache orchestrator URL for fast callbacks (avoid DNS lookups on every callback)
 _cached_orchestrator_url = None
@@ -1109,6 +1136,41 @@ async def start_queue_consumer():
         )
         logger.info("Queue consumer task created")
 
+# --- Config Hot-Reload ---
+config_watcher_started = False
+
+async def config_watcher_loop():
+    """Background loop that checks for config changes and reloads task limits."""
+    check_interval = 30  # Check every 30 seconds
+    logger.info(f"Config watcher started (checking every {check_interval}s)")
+
+    while True:
+        try:
+            await asyncio.sleep(check_interval)
+
+            if config_manager.has_config_changed():
+                logger.info("Config file changed, reloading...")
+                config_manager.reload_config()
+                # reload_task_type_limits is called via the registered callback
+        except Exception as e:
+            logger.error(f"Error in config watcher loop: {str(e)}", exc_info=True)
+            await asyncio.sleep(check_interval)
+
+async def start_config_watcher():
+    """Start the config watcher loop if not already started."""
+    global config_watcher_started
+    if not config_watcher_started:
+        config_watcher_started = True
+        await tracked_create_task(
+            config_watcher_loop(),
+            name="config_watcher_loop",
+            timeout=None,  # No timeout - runs forever
+            on_error="log"
+        )
+        logger.info("Config watcher task created")
+
+# --- End Config Hot-Reload ---
+
 # --- End Queue Management Functions ---
 
 @app.post("/tasks/process", response_model=TaskResponse)
@@ -1138,8 +1200,9 @@ async def process_task(task_request: TaskRequest):
     logger.info(f"Accepted task {task_id} for content {task_request.content_id} of type {task_request.task_type}")
 
     # --- Start Refactor Background Task Launch ---
-    # Start queue consumer if not already running
+    # Start background loops if not already running
     await start_queue_consumer()
+    await start_config_watcher()
 
     # Enqueue the task to use the same queue system as batch tasks
     # This prevents duplicate processing if both single and batch endpoints are used
@@ -1488,8 +1551,9 @@ async def process_task_batch(batch_request: TaskBatchRequest):
     """
     logger.info(f"Received batch request with {len(batch_request.tasks)} tasks")
 
-    # Start queue consumer if not already running
+    # Start background loops if not already running
     await start_queue_consumer()
+    await start_config_watcher()
 
     accepted_task_ids = []
 
@@ -1572,8 +1636,29 @@ async def get_processor_status():
         "queue_depths": current_depths,
         "running_tasks_by_type": running_by_type,
         "task_type_limits": task_type_limits,
-        "tasks_in_memory": len(tasks)
+        "tasks_in_memory": len(tasks),
+        "config_watcher_running": config_watcher_started
     }
+
+
+@app.post("/reload-config")
+async def reload_config():
+    """
+    Manually trigger a config reload.
+    Useful for immediately applying config changes without waiting for the watcher.
+    """
+    if config_manager.reload_config():
+        return {
+            "status": "reloaded",
+            "task_type_limits": dict(task_type_limits),
+            "message": "Configuration reloaded successfully"
+        }
+    else:
+        return {
+            "status": "unchanged",
+            "task_type_limits": dict(task_type_limits),
+            "message": "Configuration has not changed"
+        }
 
 
 if __name__ == "__main__":
