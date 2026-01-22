@@ -78,6 +78,10 @@ class BookmarkResponse(BaseModel):
     # Populated entity data
     entity_title: Optional[str] = None
     entity_subtitle: Optional[str] = None
+    # Segment-specific fields (only populated for entity_type='segment')
+    segment_content_id: Optional[str] = None  # String content_id for media lookup
+    segment_start_time: Optional[float] = None
+    segment_end_time: Optional[float] = None
 
     class Config:
         from_attributes = True
@@ -98,36 +102,52 @@ class BookmarkCheckResponse(BaseModel):
 # Helper Functions
 # ====================
 
-def get_entity_info(db: Session, entity_type: str, entity_id: int) -> tuple[Optional[str], Optional[str]]:
-    """Get title and subtitle for an entity."""
+def get_entity_info(db: Session, entity_type: str, entity_id: int) -> dict:
+    """
+    Get display info for an entity.
+
+    Returns dict with:
+    - title: Display title
+    - subtitle: Secondary info
+    - For segments: content_id, start_time, end_time
+    """
+    result = {'title': None, 'subtitle': None}
     try:
         if entity_type == 'episode':
             content = db.query(Content).filter(Content.id == entity_id).first()
             if content:
-                return content.title, content.channel_name
+                result['title'] = content.title
+                result['subtitle'] = content.channel_name
         elif entity_type == 'channel':
             channel = db.query(Channel).filter(Channel.id == entity_id).first()
             if channel:
-                return channel.name, channel.platform
+                result['title'] = channel.name
+                result['subtitle'] = channel.platform
         elif entity_type == 'speaker':
             speaker = db.query(SpeakerIdentity).filter(SpeakerIdentity.id == entity_id).first()
             if speaker:
-                return speaker.display_name, speaker.role
+                result['title'] = speaker.display_name
+                result['subtitle'] = speaker.role
         elif entity_type == 'segment':
             segment = db.query(EmbeddingSegment).filter(EmbeddingSegment.id == entity_id).first()
             if segment:
                 # Get the parent content for context
                 content = db.query(Content).filter(Content.id == segment.content_id).first()
                 text_preview = segment.text[:100] + "..." if segment.text and len(segment.text) > 100 else segment.text
-                return text_preview, content.title if content else None
+                result['title'] = text_preview
+                result['subtitle'] = content.title if content else None
+                # Include segment-specific data for media playback
+                result['content_id'] = content.content_id if content else None
+                result['start_time'] = segment.start_time
+                result['end_time'] = segment.end_time
     except Exception as e:
         logger.warning(f"Error getting entity info for {entity_type}/{entity_id}: {e}")
-    return None, None
+    return result
 
 
 def bookmark_to_response(db: Session, bookmark: Bookmark) -> BookmarkResponse:
     """Convert a Bookmark model to a response with entity info."""
-    title, subtitle = get_entity_info(db, bookmark.entity_type, bookmark.entity_id)
+    info = get_entity_info(db, bookmark.entity_type, bookmark.entity_id)
     return BookmarkResponse(
         id=bookmark.id,
         entity_type=bookmark.entity_type,
@@ -135,8 +155,12 @@ def bookmark_to_response(db: Session, bookmark: Bookmark) -> BookmarkResponse:
         note=bookmark.note,
         created_at=bookmark.created_at,
         updated_at=bookmark.updated_at,
-        entity_title=title,
-        entity_subtitle=subtitle,
+        entity_title=info.get('title'),
+        entity_subtitle=info.get('subtitle'),
+        # Segment-specific fields
+        segment_content_id=info.get('content_id'),
+        segment_start_time=info.get('start_time'),
+        segment_end_time=info.get('end_time'),
     )
 
 
