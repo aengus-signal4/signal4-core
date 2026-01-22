@@ -146,6 +146,9 @@ from src.database.models.query_cache import QueryVariation, QueryExpansion
 # Bookmark models
 from src.database.models.bookmarks import Bookmark
 
+# YouTube video cache models
+from src.database.models.youtube_video_cache import YouTubeVideoCache
+
 
 __all__ = [
     # Base
@@ -191,4 +194,6 @@ __all__ = [
     "QueryExpansion",
     # Bookmarks
     "Bookmark",
+    # YouTube Video Cache
+    "YouTubeVideoCache",
 ]
