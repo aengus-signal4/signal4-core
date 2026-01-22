@@ -1383,19 +1383,27 @@ async def batch_classify(request: BatchClassifyRequest):
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description='LLM Server')
+    parser.add_argument('--port', type=int, default=8002, help='Port to listen on')
+    parser.add_argument('--host', type=str, default='0.0.0.0', help='Host to bind to')
+    args = parser.parse_args()
+
     # Configure uvicorn logging to suppress default logs and use our logger
     log_config = uvicorn.config.LOGGING_CONFIG
     log_config["loggers"]["uvicorn"]["level"] = "WARNING"
     log_config["loggers"]["uvicorn.error"]["level"] = "WARNING"
     log_config["loggers"]["uvicorn.access"]["level"] = "WARNING"
-    
+
     # Log server startup through our logger
-    logger.info("Starting LLM Server on port 8002")
-    
-    # Run the server
+    logger.info(f"Starting LLM Server on {args.host}:{args.port}")
+
+    # Run the server - pass app object directly since module path doesn't work
+    # when running from different working directories
     uvicorn.run(
-        "llm_server:app",
-        host="0.0.0.0",
-        port=8002,
+        app,
+        host=args.host,
+        port=args.port,
         log_config=log_config
     )
