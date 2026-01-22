@@ -462,7 +462,7 @@ processing:
       eth: 10.0.0.9
       wifi: 10.0.0.54
       enabled: false
-      task_types: ["convert:1","transcribe:1","stitch:1"]
+      task_types: ["convert:1","transcribe:1","stitch:2"]
       max_concurrent_tasks: 1
       type: "worker"
       services:
@@ -486,18 +486,18 @@ processing:
       eth: 10.0.0.203
       wifi: 10.0.0.76
       enabled: true
-      task_types: ["convert:1","cleanup:1","transcribe:1","stitch:1"]
+      task_types: ["convert:1","cleanup:1","transcribe:1","stitch:2"]
       type: "worker"
       services:
         task_processor:
           enabled: true
           port: 8000
-        
+
     worker4:
       eth: 10.0.0.51
       wifi: 10.0.0.163
       enabled: true
-      task_types: ["convert:1","cleanup:1","transcribe:1","stitch:1"] #"cleanup",
+      task_types: ["convert:1","cleanup:1","transcribe:1","stitch:2"]
       max_concurrent_tasks: 1
       type: "worker"
       services:
@@ -509,7 +509,7 @@ processing:
       eth: 10.0.0.209
       wifi: 10.0.0.99
       enabled: true
-      task_types: ["stitch:1","diarize:1","convert:1"]
+      task_types: ["stitch:2","diarize:1","convert:1"]
       max_concurrent_tasks: 1
       type: "worker"
       services:
@@ -521,7 +521,7 @@ processing:
       eth: 10.0.0.4
       wifi: 10.0.0.215
       enabled: true
-      task_types: ["download_rumble:1","download_podcast:1","download_youtube:1"] # "cleanup:1",
+      task_types: ["download_rumble:1","download_podcast:1","download_youtube:1","transcribe:3"]
       max_concurrent_tasks: 1
       type: "head"
       services:
@@ -885,14 +885,14 @@ scheduled_tasks:
     tone_hydration:
       name: "Tone Hydration"
       description: "Analyze sentence tones using Qwen3-Omni"
-      enabled: true
+      enabled: false
       schedule:
         type: run_then_wait
         wait_seconds: 300  # Wait 5 minutes after completion
       executor:
         type: cli
         command: "python"
-        args: ["hydrate_tones.py", "--project", "Canadian", "--limit", "100", "--memory-limit", "10"]
+        args: ["hydrate_tones.py", "--project", "CPRMV", "--project", "Big_Channels", "--project", "Canadian", "--project", "Health", "--project", "Finance", "--project", "Anglosphere", "--since", "2026-01-01", "--limit", "100", "--memory-limit", "10"]
         cwd: "/Users/signal4/signal4/core/scripts/qwen3_omni_captioner"
         use_screen: true
         screen_name: "tone_hydration"
