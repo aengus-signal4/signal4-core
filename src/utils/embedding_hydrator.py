@@ -423,6 +423,13 @@ class EmbeddingHydrator:
                     content_ids = [c.id for c in content_ids]
                     query = query.filter(EmbeddingSegment.content_id.in_(content_ids))
 
+            # Exclude segments that are too long or already marked as skipped
+            from sqlalchemy import func
+            query = query.filter(
+                func.length(EmbeddingSegment.text) <= 8000,
+                ~EmbeddingSegment.embedding_version.like('SKIPPED%') | EmbeddingSegment.embedding_version.is_(None)
+            )
+
             if primary and not alternative:
                 # Count segments with wrong/missing version (uses btree index)
                 query = query.filter(
@@ -996,11 +1003,14 @@ class EmbeddingHydrator:
                             project_filter = "AND :project = ANY(c.projects)"
                             params['project'] = project
 
+                        # Filter out segments that are too long (>8000 chars) or already marked as skipped
                         sql = text(f"""
                             SELECT es.id, es.text, es.embedding_version, es.embedding_alt_model, es.meta_data
                             FROM public.embedding_segments es
                             JOIN public.content c ON c.id = es.content_id
                             WHERE es.id > :last_id
+                            AND LENGTH(es.text) <= 8000
+                            AND (es.embedding_version IS NULL OR es.embedding_version NOT LIKE 'SKIPPED%')
                             {version_filter}
                             {project_filter}
                             ORDER BY es.id
@@ -1028,50 +1038,7 @@ class EmbeddingHydrator:
                     # Try to continue to next batch
                     continue
 
-                # Filter out segments with text longer than 8000 characters (prevents OOM with pathological cases)
-                # Note: The model will automatically truncate to its max token limit (~512 tokens = ~2000-2500 chars)
-                # We only skip truly pathological cases that might cause memory issues
-                MAX_TEXT_LENGTH = 8000
-                original_segments = segments
-                segments = [seg for seg in original_segments if len(seg.text) <= MAX_TEXT_LENGTH]
-                skipped_segments = [seg for seg in original_segments if len(seg.text) > MAX_TEXT_LENGTH]
-
-                if skipped_segments:
-                    logger.warning(f"Skipped {len(skipped_segments)} segments with text > {MAX_TEXT_LENGTH} chars")
-
-                    # Mark skipped segments in database so they don't get queried again
-                    with get_session() as skip_session:
-                        skipped_ids = [seg.id for seg in skipped_segments]
-                        # Update each individually since json type doesn't support || operator
-                        for skip_id in skipped_ids:
-                            existing_meta = skip_session.execute(text(
-                                "SELECT meta_data FROM public.embedding_segments WHERE id = :id"
-                            ), {'id': skip_id}).scalar()
-
-                            if existing_meta:
-                                import json as json_module
-                                meta_dict = json_module.loads(existing_meta) if isinstance(existing_meta, str) else dict(existing_meta)
-                                meta_dict['skipped_reason'] = 'text_too_long'
-                                new_meta = json_module.dumps(meta_dict)
-                            else:
-                                new_meta = '{"skipped_reason": "text_too_long"}'
-
-                            skip_session.execute(text("""
-                                UPDATE public.embedding_segments
-                                SET embedding_version = 'SKIPPED_TOO_LONG',
-                                    meta_data = :meta_data
-                                WHERE id = :id
-                            """), {'id': skip_id, 'meta_data': new_meta})
-
-                        skip_session.commit()
-                        logger.info(f"Marked {len(skipped_ids)} segments as SKIPPED_TOO_LONG")
-
-                if not segments:
-                    logger.info("All segments in batch were too long, continuing...")
-                    # Count as progress even though we skipped them
-                    pbar.update(len(skipped_segments))
-                    continue
-
+                # Note: Long segments (>8000 chars) are now filtered out in the SQL query
                 # Process this batch
                 batch_texts = [seg.text for seg in segments]
 
