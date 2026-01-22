@@ -1960,7 +1960,7 @@ async def main():
     parser.add_argument('--reset', action='store_true', help='Reset failed tasks by creating new ones')
     parser.add_argument('--complete', action='store_true', help='Run all steps in sequence')
     parser.add_argument('--steps', nargs='+', default=['index', 'download', 'convert', 'transcribe', 'diarize', 'stitch', 'segment', 'cleanup'],
-                      help='Steps to run. Available steps: index, index_youtube, index_podcast, index_rumble, download, download_youtube, download_podcast, download_rumble, convert, transcribe, diarize, stitch, segment, cleanup (default: all steps).')
+                      help='Steps to run. Available steps: index, index_youtube, index_podcast, index_rumble, download, download_youtube, download_podcast, download_rumble, refresh_youtube_cache, convert, transcribe, diarize, stitch, segment, cleanup (default: all steps).')
     parser.add_argument('--start-date', type=str, help='Start date for content filtering (YYYY-MM-DD)')
     parser.add_argument('--end-date', type=str, help='End date for content filtering (YYYY-MM-DD)')
     parser.add_argument('--unblock', action='store_true', help='Unblock content before creating tasks. Works with download_podcast and download_youtube steps.')
@@ -2216,6 +2216,27 @@ async def main():
                 tasks = await creator.create_download_tasks(project_name, False, project_date_range, 'download_rumble')
                 if tasks > 0:
                     task_summary.add_tasks(project_name, 'download_rumble', tasks)
+                continue
+
+            if step == 'refresh_youtube_cache':
+                # Refresh YouTube video cache for podcast channels with validated YouTube matches
+                # This is project-independent - runs globally
+                logger.info("\n🔄 Refreshing YouTube video cache for podcast episode matching...")
+                try:
+                    from src.automation.youtube_cache_refresher import refresh_youtube_cache
+                    cache_result = await refresh_youtube_cache(
+                        limit=None,  # Process all validated channels
+                        match_episodes=True,
+                        episode_limit=50,
+                        dry_run=False,
+                        logger=logger
+                    )
+                    if cache_result.get('status') == 'success':
+                        task_summary.add_tasks('_global_', 'youtube_cache_refresh', cache_result.get('channels_processed', 0))
+                        logger.info(f"✅ YouTube cache refresh complete: {cache_result.get('channels_processed', 0)} channels, "
+                                   f"{cache_result.get('episodes_matched', 0)} episodes matched")
+                except Exception as e:
+                    logger.error(f"❌ YouTube cache refresh failed: {e}")
                 continue
 
             if step == 'convert':

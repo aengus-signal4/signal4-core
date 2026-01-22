@@ -800,7 +800,7 @@ scheduled_tasks:
 
     youtube_index_download:
       name: "YouTube Index & Download"
-      description: "Index YouTube channels and create download tasks"
+      description: "Index YouTube channels, create download tasks, and refresh YouTube video cache for podcast episode matching"
       enabled: true
       schedule:
         type: time_of_day
@@ -809,16 +809,16 @@ scheduled_tasks:
       executor:
         type: cli
         command: "python"
-        args: ["-m", "src.automation.task_creation_manager", "--steps", "index_youtube", "download_youtube"]
+        args: ["-m", "src.automation.task_creation_manager", "--steps", "index_youtube", "download_youtube", "refresh_youtube_cache"]
         use_screen: true
         screen_name: "youtube_index_download"
-      timeout_seconds: 7200
+      timeout_seconds: 14400  # 4 hours (increased to accommodate cache refresh)
 
     # === Continuous Processing (run then wait) ===
 
     embedding_hydration:
       name: "Embedding Hydration"
-      description: "Generate embeddings for segments"
+      description: "Generate segment embeddings first, then description embeddings (newest first), up to 10k per run"
       enabled: true
       schedule:
         type: run_then_wait
@@ -826,7 +826,7 @@ scheduled_tasks:
       executor:
         type: cli
         command: "python"
-        args: ["-m", "src.utils.embedding_hydrator", "--batch-size", "128"]
+        args: ["-m", "src.utils.embedding_hydrator", "--batch-size", "128", "--max-per-run", "10000"]
         use_screen: true
         screen_name: "embedding_hydration"
       timeout_seconds: 14400
@@ -878,23 +878,6 @@ scheduled_tasks:
         use_screen: true
         screen_name: "tone_hydration"
       timeout_seconds: 14400  # 4 hours max
-
-    # === YouTube Video Cache (for episode matching) ===
-
-    youtube_cache_refresh:
-      name: "YouTube Video Cache Refresh"
-      description: "Refresh YouTube video cache for validated podcast channels and validate new matches"
-      enabled: true
-      schedule:
-        type: time_of_day
-        hours: [4, 12, 20]  # Run at 04:00, 12:00, 20:00 UTC
-      executor:
-        type: cli
-        command: "python"
-        args: ["-m", "src.automation.youtube_cache_refresher", "--match-episodes", "--episode-limit", "50"]
-        use_screen: true
-        screen_name: "youtube_cache_refresh"
-      timeout_seconds: 14400  # 4 hours
 
     # === Backend Cache & Clustering (replaces pg_cron) ===
 
