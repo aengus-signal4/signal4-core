@@ -39,6 +39,7 @@ class NetworkMonitor:
         # Monitoring settings
         self.health_check_interval = 30  # seconds
         self.retry_check_interval = 60  # seconds - check for retry opportunities more frequently
+        self.activity_grace_period = 120  # seconds - if worker completed task within this window, consider it healthy
 
         # Pause restart attempts during deployment
         self.restart_paused = False
@@ -84,28 +85,40 @@ class NetworkMonitor:
     async def _check_all_workers_health(self):
         """Check health of all workers and handle issues"""
         health_results = await self.network_manager.perform_bulk_health_check()
-        
+
         for worker_id, is_healthy in health_results.items():
             if worker_id not in self.workers:
                 continue
-                
+
             worker = self.workers[worker_id]
-            
-            # Update worker status based on health
-            if is_healthy:
+
+            # Check if worker has recent task activity (proves it's actually working)
+            # This handles cases where HTTP health check fails but worker is processing tasks
+            has_recent_activity = False
+            if hasattr(worker, 'last_heartbeat') and worker.last_heartbeat:
+                seconds_since_heartbeat = (datetime.now(timezone.utc) - worker.last_heartbeat).total_seconds()
+                has_recent_activity = seconds_since_heartbeat < self.activity_grace_period
+                if has_recent_activity and not is_healthy:
+                    logger.debug(f"Worker {worker_id} HTTP health check failed but has recent task activity "
+                               f"({seconds_since_heartbeat:.0f}s ago) - considering healthy")
+
+            # Update worker status based on health OR recent activity
+            if is_healthy or has_recent_activity:
                 if worker.status in ['unhealthy', 'failed', 'network_issue']:
-                    logger.info(f"Worker {worker_id} recovered and is now healthy")
+                    recovery_reason = "HTTP health check" if is_healthy else "recent task activity"
+                    logger.info(f"Worker {worker_id} recovered via {recovery_reason} and is now healthy")
                     worker.status = 'active'
-                    worker.last_heartbeat = datetime.now(timezone.utc)
-                    
+                    if is_healthy:  # Only update heartbeat from actual health check
+                        worker.last_heartbeat = datetime.now(timezone.utc)
+
                     # Reset restart attempts on recovery
                     if hasattr(worker, 'record_restart_attempt'):
                         worker.record_restart_attempt(True)
             else:
                 if worker.status == 'active':
-                    logger.warning(f"Worker {worker_id} became unhealthy")
+                    logger.warning(f"Worker {worker_id} became unhealthy (no recent task activity)")
                     worker.status = 'unhealthy'
-                    
+
                     # Attempt immediate restart for newly unhealthy worker
                     await self._attempt_worker_restart(worker_id, worker)
                 elif worker.status in ['unhealthy', 'failed']:

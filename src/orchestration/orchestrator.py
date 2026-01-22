@@ -689,10 +689,12 @@ class TaskOrchestratorV2:
                 session.commit()
                 logger.debug(f"Task {task_id} status committed as {status}")
 
-                # Remove task from worker IMMEDIATELY
+                # Remove task from worker IMMEDIATELY and update heartbeat
                 worker = self.worker_pool.get_worker(worker_id)
                 if worker:
                     worker.remove_task(task_id, task_type)
+                    # Update heartbeat - task callback proves worker is alive
+                    worker.last_heartbeat = datetime.now(timezone.utc)
 
                 # Handle S3 error detection and global pause
                 error_message = result.get('error', '') if isinstance(result, dict) else str(result)
