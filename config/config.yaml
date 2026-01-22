@@ -828,7 +828,7 @@ scheduled_tasks:
         type: cli
         host: "10.0.0.209"  # Run on worker5 (same host as embedding server)
         command: "python"
-        args: ["-m", "src.utils.embedding_hydrator", "--batch-size", "128", "--max-per-run", "10000"]
+        args: ["-m", "src.utils.embedding_hydrator", "--batch-size", "32", "--max-per-run", "10000"]
         use_screen: true
         screen_name: "embedding_hydration"
       timeout_seconds: 14400

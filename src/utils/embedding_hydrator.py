@@ -426,7 +426,7 @@ class EmbeddingHydrator:
             # Exclude segments that are too long or already marked as skipped
             from sqlalchemy import func
             query = query.filter(
-                func.length(EmbeddingSegment.text) <= 8000,
+                func.length(EmbeddingSegment.text) <= 3000,
                 ~EmbeddingSegment.embedding_version.like('SKIPPED%') | EmbeddingSegment.embedding_version.is_(None)
             )
 
@@ -1009,7 +1009,7 @@ class EmbeddingHydrator:
                             FROM public.embedding_segments es
                             JOIN public.content c ON c.id = es.content_id
                             WHERE es.id > :last_id
-                            AND LENGTH(es.text) <= 8000
+                            AND LENGTH(es.text) <= 3000
                             AND (es.embedding_version IS NULL OR es.embedding_version NOT LIKE 'SKIPPED%')
                             {version_filter}
                             {project_filter}
