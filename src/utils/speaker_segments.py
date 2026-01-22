@@ -45,15 +45,33 @@ def format_speaker_attributed_text(text: str, speaker_positions: Dict[str, List[
     # Sort by start position to maintain text order
     ranges.sort(key=lambda x: x[0])
 
-    # Build formatted output
+    # Build formatted output, combining consecutive same-speaker ranges
     formatted_parts = []
+    current_speaker = None
+    current_texts = []
 
     for start, end, speaker_label in ranges:
-        # Extract text for this range
         speaker_text = text[start:end].strip()
 
-        if speaker_text:  # Only add non-empty text
-            formatted_parts.append(f"{speaker_label}: {speaker_text}")
+        if not speaker_text:
+            continue
+
+        if speaker_label == current_speaker:
+            # Same speaker - combine text
+            current_texts.append(speaker_text)
+        else:
+            # Different speaker - flush previous speaker's text
+            if current_speaker is not None and current_texts:
+                combined_text = " ".join(current_texts)
+                formatted_parts.append(f"{current_speaker}: {combined_text}")
+            # Start new speaker
+            current_speaker = speaker_label
+            current_texts = [speaker_text]
+
+    # Flush the last speaker's text
+    if current_speaker is not None and current_texts:
+        combined_text = " ".join(current_texts)
+        formatted_parts.append(f"{current_speaker}: {combined_text}")
 
     # Join with double newlines for clear speaker separation
     return "\n\n".join(formatted_parts)
