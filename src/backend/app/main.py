@@ -134,7 +134,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 # Include routers
-from .routers import health, media, analysis, query, api_keys, entities, bookmarks, explore, images
+from .routers import health, media, analysis, query, api_keys, entities, bookmarks, explore, images, report
 
 app.include_router(health.router)            # Health monitoring
 app.include_router(media.router)             # Media serving + transcription
@@ -145,6 +145,7 @@ app.include_router(entities.router)          # Entity details (episodes, speaker
 app.include_router(bookmarks.router)         # User bookmarks
 app.include_router(explore.router)           # Project exploration (stats, recent episodes)
 app.include_router(images.router)            # Image proxy (thumbnails, avatars)
+app.include_router(report.router)            # Public report endpoints (no auth)
 
 # Root endpoint
 @app.get("/")

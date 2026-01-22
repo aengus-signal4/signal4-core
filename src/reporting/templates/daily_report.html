@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Signal4 Daily Report</title>
+  <style>
+    /* Reset */
+    body, table, td, p, a, li, blockquote {
+      -webkit-text-size-adjust: 100%;
+      -ms-text-size-adjust: 100%;
+    }
+    table, td {
+      mso-table-lspace: 0pt;
+      mso-table-rspace: 0pt;
+    }
+    img {
+      -ms-interpolation-mode: bicubic;
+    }
+
+    /* Base styles */
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100% !important;
+      height: 100% !important;
+      background-color: #f7f4e9;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    }
+
+    /* Brand colors */
+    .sage { color: #5a7a5a; }
+    .amber { color: #daa520; }
+    .sage-bg { background-color: #5a7a5a; }
+    .amber-bg { background-color: #daa520; }
+    .cream-bg { background-color: #f7f4e9; }
+    .white-bg { background-color: #ffffff; }
+
+    /* Layout */
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    .card {
+      background-color: #ffffff;
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 16px;
+    }
+
+    /* Typography */
+    h1 {
+      color: #1a1714;
+      font-size: 24px;
+      font-weight: 700;
+      margin: 0 0 8px 0;
+    }
+
+    h2 {
+      color: #5a7a5a;
+      font-size: 18px;
+      font-weight: 600;
+      margin: 0 0 16px 0;
+    }
+
+    p {
+      color: #4a4540;
+      font-size: 14px;
+      line-height: 1.6;
+      margin: 0 0 12px 0;
+    }
+
+    .muted {
+      color: #7a756a;
+    }
+
+    .small {
+      font-size: 12px;
+    }
+
+    /* Stats grid */
+    .stats-grid {
+      display: table;
+      width: 100%;
+      table-layout: fixed;
+    }
+
+    .stat-item {
+      display: table-cell;
+      text-align: center;
+      padding: 12px 8px;
+      vertical-align: top;
+    }
+
+    .stat-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #5a7a5a;
+      line-height: 1;
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: #7a756a;
+      margin-top: 4px;
+    }
+
+    /* Episode list */
+    .episode {
+      padding: 12px 0;
+      border-bottom: 1px solid #e8e4d8;
+    }
+
+    .episode:last-child {
+      border-bottom: none;
+    }
+
+    .episode-title {
+      color: #1a1714;
+      font-size: 14px;
+      font-weight: 500;
+      text-decoration: none;
+      margin-bottom: 4px;
+      display: block;
+    }
+
+    .episode-meta {
+      color: #7a756a;
+      font-size: 12px;
+    }
+
+    /* Channel list */
+    .channel {
+      padding: 8px 0;
+      border-bottom: 1px solid #e8e4d8;
+    }
+
+    .channel:last-child {
+      border-bottom: none;
+    }
+
+    .channel-name {
+      color: #1a1714;
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .channel-stats {
+      color: #7a756a;
+      font-size: 12px;
+    }
+
+    /* Button */
+    .button {
+      display: inline-block;
+      background-color: #5a7a5a;
+      color: #ffffff !important;
+      padding: 12px 24px;
+      border-radius: 6px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .button:hover {
+      background-color: #3d5a3d;
+    }
+
+    /* CTA section */
+    .cta {
+      background: linear-gradient(135deg, rgba(90, 122, 90, 0.1), rgba(218, 165, 32, 0.1));
+      border-radius: 8px;
+      padding: 32px;
+      text-align: center;
+    }
+
+    /* Footer */
+    .footer {
+      text-align: center;
+      padding: 24px;
+      color: #7a756a;
+      font-size: 12px;
+    }
+
+    .footer a {
+      color: #5a7a5a;
+      text-decoration: none;
+    }
+
+    /* Responsive */
+    @media only screen and (max-width: 480px) {
+      .container {
+        width: 100% !important;
+        padding: 0 16px !important;
+      }
+
+      .stat-item {
+        display: block;
+        width: 50%;
+        float: left;
+        margin-bottom: 16px;
+      }
+
+      .stat-value {
+        font-size: 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" class="cream-bg">
+    <tr>
+      <td align="center" style="padding: 24px 16px;">
+        <table class="container" width="600" cellpadding="0" cellspacing="0" border="0">
+          <!-- Header -->
+          <tr>
+            <td style="padding-bottom: 24px;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td>
+                    <!-- Logo placeholder: 7 bars waveform -->
+                    <svg width="45" height="45" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle; margin-right: 12px;">
+                      <g transform="translate(8, 30)">
+                        <rect x="0" y="-10" width="3" height="20" rx="1.5" fill="#5a7a5a"/>
+                        <rect x="6" y="-18" width="3" height="36" rx="1.5" fill="#5a7a5a"/>
+                        <rect x="12" y="-8" width="3" height="16" rx="1.5" fill="#5a7a5a"/>
+                        <rect x="18" y="-14" width="3" height="28" rx="1.5" fill="#5a7a5a"/>
+                        <rect x="24" y="-20" width="3" height="40" rx="1.5" fill="#5a7a5a"/>
+                        <rect x="30" y="-12" width="3" height="24" rx="1.5" fill="#5a7a5a"/>
+                        <rect x="36" y="-16" width="3" height="32" rx="1.5" fill="#daa520"/>
+                      </g>
+                    </svg>
+                    <span style="font-size: 20px; font-weight: 700; color: #1a1714; vertical-align: middle;">Signal4 Daily Report</span>
+                  </td>
+                  <td align="right">
+                    <span class="muted small">{{report_date}}</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Stats Card -->
+          <tr>
+            <td>
+              <div class="card">
+                <h2>Platform Overview</h2>
+                <div class="stats-grid">
+                  <div class="stat-item">
+                    <div class="stat-value">{{total_episodes}}</div>
+                    <div class="stat-label">Episodes</div>
+                  </div>
+                  <div class="stat-item">
+                    <div class="stat-value">{{total_channels}}</div>
+                    <div class="stat-label">Channels</div>
+                  </div>
+                  <div class="stat-item">
+                    <div class="stat-value">{{total_speakers}}</div>
+                    <div class="stat-label">Speakers</div>
+                  </div>
+                  <div class="stat-item">
+                    <div class="stat-value">{{total_hours}}</div>
+                    <div class="stat-label">Hours</div>
+                  </div>
+                </div>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Recent Episodes -->
+          <tr>
+            <td>
+              <div class="card">
+                <h2>Recent Episodes</h2>
+                {{#episodes}}
+                <div class="episode">
+                  <span class="episode-title">{{title}}</span>
+                  <div class="episode-meta">
+                    {{channel_name}} &bull; {{publish_date}} &bull; {{duration}}
+                  </div>
+                </div>
+                {{/episodes}}
+              </div>
+            </td>
+          </tr>
+
+          <!-- Top Channels -->
+          <tr>
+            <td>
+              <div class="card">
+                <h2>Top Channels</h2>
+                {{#channels}}
+                <div class="channel">
+                  <span class="channel-name">{{name}}</span>
+                  <div class="channel-stats">{{episode_count}} episodes &bull; {{duration_hours}}h of content</div>
+                </div>
+                {{/channels}}
+              </div>
+            </td>
+          </tr>
+
+          <!-- CTA -->
+          <tr>
+            <td>
+              <div class="cta">
+                <h2 style="color: #1a1714; margin-bottom: 8px;">View Full Report</h2>
+                <p style="margin-bottom: 16px;">Explore the complete report with more insights and analysis.</p>
+                <a href="https://signal4.ca/report" class="button">View Report &rarr;</a>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td>
+              <div class="footer">
+                <p>
+                  You're receiving this because you subscribed to Signal4 Daily Reports.<br>
+                  <a href="{{unsubscribe_url}}">Unsubscribe</a> &bull; <a href="https://signal4.ca">Visit Signal4</a>
+                </p>
+                <p style="margin-top: 12px;">
+                  &copy; {{year}} Signal4. Audio-visual content intelligence.
+                </p>
+              </div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

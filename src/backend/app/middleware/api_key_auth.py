@@ -55,6 +55,7 @@ PUBLIC_PATHS = {
 PUBLIC_PATH_PREFIXES = [
     "/docs",
     "/redoc",
+    "/api/report",  # Public report endpoints (no auth required)
 ]
 
 # Scope requirements for path prefixes
