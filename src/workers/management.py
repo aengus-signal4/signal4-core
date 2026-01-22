@@ -519,8 +519,9 @@ exec {self.head_python_path} {llm_server_path} 2>&1 | tee -a {log_dir}/llm_serve
             python_path = self.head_python_path if is_head else self.worker_python_path
             worker_id = worker.worker_id if hasattr(worker, 'worker_id') else 'local'
             project_root = self.project_dir
-            processor_path = f"{project_root}/src/workers/processor.py"
             log_dir = f"/Users/signal4/logs/content_processing/{worker_id}"
+            # Use uvicorn module execution for proper HTTP server binding
+            uvicorn_cmd = "python -m uvicorn src.workers.processor:app --host 0.0.0.0 --port 8000"
             
             # Create log directory
             mkdir_cmd = f"mkdir -p {log_dir}"
@@ -536,8 +537,9 @@ exec {self.head_python_path} {llm_server_path} 2>&1 | tee -a {log_dir}/llm_serve
                 kill_cmd = f"PATH=/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin:$PATH tmux kill-session -t processor 2>/dev/null || true"
                 await self._run_command(worker, kill_cmd)
 
-                # Also kill any orphaned processor processes
-                await self._run_command(worker, "pkill -9 -f 'task_processor.py' 2>/dev/null || true")
+                # Also kill any orphaned processor processes (both old and new style)
+                await self._run_command(worker, "pkill -9 -f 'src.workers.processor' 2>/dev/null || true")
+                await self._run_command(worker, "pkill -9 -f 'processor.py' 2>/dev/null || true")
                 await asyncio.sleep(2)  # Increased from 1 to 2 seconds
 
                 # Verify session is truly dead before creating new one
@@ -551,11 +553,11 @@ exec {self.head_python_path} {llm_server_path} 2>&1 | tee -a {log_dir}/llm_serve
                     await self._run_command(worker, kill_cmd)
                     await asyncio.sleep(1)
 
-                # Start new tmux session with task_processor.py using uv
+                # Start new tmux session with uvicorn using uv
                 uv_path = self.uv_path
                 # Run uv which automatically uses the project's .venv
                 # Use exec to replace shell with python process, keeping it attached to tmux
-                tmux_cmd = f"cd {project_root} && export PYTHONPATH={project_root}:$PYTHONPATH && PATH=/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin:$PATH tmux new-session -d -s processor 'exec {uv_path} run --project {project_root} python -u {processor_path} >> {log_dir}/processor.log 2>&1'"
+                tmux_cmd = f"cd {project_root} && export PYTHONPATH={project_root}:$PYTHONPATH && PATH=/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin:$PATH tmux new-session -d -s processor 'exec {uv_path} run --project {project_root} {uvicorn_cmd} >> {log_dir}/processor.log 2>&1'"
                 result = await self._run_command(worker, tmux_cmd)
 
                 if hasattr(result, 'returncode') and result.returncode != 0:
@@ -567,8 +569,9 @@ exec {self.head_python_path} {llm_server_path} 2>&1 | tee -a {log_dir}/llm_serve
                 kill_cmd = "screen -S processor -X quit 2>/dev/null || true"
                 await self._run_command(worker, kill_cmd)
 
-                # Also kill any orphaned processor processes
-                await self._run_command(worker, "pkill -9 -f 'task_processor.py' 2>/dev/null || true")
+                # Also kill any orphaned processor processes (both old and new style)
+                await self._run_command(worker, "pkill -9 -f 'src.workers.processor' 2>/dev/null || true")
+                await self._run_command(worker, "pkill -9 -f 'processor.py' 2>/dev/null || true")
                 await asyncio.sleep(2)  # Increased from 1 to 2 seconds
 
                 # Verify session is truly dead before creating new one
@@ -582,12 +585,12 @@ exec {self.head_python_path} {llm_server_path} 2>&1 | tee -a {log_dir}/llm_serve
                     await self._run_command(worker, kill_cmd)
                     await asyncio.sleep(1)
 
-                # Start new screen session using uv
+                # Start new screen session using uv with uvicorn
                 uv_path = self.uv_path
                 # Run uv which automatically uses the project's .venv
                 # Use exec to replace bash with the python process, keeping it attached to screen
                 # Redirect output directly to log file (use tail -f to view logs)
-                screen_cmd = f"screen -dmS processor bash -c 'cd {project_root} && export PYTHONPATH={project_root}:$PYTHONPATH && exec {uv_path} run --project {project_root} python -u {processor_path} >> {log_dir}/processor.log 2>&1'"
+                screen_cmd = f"screen -dmS processor bash -c 'cd {project_root} && export PYTHONPATH={project_root}:$PYTHONPATH && exec {uv_path} run --project {project_root} {uvicorn_cmd} >> {log_dir}/processor.log 2>&1'"
                 result = await self._run_command(worker, screen_cmd)
 
                 if hasattr(result, 'returncode') and result.returncode != 0:
@@ -595,24 +598,26 @@ exec {self.head_python_path} {llm_server_path} 2>&1 | tee -a {log_dir}/llm_serve
                     return False
 
             else:  # nohup
-                # Kill any existing process
-                await self._run_command(worker, "pkill -9 -f task_processor.py || true")
+                # Kill any existing process (both old and new style)
+                await self._run_command(worker, "pkill -9 -f 'src.workers.processor' || true")
+                await self._run_command(worker, "pkill -9 -f 'processor.py' || true")
                 await asyncio.sleep(2)  # Increased from 1 to 2 seconds
 
                 # Verify process is dead
                 for retry in range(3):
-                    check_cmd = f"pgrep -f 'task_processor.py' && echo 'exists' || echo 'dead'"
+                    check_cmd = f"pgrep -f 'processor' && echo 'exists' || echo 'dead'"
                     check_result = await self._run_command(worker, check_cmd)
                     check_output = check_result.stdout if hasattr(check_result, 'stdout') else str(check_result)
                     if 'dead' in check_output:
                         break
                     logger.warning(f"Processor still running on {worker_id}, retrying kill (attempt {retry+1}/3)")
-                    await self._run_command(worker, "pkill -9 -f task_processor.py || true")
+                    await self._run_command(worker, "pkill -9 -f 'src.workers.processor' || true")
+                    await self._run_command(worker, "pkill -9 -f 'processor.py' || true")
                     await asyncio.sleep(1)
 
-                # Start with nohup using uv
+                # Start with nohup using uv and uvicorn
                 uv_path = self.uv_path
-                nohup_cmd = f"cd {project_root} && export PYTHONPATH={project_root}:$PYTHONPATH && nohup caffeinate {uv_path} run --project {project_root} python {processor_path} > {log_dir}/processor.log 2>&1 &"
+                nohup_cmd = f"cd {project_root} && export PYTHONPATH={project_root}:$PYTHONPATH && nohup caffeinate {uv_path} run --project {project_root} {uvicorn_cmd} > {log_dir}/processor.log 2>&1 &"
                 result = await self._run_command(worker, nohup_cmd)
 
                 if hasattr(result, 'returncode') and result.returncode != 0:
