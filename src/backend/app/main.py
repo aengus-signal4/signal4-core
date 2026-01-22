@@ -85,8 +85,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS_PRODUCTION + (CORS_ORIGINS_DEVELOPMENT if DEBUG else []),
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "X-API-Key", "Authorization"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-API-Key", "X-Client-Id", "Authorization"],
 )
 
 # API Key authentication middleware
@@ -134,7 +134,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 # Include routers
-from .routers import health, media, analysis, query, api_keys, entities
+from .routers import health, media, analysis, query, api_keys, entities, bookmarks, explore, images
 
 app.include_router(health.router)            # Health monitoring
 app.include_router(media.router)             # Media serving + transcription
@@ -142,6 +142,9 @@ app.include_router(analysis.router)          # All RAG/search operations
 app.include_router(query.router)             # Read-only segment query API
 app.include_router(api_keys.router)          # API key management
 app.include_router(entities.router)          # Entity details (episodes, speakers, channels)
+app.include_router(bookmarks.router)         # User bookmarks
+app.include_router(explore.router)           # Project exploration (stats, recent episodes)
+app.include_router(images.router)            # Image proxy (thumbnails, avatars)
 
 # Root endpoint
 @app.get("/")
