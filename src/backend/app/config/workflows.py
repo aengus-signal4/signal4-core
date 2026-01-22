@@ -166,7 +166,8 @@ WORKFLOWS: Dict[str, List[Dict[str, Any]]] = {
                 "recency_weight": 0.25,
                 "single_speaker_weight": 0.08,
                 "named_speaker_weight": 0.07,
-                "similarity_floor": 0.48
+                "similarity_floor": 0.42,
+                "keyword_weight": 0.15
             }
         },
         {

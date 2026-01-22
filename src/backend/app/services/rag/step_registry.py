@@ -273,6 +273,11 @@ STEP_REGISTRY: Dict[str, StepMetadata] = {
                 "type": "number",
                 "default": 0.0,
                 "description": "Minimum similarity threshold to include segment (0 = no floor)"
+            },
+            "keyword_weight": {
+                "type": "number",
+                "default": 0.0,
+                "description": "Bonus weight for segments containing query keywords (0 = disabled)"
             }
         },
         method_name="rerank_segments"

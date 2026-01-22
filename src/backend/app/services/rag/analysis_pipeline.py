@@ -1005,6 +1005,7 @@ class AnalysisPipeline:
                 recency=params.get("recency_weight", 0.2),
                 single_speaker=params.get("single_speaker_weight", 0.1),
                 named_speaker=params.get("named_speaker_weight", 0.1),
+                keyword_match=params.get("keyword_weight", 0.0),
                 similarity_floor=params.get("similarity_floor", 0.0)
             )
 
@@ -1016,13 +1017,17 @@ class AnalysisPipeline:
 
             time_window_days = params.get("time_window_days", 30)
 
+            # Get keywords from context (set by expand_query step)
+            keywords = context.get("keywords", [])
+
             # Initialize reranker (uses embedded psycopg2 connection)
             reranker = SegmentReranker()
             reranked = reranker.rerank(
                 segments,
                 weights=weights,
                 diversity=diversity,
-                time_window_days=time_window_days
+                time_window_days=time_window_days,
+                keywords=keywords
             )
 
             # Update context with reranked segments

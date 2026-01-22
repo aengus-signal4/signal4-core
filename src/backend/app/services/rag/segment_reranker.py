@@ -33,10 +33,11 @@ class RerankerWeights:
     recency: float = 0.2          # Publish date freshness
     single_speaker: float = 0.1   # Segment has dominant speaker (60%+)
     named_speaker: float = 0.1    # Speaker has identified name
+    keyword_match: float = 0.0    # Bonus for keyword matches (added on top, not normalized)
     similarity_floor: float = 0.0 # Minimum similarity to include (0 = no floor)
 
     def __post_init__(self):
-        """Normalize weights to sum to 1.0 (excluding similarity_floor)."""
+        """Normalize weights to sum to 1.0 (excluding similarity_floor and keyword_match)."""
         total = (self.similarity + self.popularity + self.recency +
                  self.single_speaker + self.named_speaker)
         if total > 0:
@@ -122,7 +123,8 @@ class SegmentReranker:
         segments: List[Dict[str, Any]],
         weights: Optional[RerankerWeights] = None,
         diversity: Optional[DiversityConstraints] = None,
-        time_window_days: int = 30
+        time_window_days: int = 30,
+        keywords: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """
         Rerank segments using composite scoring and diversity constraints.
@@ -132,6 +134,7 @@ class SegmentReranker:
             weights: Scoring weights (default: balanced)
             diversity: Diversity constraints (default: best per episode)
             time_window_days: Time window for recency scoring normalization
+            keywords: Optional list of keywords from query expansion for bonus scoring
 
         Returns:
             Reranked list of segment dicts with added 'rerank_score' field
@@ -141,11 +144,17 @@ class SegmentReranker:
 
         weights = weights or RerankerWeights()
         diversity = diversity or DiversityConstraints()
+        keywords = keywords or []
+
+        # Normalize keywords for matching (lowercase)
+        keywords_lower = [k.lower() for k in keywords if k]
 
         logger.info(f"Reranking {len(segments)} segments with weights: "
                    f"sim={weights.similarity:.2f}, pop={weights.popularity:.2f}, "
                    f"rec={weights.recency:.2f}, single={weights.single_speaker:.2f}, "
-                   f"named={weights.named_speaker:.2f}, floor={weights.similarity_floor:.2f}")
+                   f"named={weights.named_speaker:.2f}, kw={weights.keyword_match:.2f}, "
+                   f"floor={weights.similarity_floor:.2f}"
+                   + (f", keywords={keywords_lower}" if keywords_lower else ""))
 
         # Apply similarity floor if configured
         if weights.similarity_floor > 0:
@@ -170,7 +179,7 @@ class SegmentReranker:
         # Score each segment
         scored = []
         for seg in enriched:
-            score = self._compute_score(seg, weights, now, oldest_date)
+            score = self._compute_score(seg, weights, now, oldest_date, keywords_lower)
             seg['rerank_score'] = score
             scored.append(seg)
 
@@ -335,7 +344,8 @@ class SegmentReranker:
         segment: Dict[str, Any],
         weights: RerankerWeights,
         now: datetime,
-        oldest_date: datetime
+        oldest_date: datetime,
+        keywords_lower: List[str] = None
     ) -> float:
         """Compute composite rerank score for a segment."""
         score = 0.0
@@ -378,6 +388,16 @@ class SegmentReranker:
         # Named speaker bonus
         if segment.get('_has_named_speaker'):
             score += weights.named_speaker * 1.0
+
+        # Keyword match bonus (added on top of normalized score)
+        if keywords_lower and weights.keyword_match > 0:
+            text = segment.get('text', '').lower()
+            matches = sum(1 for kw in keywords_lower if kw in text)
+            if matches > 0:
+                # Normalize by number of keywords, cap at 1.0
+                keyword_score = min(1.0, matches / len(keywords_lower))
+                score += weights.keyword_match * keyword_score
+                segment['_keyword_matches'] = matches
 
         return score
 
