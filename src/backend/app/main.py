@@ -9,8 +9,8 @@ Endpoints:
 - /api/media/content/{id} - Unified media serving with optional transcription
 - /api/analysis - All RAG/search operations with declarative workflows
 
-Note: Embedding generation is handled by the centralized Embedding Server (port 8005).
-The backend connects to it as a client with high priority (1) for interactive queries.
+Note: Embedding model (Qwen/Qwen3-Embedding-0.6B) is loaded directly in-process
+on first use - no separate embedding server required.
 """
 
 import os
@@ -32,10 +32,10 @@ logger.info("Backend API initializing...")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan - startup and shutdown events"""
-    # Startup: Backend now uses the centralized embedding server
+    # Startup
     logger.info("=" * 80)
     logger.info("Backend API starting...")
-    logger.info("Embedding generation delegated to Embedding Server (port 8005)")
+    logger.info("Embedding model will load on first query (lazy loading)")
     logger.info("=" * 80)
 
     yield  # App runs

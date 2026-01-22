@@ -3,7 +3,6 @@ Head Node Service Monitor - Health monitoring and auto-restart for head node ser
 
 Monitors:
 - Backend API (port 7999)
-- Embedding Server (port 8005)
 - LLM Server (port 8002)
 - Model Servers (port 8004+)
 
@@ -56,7 +55,7 @@ class HeadNodeServiceInfo(ExponentialBackoffMixin):
         self.port = port
         self.health_endpoint = health_endpoint
         self.enabled = enabled
-        self.depends_on = depends_on  # Service dependency (e.g., backend depends on embedding_server)
+        self.depends_on = depends_on  # Service dependency (e.g., backend depends on llm_server)
         self.host = host  # Remote host IP for services not running on head node
 
         # Status tracking
@@ -176,20 +175,7 @@ class HeadNodeServiceMonitor:
                 port=backend_config.get('port', 7999),
                 health_endpoint='/health',
                 enabled=True,
-                depends_on='embedding_server'  # Backend depends on embedding server
-            )
-
-        # Embedding Server (may run on remote host)
-        embedding_config = services_config.get('embedding_server', {})
-        if embedding_config.get('enabled', True):
-            embedding_host = embedding_config.get('host')  # None means localhost
-            self.services['embedding_server'] = HeadNodeServiceInfo(
-                service_name='embedding_server',
-                port=embedding_config.get('port', 8005),
-                health_endpoint='/health',
-                enabled=True,
-                depends_on=None,
-                host=embedding_host
+                depends_on=None
             )
 
         # LLM Server

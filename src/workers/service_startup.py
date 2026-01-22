@@ -5,7 +5,6 @@ Manages startup of:
 - LLM server
 - Monitoring dashboards (system)
 - Backend API
-- Embedding Server
 - Model Servers
 
 All services run in named screen sessions for persistence across orchestrator restarts.
@@ -94,12 +93,6 @@ class ServiceStartupManager:
         self.model_server_instances = model_servers_config.get('instances', {})
         self.model_server_script = self.base_path / 'src' / 'services' / 'llm' / 'mlx_server.py'
 
-        # Embedding Server configuration
-        embedding_config = services_config.get('embedding_server', {})
-        self.embedding_server_enabled = embedding_config.get('enabled', True)
-        self.embedding_server_port = embedding_config.get('port', 8005)
-        self.embedding_server_script = self.base_path / 'src' / 'services' / 'embedding_server.py'
-
         # Memory Monitor configuration
         memory_monitor_config = services_config.get('memory_monitor', {})
         self.memory_monitor_enabled = memory_monitor_config.get('enabled', True)
@@ -114,7 +107,6 @@ class ServiceStartupManager:
         self.screen_names = {
             'backend': 'backend_api',
             'llm_server': 'llm_server',
-            'embedding_server': 'embedding_server',
             'system_monitoring': 'system_monitoring',
             'memory_monitor': 'memory_monitor',
         }
@@ -124,10 +116,6 @@ class ServiceStartupManager:
         # Start memory monitor first (lightweight, always useful)
         if self.memory_monitor_enabled:
             await self._start_memory_monitor()
-
-        # Start embedding server (backend depends on it)
-        if self.embedding_server_enabled:
-            await self._start_embedding_server()
 
         # Start backend API (other services may depend on it)
         if self.backend_enabled:
@@ -147,7 +135,7 @@ class ServiceStartupManager:
 
         self.logger.info(
             f"Service startup manager initialized. Services: "
-            f"MemoryMonitor={self.memory_monitor_enabled}, Embedding={self.embedding_server_enabled}, "
+            f"MemoryMonitor={self.memory_monitor_enabled}, "
             f"Backend={self.backend_enabled}, LLM={self.llm_enabled}, "
             f"ModelServers={self.model_servers_enabled}, Dashboards={self.dashboards_enabled}"
         )
@@ -313,29 +301,6 @@ class ServiceStartupManager:
             self.logger.info(f"Memory monitor started successfully in screen '{screen_name}'")
         else:
             self.logger.error(f"Memory monitor failed to start")
-
-    async def _start_embedding_server(self):
-        """Start the Embedding server in a screen session"""
-        # Check if script exists
-        if not self.embedding_server_script.exists():
-            self.logger.warning(f"Embedding server script not found: {self.embedding_server_script}")
-            return
-
-        screen_name = self.screen_names['embedding_server']
-        cmd = [
-            str(self.uv_path), 'run', 'python',
-            str(self.embedding_server_script),
-            '--port', str(self.embedding_server_port),
-            '--host', '0.0.0.0'
-        ]
-
-        await self._start_in_screen(
-            screen_name=screen_name,
-            cmd=cmd,
-            port=self.embedding_server_port,
-            service_description='Embedding server',
-            log_file='logs/services/embedding_server.log'
-        )
 
     async def _start_llm_server(self):
         """Start the LLM server in a screen session"""
@@ -567,11 +532,6 @@ echo "[$(date)] Model server {instance_name} started with PID $!"
     def get_status(self) -> Dict[str, Any]:
         """Get status of all managed services"""
         status = {
-            'embedding_server': {
-                'enabled': self.embedding_server_enabled,
-                'port': self.embedding_server_port,
-                'running': False
-            },
             'backend': {
                 'enabled': self.backend_enabled,
                 'port': self.backend_port,
@@ -607,8 +567,6 @@ echo "[$(date)] Model server {instance_name} started with PID $!"
                 }
 
         # Check screen session status by port (using sync version for non-async method)
-        if self._check_port_in_use_sync(self.embedding_server_port):
-            status['embedding_server']['running'] = True
         if self._check_port_in_use_sync(self.backend_port):
             status['backend']['running'] = True
         if self._check_port_in_use_sync(self.llm_port):
@@ -639,8 +597,6 @@ echo "[$(date)] Model server {instance_name} started with PID $!"
             # Restart based on service name
             if service_name == 'backend':
                 await self._start_backend()
-            elif service_name == 'embedding_server':
-                await self._start_embedding_server()
             elif service_name == 'llm_server':
                 await self._start_llm_server()
             elif service_name == 'system_monitoring':

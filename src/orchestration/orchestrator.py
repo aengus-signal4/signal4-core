@@ -453,7 +453,7 @@ class TaskOrchestratorV2:
         await self.network_monitor.start_monitoring(self.worker_pool.get_all_workers(), get_session)
 
         # Wait for head node services to be healthy before starting scheduled tasks
-        # (scheduled tasks depend on LLM server, embedding server, etc.)
+        # (scheduled tasks may depend on LLM server, etc.)
         logger.info("Waiting for head node services to be healthy...")
         await self._wait_for_head_node_services()
 
@@ -488,14 +488,14 @@ class TaskOrchestratorV2:
         """
         Wait for critical head node services to be healthy before proceeding.
 
-        Services checked: embedding_server, llm_server (if enabled)
+        Services checked: llm_server (if enabled)
         This ensures scheduled tasks that depend on these services don't fail on startup.
         """
         if not hasattr(self, 'head_node_monitor'):
             logger.warning("Head node monitor not available, skipping service health wait")
             return
 
-        critical_services = ['embedding_server', 'llm_server']
+        critical_services = ['llm_server']
         start_time = asyncio.get_event_loop().time()
 
         while True:

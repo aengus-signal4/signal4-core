@@ -5,11 +5,9 @@ Embedding Hydrator
 Core class for batch generating embeddings for segments.
 Called via scheduled tasks (see config/config.yaml under 'scheduled_tasks').
 
-Primary (0.6B) embeddings can use either:
-- Local model loading (default, for standalone operation)
-- Centralized Embedding Server (when --use-server flag is set)
-
-Alternative (4B) embeddings always use local model loading.
+Uses local model loading for all embeddings:
+- Primary (0.6B): Qwen/Qwen3-Embedding-0.6B
+- Alternative (4B): Qwen/Qwen3-Embedding-4B (for configured projects)
 """
 
 import sys
@@ -25,7 +23,6 @@ from datetime import datetime, timezone
 import numpy as np
 from tqdm import tqdm
 import gc
-import httpx
 
 from src.utils.logger import setup_worker_logger
 from src.database.session import get_session
@@ -39,29 +36,13 @@ logger = setup_worker_logger('embedding_hydrator')
 # Define namedtuple ONCE at module level (not inside loop)
 SegmentData = namedtuple('SegmentData', ['id', 'text', 'embedding_version', 'embedding_alt_model', 'meta_data'])
 
-# Load embedding server configuration from config.yaml
-# When running on worker5 (same host as embedding server), host will be the worker5 IP
-# but we connect to localhost since we're on the same machine
-from src.utils.config import load_config
-_config = load_config()
-_embedding_config = _config.get('services', {}).get('embedding_server', {})
-# For hydrator: if we're running on the same host as the embedding server, use localhost
-# The scheduled task runs on the same host as the embedding server (both on worker5)
-EMBEDDING_SERVER_HOST = '127.0.0.1'  # Always localhost - hydrator runs on same host as server
-EMBEDDING_SERVER_PORT = _embedding_config.get('port', 8005)
-EMBEDDING_SERVER_URL = f"http://{EMBEDDING_SERVER_HOST}:{EMBEDDING_SERVER_PORT}"
-
-# Hydration requests use lower priority (5) to allow backend queries (1) to jump ahead
-HYDRATION_PRIORITY = 5
-
 
 class EmbeddingHydrator:
     """Batch generates embeddings for segments."""
 
     def __init__(self, primary_model_override: Optional[str] = None,
                  alternative_model_override: Optional[str] = None,
-                 alternative_dim: Optional[int] = None,
-                 use_server: bool = False):
+                 alternative_dim: Optional[int] = None):
         """
         Initialize the embedding hydrator.
 
@@ -69,7 +50,6 @@ class EmbeddingHydrator:
             primary_model_override: Override primary model name
             alternative_model_override: Override alternative model name
             alternative_dim: Override alternative model dimension
-            use_server: If True, use centralized embedding server for primary (0.6B) embeddings
         """
         # Load config - navigate from src/utils/ up to repo root
         config_path = get_config_path()
@@ -77,10 +57,6 @@ class EmbeddingHydrator:
             self.config = yaml.safe_load(f)
 
         seg_config = self.config.get('embedding', {}).get('embedding_segmentation', {})
-
-        # Server mode for primary embeddings
-        self.use_server = use_server
-        self._http_client: Optional[httpx.Client] = None
 
         # Primary embedding model - allow override
         if primary_model_override:
@@ -110,22 +86,13 @@ class EmbeddingHydrator:
         self.alternative_model_obj = None
 
         logger.info(f"Embedding hydrator initialized")
-        if self.use_server:
-            logger.info(f"Primary embeddings: Using Embedding Server at {EMBEDDING_SERVER_URL}")
-        else:
-            logger.info(f"Primary model (will load on first use): {self.embedding_model}")
+        logger.info(f"Primary model (will load on first use): {self.embedding_model}")
         if self.alternative_model:
             logger.info(f"Alternative model (will load on first use): {self.alternative_model}")
 
     def cleanup(self):
-        """Release all resources - models, HTTP client, and clear caches."""
+        """Release all resources - models and clear caches."""
         logger.info("Cleaning up embedding hydrator resources...")
-
-        # Close HTTP client if open
-        if self._http_client is not None and not self._http_client.is_closed:
-            self._http_client.close()
-            self._http_client = None
-            logger.info("HTTP client closed")
 
         # Unload primary model
         if self.primary_model is not None:
@@ -150,69 +117,8 @@ class EmbeddingHydrator:
 
         logger.info("Cleanup complete")
 
-    def _get_http_client(self) -> httpx.Client:
-        """Get or create synchronous HTTP client for embedding server."""
-        if self._http_client is None or self._http_client.is_closed:
-            self._http_client = httpx.Client(
-                base_url=EMBEDDING_SERVER_URL,
-                timeout=httpx.Timeout(120.0, connect=10.0)  # 2 min total, 10s connect
-            )
-        return self._http_client
-
-    def _check_server_health(self) -> bool:
-        """Check if embedding server is healthy."""
-        try:
-            client = self._get_http_client()
-            response = client.get("/health")
-            if response.status_code == 200:
-                data = response.json()
-                return data.get('status') == 'healthy'
-            return False
-        except Exception as e:
-            logger.warning(f"Embedding server health check failed: {e}")
-            return False
-
-    def _generate_embeddings_via_server(self, texts: List[str]) -> np.ndarray:
-        """
-        Generate embeddings using the centralized embedding server.
-
-        Uses priority 5 (hydration) so backend queries (priority 1) can jump ahead.
-
-        Args:
-            texts: List of texts to embed
-
-        Returns:
-            Numpy array of embeddings
-        """
-        client = self._get_http_client()
-
-        # Send request with hydration priority (lower than backend)
-        response = client.post(
-            "/embed",
-            json={
-                "texts": texts,
-                "priority": HYDRATION_PRIORITY,
-                "add_instruction": False  # Hydration uses raw text, not queries
-            }
-        )
-
-        if response.status_code != 200:
-            raise RuntimeError(f"Embedding server error {response.status_code}: {response.text}")
-
-        result = response.json()
-        embeddings = np.array(result['embeddings'], dtype=np.float32)
-
-        return embeddings
-
     def _init_primary_model(self):
-        """Lazy load primary embedding model on first use (skipped if using server)."""
-        if self.use_server:
-            # Using embedding server - verify it's healthy
-            if not self._check_server_health():
-                raise RuntimeError(f"Embedding server at {EMBEDDING_SERVER_URL} is not healthy")
-            logger.info(f"Using embedding server at {EMBEDDING_SERVER_URL} for primary embeddings")
-            return
-
+        """Lazy load primary embedding model on first use."""
         if self.primary_model is not None:
             logger.debug("Primary model already loaded")
             return
@@ -913,16 +819,10 @@ class EmbeddingHydrator:
                 generate_primary = True
                 generate_alternative = False
 
-        # Initialize models as needed (skip if using embedding server for primary)
-        if generate_primary and not self.use_server:
+        # Initialize models as needed
+        if generate_primary:
             self._init_primary_model()
-        elif generate_primary and self.use_server:
-            # Just verify server is healthy, don't load local model
-            if not self._check_server_health():
-                raise RuntimeError(f"Embedding server at {EMBEDDING_SERVER_URL} is not healthy")
-            logger.info(f"Using embedding server at {EMBEDDING_SERVER_URL} for primary embeddings")
         if generate_alternative:
-            # Alternative embeddings always use local model (4B not on server)
             self._init_alternative_model()
 
         # Use streaming pagination instead of loading all IDs at once
@@ -1060,33 +960,7 @@ class EmbeddingHydrator:
                     import time
                     primary_embeddings = None
 
-                    # Use embedding server if enabled for primary embeddings
-                    if generate_primary and self.use_server:
-                        start_time = time.time()
-
-                        # Process in chunks via server (server handles batching internally)
-                        max_chunk_size = 64  # Server can handle larger chunks
-                        all_embeddings = []
-
-                        for chunk_start in range(0, len(batch_texts), max_chunk_size):
-                            chunk_end = min(chunk_start + max_chunk_size, len(batch_texts))
-                            chunk_texts = batch_texts[chunk_start:chunk_end]
-
-                            chunk_embeddings = self._generate_embeddings_via_server(chunk_texts)
-                            all_embeddings.append(chunk_embeddings)
-
-                            del chunk_texts
-                            gc.collect()
-
-                        primary_embeddings = np.vstack(all_embeddings) if len(all_embeddings) > 1 else all_embeddings[0]
-                        primary_embeddings = np.asarray(primary_embeddings, dtype=np.float32)
-                        del all_embeddings
-                        gc.collect()
-
-                        encode_time = time.time() - start_time
-                        logger.info(f"Generated {len(primary_embeddings)} primary embeddings via server in {encode_time:.2f}s ({len(primary_embeddings)/encode_time:.1f} emb/s)")
-
-                    elif generate_primary and self.primary_model:
+                    if generate_primary and self.primary_model:
                         # Local model path (original code)
                         # Check actual device
                         logger.info(f"Model device: {self.primary_model.device}")
@@ -1370,9 +1244,7 @@ class EmbeddingHydrator:
 
                 # AGGRESSIVE MEMORY MANAGEMENT: Reload model every N batches to force complete memory reset
                 # MPS has memory fragmentation issues that empty_cache() doesn't fully resolve
-                # Only applies when using local models (not embedding server)
-                if not self.use_server:
-                    batches_processed = (total_primary_generated + total_alternative_generated) // batch_size
+                batches_processed = (total_primary_generated + total_alternative_generated) // batch_size
                     if batches_processed > 0 and batches_processed % 20 == 0:  # Every 20 batches
                         logger.info(f"Reloading model after {batches_processed} batches to reset MPS memory...")
                         if generate_primary and self.primary_model:
@@ -1464,13 +1336,8 @@ class EmbeddingHydrator:
 
         logger.info(f"Starting description embedding (batch_size={batch_size}, limit={effective_limit})")
 
-        # Initialize primary model or verify server (we use the same model as segment embeddings)
-        if self.use_server:
-            if not self._check_server_health():
-                raise RuntimeError(f"Embedding server at {EMBEDDING_SERVER_URL} is not healthy")
-            logger.info(f"Using embedding server at {EMBEDDING_SERVER_URL} for description embeddings")
-        else:
-            self._init_primary_model()
+        # Initialize primary model (we use the same model as segment embeddings)
+        self._init_primary_model()
 
         total_embedded = 0
         total_skipped = 0
@@ -1552,18 +1419,14 @@ class EmbeddingHydrator:
                             torch.mps.empty_cache()
                         gc.collect()
 
-                        if self.use_server:
-                            # Use embedding server
-                            embeddings = self._generate_embeddings_via_server(descriptions)
-                        else:
-                            # Use local model
-                            with torch.no_grad():
-                                embeddings = self.primary_model.encode(
-                                    descriptions,
-                                    convert_to_numpy=True,
-                                    show_progress_bar=False,
-                                    batch_size=32
-                                )
+                        # Use local model
+                        with torch.no_grad():
+                            embeddings = self.primary_model.encode(
+                                descriptions,
+                                convert_to_numpy=True,
+                                show_progress_bar=False,
+                                batch_size=32
+                            )
 
                         embeddings = np.asarray(embeddings, dtype=np.float32)
 
@@ -1629,16 +1492,12 @@ Examples:
   # Process unlimited embeddings (no cap)
   uv run python -m src.utils.embedding_hydrator --max-per-run 0
 
-  # Use local model instead of server (not recommended)
-  uv run python -m src.utils.embedding_hydrator --no-server
-
 IMPORTANT:
   - Default max-per-run is 10,000 embeddings (use --max-per-run 0 for unlimited)
   - Default order: segment embeddings FIRST, then description embeddings (by publish_date DESC)
   - The 10k budget is shared across both phases
   - --primary-only or --alternative-only: Only segment embeddings (skips descriptions)
   - --embed-descriptions: Only description embeddings (skips segments)
-  - --no-server: Use local model instead of embedding server
         ''',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -1649,7 +1508,6 @@ IMPORTANT:
     parser.add_argument("--alt-first", action="store_true", help="Generate alternative (4B) embeddings first, then primary (0.6B)")
     parser.add_argument("--force-reembed", action="store_true", help="Re-generate embeddings even if version exists")
     parser.add_argument("--stitch-version", type=str, default=None, help="Filter to specific stitch version prefix (e.g., 'stitch_v14')")
-    parser.add_argument("--no-server", action="store_true", help="Use local model instead of embedding server (server is used by default)")
     parser.add_argument("--embed-descriptions", action="store_true", help="Embed content descriptions (for semantic related episodes)")
     parser.add_argument("--limit", type=int, default=None, help="Limit number of items to process (for testing)")
     parser.add_argument("--max-per-run", type=int, default=10000, help="Maximum embeddings to generate per run cycle (default: 10000)")
@@ -1667,9 +1525,8 @@ IMPORTANT:
     # Import time for cleanup delays
     import time
 
-    # Run hydration - use server by default unless --no-server is specified
-    use_server = not args.no_server
-    hydrator = EmbeddingHydrator(use_server=use_server)
+    # Run hydration with local model
+    hydrator = EmbeddingHydrator()
 
     # Track total embeddings generated across all phases
     total_generated = 0
