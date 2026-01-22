@@ -287,44 +287,45 @@ class MLXManager:
                     logger.info(f"Detected local worker as {worker_name} with IP {self.local_ip}")
                     break
 
-            # Get model restrictions for this worker
-            worker_models = mlx_config.get('worker_models', {})
-            if self.local_ip in worker_models:
-                worker_config = worker_models[self.local_ip]
-                self.allowed_models = worker_config.get('allowed_models', [])
-                self.default_model = worker_config.get('default_model')
-                logger.info(f"Model restrictions for {self.local_ip}:")
-                logger.info(f"  Allowed models: {self.allowed_models}")
-                logger.info(f"  Default model: {self.default_model}")
-            else:
+            # Get model restrictions for this worker from services.model_servers.instances
+            model_server_instances = config.get('services', {}).get('model_servers', {}).get('instances', {})
+            worker_config_found = False
+
+            for instance_name, instance_config in model_server_instances.items():
+                if not instance_config.get('enabled', False):
+                    continue
+                instance_host = instance_config.get('host')
+                if instance_host == self.local_ip:
+                    self.allowed_models = instance_config.get('allowed_models', [])
+                    self.default_model = instance_config.get('default_model')
+                    worker_config_found = True
+                    logger.info(f"Found model_server config for {instance_name} ({self.local_ip}):")
+                    logger.info(f"  Allowed models: {self.allowed_models}")
+                    logger.info(f"  Default model: {self.default_model}")
+                    break
+
+            if not worker_config_found:
                 # No restrictions - allow all models
                 self.allowed_models = list(MODEL_CONFIGS.keys())
                 self.default_model = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
-                logger.warning(f"No model restrictions found for {self.local_ip}, allowing all models")
+                logger.warning(f"No model_server config found for {self.local_ip}, allowing all models")
 
-            # Discover MLX endpoints from worker config and track their allowed models
+            # Discover MLX endpoints from model_server instances config
             discovered_endpoints = []
-            for worker_name, worker_info in workers.items():
-                if worker_info.get('services', {}).get('llm_server_mlx', {}).get('enabled', False):
-                    eth_ip = worker_info.get('eth')
-                    if eth_ip:
-                        discovered_endpoints.append(eth_ip)
-                        # Store allowed models for this endpoint
-                        if eth_ip in worker_models:
-                            self.endpoint_models[eth_ip] = worker_models[eth_ip].get('allowed_models', [])
-                        else:
-                            self.endpoint_models[eth_ip] = list(MODEL_CONFIGS.keys())
+            for instance_name, instance_config in model_server_instances.items():
+                if not instance_config.get('enabled', False):
+                    continue
+                instance_host = instance_config.get('host')
+                if instance_host:
+                    discovered_endpoints.append(instance_host)
+                    # Store allowed models for this endpoint
+                    self.endpoint_models[instance_host] = instance_config.get('allowed_models', list(MODEL_CONFIGS.keys()))
 
-            # Add configured endpoints
-            configured_endpoints = mlx_config.get('endpoints', [])
-            self.mlx_endpoints = list(set(discovered_endpoints + configured_endpoints + ["10.0.0.34", "localhost"]))
+            # Add localhost
+            self.mlx_endpoints = list(set(discovered_endpoints + ["localhost"]))
 
             # Set localhost models
             self.endpoint_models["localhost"] = self.allowed_models
-
-            # Set worker0 (10.0.0.34) models if not already configured
-            if "10.0.0.34" not in self.endpoint_models:
-                self.endpoint_models["10.0.0.34"] = list(MODEL_CONFIGS.keys())
 
             logger.info(f"Discovered MLX endpoints: {self.mlx_endpoints}")
             logger.info(f"Endpoint model capabilities: {self.endpoint_models}")
@@ -512,12 +513,6 @@ class MLXManager:
                     self.queued_requests -= 1
                     self.endpoint_active_requests[endpoint] += 1
 
-                # Log request preview (first 100 chars of last user message)
-                user_messages = [msg for msg in request.messages if msg.role == "user"]
-                if user_messages:
-                    last_user_msg = user_messages[-1].content[:100]
-                    logger.info(f"[{request_id}] Request preview: {last_user_msg}...")
-
                 logger.debug(f"[{request_id}] Processing request (endpoint {endpoint}, processor {processor_id}, priority {priority})")
                 start_time = time.time()
 
@@ -530,21 +525,19 @@ class MLXManager:
 
                     processing_time = time.time() - start_time
 
-                    # Log response preview (first 100 chars) and MLX stats
-                    response_preview = response_data['response'][:100]
-                    logger.info(f"[{request_id}] Response preview: {response_preview}...")
+                    # Clean completion log
+                    model_used = response_data.get('model_used', 'unknown')
+                    # Extract short model name (e.g., "80B" from full path)
+                    if '80B' in model_used:
+                        model_short = 'tier_1'
+                    elif '30B' in model_used or '4B' in model_used:
+                        model_short = 'tier_2'
+                    elif '8B' in model_used:
+                        model_short = 'tier_3'
+                    else:
+                        model_short = model_used.split('/')[-1][:20]
 
-                    # Log MLX stats if available
-                    mlx_stats = response_data.get('mlx_stats', {})
-                    if mlx_stats:
-                        logger.info(
-                            f"[{request_id}] MLX stats: "
-                            f"prompt={mlx_stats.get('prompt_tokens')}tok @ {mlx_stats.get('prompt_tps')}tok/s, "
-                            f"gen={mlx_stats.get('generation_tokens')}tok @ {mlx_stats.get('generation_tps')}tok/s, "
-                            f"mem={mlx_stats.get('peak_memory_gb')}GB"
-                        )
-
-                    logger.debug(f"[{request_id}] LLM Response from {endpoint} (took {processing_time:.2f}s)")
+                    logger.info(f"[{request_id}] Completed in {processing_time:5.2f}s ({model_short})")
 
                     self.total_requests += 1
                     self.requests_by_task_type[request.task_type.value] += 1

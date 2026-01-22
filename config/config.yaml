@@ -115,10 +115,9 @@ services:
         enabled: true
         host: "10.0.0.34"  # worker0 IP
         port: 8004
-        tiers: ["tier_1", "tier_2"]
+        tiers: ["tier_1", "tier_2", "tier_3"]  # Handle all tiers with 80B model
         allowed_models:
           - "mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit"
-          - "mlx-community/Qwen3-30B-A3B-4bit"
         default_model: "mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit"
       head:
         enabled: false  # Disabled - tier_2 handled by worker0
@@ -426,7 +425,7 @@ processing:
       eth: 10.0.0.34
       wifi: 10.0.0.28
       enabled: true
-      task_types: ["download_podcast:1"]
+      task_types: ["download_podcast:1","diarize:1"]
       max_concurrent_tasks: 1
       type: "worker"
       download_mode: cookie
@@ -485,7 +484,7 @@ processing:
     worker5:
       eth: 10.0.0.209
       wifi: 10.0.0.99
-      enabled: true
+      enabled: false
       task_types: ["stitch:1","diarize:1","convert:1"]
       max_concurrent_tasks: 1
       type: "worker"
@@ -815,15 +814,15 @@ scheduled_tasks:
     embedding_hydration:
       name: "Embedding Hydration"
       description: "Generate segment embeddings first, then description embeddings (newest first), up to 10k per run"
-      enabled: true  # Runs on worker5, loads embedding model directly
+      enabled: true  # Runs on worker6/head, loads embedding model directly
       schedule:
         type: run_then_wait
         wait_seconds: 600  # Wait 10 minutes after completion
       executor:
         type: cli
-        host: "10.0.0.209"  # Run on worker5
+        host: "10.0.0.4"  # Run on worker6/head/local
         command: "python"
-        args: ["-m", "src.utils.embedding_hydrator", "--batch-size", "32", "--max-per-run", "10000", "--no-server"]
+        args: ["-m", "src.utils.embedding_hydrator", "--batch-size", "32", "--max-per-run", "10000"]
         use_screen: true
         screen_name: "embedding_hydration"
       timeout_seconds: 14400
