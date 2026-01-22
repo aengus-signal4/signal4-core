@@ -67,25 +67,6 @@ active_projects:
     priority: 2
     use_alternative_embeddings: false  # English-speaking countries (US, UK, CA, AU, NZ, IE, IN, NG, ZA, PH, KE)
 
-# Content indexing configuration - per-source scheduling
-indexing:
-  enabled: true  # Enable/disable content indexing
-
-  # Per-source scheduling (modular - easy to add TikTok, Instagram, etc.)
-  sources:
-    podcast:
-      enabled: true
-      interval_seconds: 14400  # Run every 4 hours - RSS feeds update frequently
-    youtube:
-      enabled: true
-      interval_seconds: 86400  # Run once per day - API rate limits
-    rumble:
-      enabled: true
-      interval_seconds: 86400  # Run once per day - API rate limits
-    # tiktok:  # Example for future sources
-    #   enabled: false
-    #   interval_seconds: 43200  # Run every 12 hours
-
 # Automated task creation configuration
 task_creation:
   enabled: true  # Enable/disable automated task creation
@@ -808,7 +789,7 @@ scheduled_tasks:
       enabled: true
       schedule:
         type: time_of_day
-        hours: [0, 8, 16]  # Run at 00:00, 08:00, 16:00
+        hours: [0, 4, 8, 12, 16, 20]  # Run every 4 hours
       executor:
         type: cli
         command: "python"
@@ -841,7 +822,7 @@ scheduled_tasks:
       enabled: true
       schedule:
         type: run_then_wait
-        wait_seconds: 3600  # Wait 1 hour after completion
+        wait_seconds: 600  # Wait 10 minutes after completion
       executor:
         type: cli
         command: "python"
@@ -898,6 +879,23 @@ scheduled_tasks:
         screen_name: "tone_hydration"
       timeout_seconds: 14400  # 4 hours max
 
+    # === YouTube Video Cache (for episode matching) ===
+
+    youtube_cache_refresh:
+      name: "YouTube Video Cache Refresh"
+      description: "Refresh YouTube video cache for validated podcast channels and validate new matches"
+      enabled: true
+      schedule:
+        type: time_of_day
+        hours: [4, 12, 20]  # Run at 04:00, 12:00, 20:00 UTC
+      executor:
+        type: cli
+        command: "python"
+        args: ["-m", "src.automation.youtube_cache_refresher", "--match-episodes", "--episode-limit", "50"]
+        use_screen: true
+        screen_name: "youtube_cache_refresh"
+      timeout_seconds: 14400  # 4 hours
+
     # === Backend Cache & Clustering (replaces pg_cron) ===
 
     cache_refresh_30d:
@@ -924,6 +922,23 @@ scheduled_tasks:
         type: sql
         function: "refresh_embedding_cache_7d"
       timeout_seconds: 600
+
+    # === Daily Report Email ===
+
+    daily_report:
+      name: "Daily Report Email"
+      description: "Send daily report email to subscribers via Resend"
+      enabled: true
+      schedule:
+        type: time_of_day
+        hours: [13]  # 13:00 UTC = 8:00 AM Eastern
+      executor:
+        type: cli
+        command: "python"
+        args: ["-m", "src.reporting.daily_report", "--send"]
+        use_screen: true
+        screen_name: "daily_report"
+      timeout_seconds: 1800  # 30 minutes
 
     # Clustering tasks disabled - not using clustering for now
     # clustering_30d_main:
