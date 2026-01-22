@@ -434,6 +434,8 @@ async def main():
     """Main entry point for the thumbnail downloader."""
     parser = argparse.ArgumentParser(description='Download podcast thumbnails to S3')
     parser.add_argument('--channel-ids', type=int, nargs='+', help='Specific channel IDs to process')
+    parser.add_argument('--active-projects', action='store_true', help='Only process channels in active projects')
+    parser.add_argument('--missing-only', action='store_true', help='Only process channels missing image_url')
     parser.add_argument('--test', action='store_true', help='Test mode - process only 3 channels')
     parser.add_argument('--force', action='store_true', help='Re-download existing thumbnails')
     parser.add_argument('--delay', type=float, default=1.0, help='Delay between requests (seconds)')
@@ -448,12 +450,43 @@ async def main():
 
     # Get channels to process
     with get_session() as session:
-        query = session.query(Channel).filter(
-            Channel.platform == 'podcast'
-        )
+        if args.active_projects:
+            # Get channels that have content in active projects
+            from src.database.models import Content
+            from sqlalchemy import distinct, text
+
+            # Active projects with podcast content
+            active_projects = ['CPRMV', 'Canadian', 'Health', 'Finance', 'Anglosphere']
+
+            query = session.query(Channel).filter(
+                Channel.platform == 'podcast',
+                Channel.id.in_(
+                    session.query(distinct(Content.channel_id)).filter(
+                        Content.platform == 'podcast',
+                        Content.channel_id.isnot(None),
+                        Content.projects.op('&&')(active_projects)  # PostgreSQL array overlap
+                    )
+                )
+            )
+            logger.info(f"Filtering to channels in active projects: {active_projects}")
+        else:
+            query = session.query(Channel).filter(
+                Channel.platform == 'podcast'
+            )
 
         if args.channel_ids:
             query = query.filter(Channel.id.in_(args.channel_ids))
+
+        if args.missing_only:
+            # Only channels without image_url
+            from sqlalchemy import or_
+            query = query.filter(
+                or_(
+                    Channel.platform_metadata['image_url'].astext.is_(None),
+                    Channel.platform_metadata['image_url'].astext == ''
+                )
+            )
+            logger.info("Filtering to channels missing image_url")
 
         channels = query.all()
 
@@ -471,9 +504,11 @@ async def main():
         ]
 
     logger.info(f"Found {len(channel_data)} channels to process")
+    print(f"Found {len(channel_data)} channels to process")
 
     if not channel_data:
         logger.warning("No channels found to process")
+        print("No channels found to process")
         return
 
     # Download thumbnails
@@ -486,22 +521,23 @@ async def main():
     try:
         results = await downloader.download_thumbnails_batch(channel_data, force=args.force)
 
-        logger.info(f"\n{'='*50}")
-        logger.info("Thumbnail Download Summary:")
-        logger.info(f"  Total: {results['total']}")
-        logger.info(f"  New downloads: {results['success']}")
-        logger.info(f"  Updated (URL changed): {results['updated']}")
-        logger.info(f"  Skipped (already exist): {results['skipped']}")
-        logger.info(f"  Failed: {results['failed']}")
+        print(f"\n{'='*50}")
+        print("Thumbnail Download Summary:")
+        print(f"  Total: {results['total']}")
+        print(f"  New downloads: {results['success']}")
+        print(f"  Updated (URL changed): {results['updated']}")
+        print(f"  Skipped (already exist): {results['skipped']}")
+        print(f"  Failed: {results['failed']}")
+        logger.info(f"Thumbnail Download Summary: Total={results['total']}, New={results['success']}, Updated={results['updated']}, Skipped={results['skipped']}, Failed={results['failed']}")
 
         if results['errors']:
-            logger.info(f"\nErrors ({len(results['errors'])}):")
+            print(f"\nErrors ({len(results['errors'])}):")
             for err in results['errors'][:10]:  # Show first 10 errors
-                logger.info(f"  Channel {err['channel_id']}: {err['error']}")
+                print(f"  Channel {err['channel_id']}: {err['error']}")
 
         # Update database with new image URLs
         if results['url_updates']:
-            logger.info(f"\nUpdating {len(results['url_updates'])} channel image URLs in database...")
+            print(f"\nUpdating {len(results['url_updates'])} channel image URLs in database...")
             with get_session() as session:
                 for update in results['url_updates']:
                     channel = session.query(Channel).filter(Channel.id == update['channel_id']).first()
@@ -512,7 +548,7 @@ async def main():
                         channel.platform_metadata = pm
                         flag_modified(channel, 'platform_metadata')  # Required for JSONB updates
                 session.commit()
-            logger.info("Database updated successfully")
+            print("Database updated successfully")
 
     finally:
         await downloader.close()

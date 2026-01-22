@@ -79,16 +79,16 @@ def _format_date(dt) -> Optional[str]:
     return dt.isoformat() if hasattr(dt, 'isoformat') else str(dt)
 
 
-def _get_thumbnail_url(content_id: str, platform: str, channel_image_url: Optional[str] = None) -> Optional[str]:
+def _get_thumbnail_url(content_id: str, platform: str, channel_key: Optional[str] = None, has_channel_image: bool = False) -> Optional[str]:
     """Generate thumbnail URL based on platform.
 
     For YouTube: Uses img.youtube.com URL pattern.
-    For podcasts: Uses channel artwork URL from RSS feed (stored in platform_metadata).
+    For podcasts: Uses image proxy URL if channel has an image stored.
     """
     if platform == 'youtube' and content_id and not content_id.startswith('pod_'):
         return f"https://img.youtube.com/vi/{content_id}/mqdefault.jpg"
-    if platform == 'podcast' and channel_image_url:
-        return channel_image_url
+    if platform == 'podcast' and channel_key and has_channel_image:
+        return f"/api/images/channels/{channel_key}.jpg"
     return None
 
 
@@ -244,7 +244,7 @@ async def get_recent_episodes(
 
             total_available = count_result.total if count_result else 0
 
-            # Get episodes with segment counts and channel artwork
+            # Get episodes with segment counts and channel info for thumbnails
             episodes_query = text("""
                 SELECT
                     c.id,
@@ -257,14 +257,17 @@ async def get_recent_episodes(
                     c.platform,
                     c.description,
                     COUNT(es.id) as segment_count,
-                    ch.platform_metadata->>'image_url' as channel_image_url
+                    ch.channel_key,
+                    CASE WHEN ch.platform_metadata->>'image_url' IS NOT NULL
+                         AND ch.platform_metadata->>'image_url' != ''
+                         THEN true ELSE false END as has_channel_image
                 FROM content c
                 LEFT JOIN embedding_segments es ON c.id = es.content_id
                 LEFT JOIN channels ch ON c.channel_id = ch.id
                 WHERE c.projects @> ARRAY[:project]::varchar[]
                 AND c.publish_date >= NOW() - INTERVAL ':days days'
                 AND c.is_embedded = true
-                GROUP BY c.id, ch.platform_metadata
+                GROUP BY c.id, ch.channel_key, ch.platform_metadata
                 ORDER BY c.publish_date DESC
                 LIMIT :limit OFFSET :offset
             """)
@@ -286,7 +289,7 @@ async def get_recent_episodes(
                     duration=int(row.duration) if row.duration else None,
                     platform=row.platform or "unknown",
                     description_short=_truncate_description(row.description),
-                    thumbnail_url=_get_thumbnail_url(row.content_id, row.platform or "", row.channel_image_url),
+                    thumbnail_url=_get_thumbnail_url(row.content_id, row.platform or "", row.channel_key, row.has_channel_image),
                     segment_count=row.segment_count
                 ))
 
