@@ -191,10 +191,16 @@ STYLE:
 - Be vivid and concrete: include specific phrases, examples, and details.
 - Stay neutral and descriptive; do not judge or endorse any position.
 
+PRIORITIZATION:
+- Prioritize transcripts that DIRECTLY and SPECIFICALLY address the question.
+- Favor content that names specific people, events, or details related to the query.
+- If some transcripts are only tangentially related, focus your summary on the most relevant ones.
+
 CITATION RULES:
 - After EVERY factual claim or quote, cite the source using its citation ID, e.g. {{seg_3}}.
 - You may string multiple citations, but NEVER more than 3 per sentence: {{seg_3}} {{seg_6}} {{seg_9}}.
 - ONLY use citation IDs provided above; do NOT invent new ones.
+- Cite the MOST RELEVANT sources first when multiple sources support a claim.
 
 FORMAT:
 - Output exactly ONE paragraph.

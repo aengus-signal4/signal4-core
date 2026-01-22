@@ -33,9 +33,10 @@ class RerankerWeights:
     recency: float = 0.2          # Publish date freshness
     single_speaker: float = 0.1   # Segment has dominant speaker (60%+)
     named_speaker: float = 0.1    # Speaker has identified name
+    similarity_floor: float = 0.0 # Minimum similarity to include (0 = no floor)
 
     def __post_init__(self):
-        """Normalize weights to sum to 1.0."""
+        """Normalize weights to sum to 1.0 (excluding similarity_floor)."""
         total = (self.similarity + self.popularity + self.recency +
                  self.single_speaker + self.named_speaker)
         if total > 0:
@@ -44,6 +45,32 @@ class RerankerWeights:
             self.recency /= total
             self.single_speaker /= total
             self.named_speaker /= total
+
+    @classmethod
+    def topic_summary(cls) -> "RerankerWeights":
+        """
+        Preset for topic summaries: heavily weight channel importance and recency.
+
+        Once content is semantically relevant (above similarity_floor), prioritize:
+        - Recent content from popular/important channels
+        - Similarity acts as a gate (floor=0.45), not the primary ranking signal
+
+        Weights: similarity=0.15, popularity=0.35, recency=0.35, speaker signals=0.15
+        Floor: 0.45 (drops segments with similarity < 45%)
+        """
+        return cls(
+            similarity=0.15,      # Reduced: similarity is a gate, not primary signal
+            popularity=0.35,      # Boosted: channel importance dominates
+            recency=0.35,         # Boosted: recent content prioritized
+            single_speaker=0.08,  # Slight reduction
+            named_speaker=0.07,   # Slight reduction
+            similarity_floor=0.45 # Gate: must be at least 45% similar
+        )
+
+    @classmethod
+    def balanced(cls) -> "RerankerWeights":
+        """Default balanced weights (no similarity floor)."""
+        return cls()  # Uses default values
 
 
 @dataclass
@@ -118,7 +145,20 @@ class SegmentReranker:
         logger.info(f"Reranking {len(segments)} segments with weights: "
                    f"sim={weights.similarity:.2f}, pop={weights.popularity:.2f}, "
                    f"rec={weights.recency:.2f}, single={weights.single_speaker:.2f}, "
-                   f"named={weights.named_speaker:.2f}")
+                   f"named={weights.named_speaker:.2f}, floor={weights.similarity_floor:.2f}")
+
+        # Apply similarity floor if configured
+        if weights.similarity_floor > 0:
+            original_count = len(segments)
+            segments = [s for s in segments if s.get('similarity', 0) >= weights.similarity_floor]
+            filtered_count = original_count - len(segments)
+            if filtered_count > 0:
+                logger.info(f"Similarity floor {weights.similarity_floor:.2f}: "
+                           f"filtered {filtered_count} segments, {len(segments)} remaining")
+
+        if not segments:
+            logger.warning("No segments remaining after similarity floor filtering")
+            return []
 
         # Enrich segments with scoring data
         enriched = self._enrich_segments(segments)

@@ -8,11 +8,15 @@ Direct Q&A workflow with two modes:
 2. run_with_expansion(): Query expansion → semantic search → sample → generate answer
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Literal
 from ..analysis_pipeline import AnalysisPipeline
+from ..segment_reranker import RerankerWeights
 
 from ....utils.backend_logger import get_logger
 logger = get_logger("simple_rag_workflow")
+
+# Type alias for reranker presets
+RerankerPreset = Literal["topic_summary", "balanced"]
 
 
 class SimpleRAGWorkflow:
@@ -30,7 +34,7 @@ class SimpleRAGWorkflow:
         result = await workflow.run(
             query="What is discussed about climate?",
             segments=search_results,
-            n_samples=20
+            n_samples=24
         )
         # Returns: {"summary": "...", "segment_ids": [123, 456, ...]}
     """
@@ -51,7 +55,7 @@ class SimpleRAGWorkflow:
         self,
         query: str,
         segments: List,  # List of Segment objects
-        n_samples: int = 20,
+        n_samples: int = 24,
         diversity_weight: float = 0.8,
         model: str = "grok-4-fast-non-reasoning-latest",
         temperature: float = 0.3,
@@ -187,7 +191,7 @@ class SimpleRAGWorkflow:
         query: str,
         expansion_strategy: str = "multi_query",
         k: int = 100,
-        n_samples: int = 20,
+        n_samples: int = 24,
         diversity_weight: float = 0.8,
         time_window_days: Optional[int] = 30,
         model: str = "grok-4-fast-non-reasoning-latest",
@@ -195,6 +199,7 @@ class SimpleRAGWorkflow:
         max_tokens: int = 800,
         generate_quantitative_metrics: bool = False,
         include_baseline_for_centrality: bool = False,
+        reranker_preset: RerankerPreset = "topic_summary",
         **filters
     ) -> Dict[str, Any]:
         """
@@ -223,6 +228,9 @@ class SimpleRAGWorkflow:
             max_tokens: Max tokens for answer
             generate_quantitative_metrics: Generate quantitative analysis
             include_baseline_for_centrality: Include baseline for centrality calculation
+            reranker_preset: Reranking weight preset (default "topic_summary")
+                - "topic_summary": Heavy weight on channel importance + recency (0.35 each)
+                - "balanced": Equal weight on similarity, popularity, recency (0.4, 0.2, 0.2)
             **filters: Additional search filters (projects, languages, channels)
                 - n_stances: Number of stances (for stance_variation, default 3)
 
@@ -243,10 +251,16 @@ class SimpleRAGWorkflow:
         if not self.db_session:
             raise ValueError("db_session required for run_with_expansion(). Pass it to __init__.")
 
-        logger.info(f"Running SimpleRAG with expansion: query='{query[:50]}...', strategy={expansion_strategy}")
+        logger.info(f"Running SimpleRAG with expansion: query='{query[:50]}...', strategy={expansion_strategy}, reranker={reranker_preset}")
 
         # Build pipeline with query expansion + semantic search
         pipeline = AnalysisPipeline("simple_rag_expansion", llm_service=self.llm_service, db_session=self.db_session)
+
+        # Get reranker weights from preset
+        if reranker_preset == "topic_summary":
+            weights = RerankerWeights.topic_summary()
+        else:
+            weights = RerankerWeights.balanced()
 
         # Custom step: prepare segments as a single "theme"
         async def prepare_segments(context, **params):
@@ -273,7 +287,13 @@ class SimpleRAGWorkflow:
             .retrieve_segments_by_search(k=k, time_window_days=time_window_days, **filters)
             .rerank_segments(
                 best_per_episode=True,
-                time_window_days=time_window_days or 30
+                time_window_days=time_window_days or 30,
+                similarity_weight=weights.similarity,
+                popularity_weight=weights.popularity,
+                recency_weight=weights.recency,
+                single_speaker_weight=weights.single_speaker,
+                named_speaker_weight=weights.named_speaker,
+                similarity_floor=weights.similarity_floor
             )
             .custom_step("prepare_segments", prepare_segments)
         )
@@ -367,7 +387,7 @@ class SimpleRAGWorkflow:
         query: str,
         expansion_strategy: str = "multi_query",
         k: int = 100,
-        n_samples: int = 20,
+        n_samples: int = 24,
         diversity_weight: float = 0.8,
         time_window_days: Optional[int] = 30,
         model: str = "grok-4-fast-non-reasoning-latest",
@@ -375,6 +395,7 @@ class SimpleRAGWorkflow:
         max_tokens: int = 800,
         generate_quantitative_metrics: bool = False,
         include_baseline_for_centrality: bool = False,
+        reranker_preset: RerankerPreset = "topic_summary",
         **filters
     ):
         """
@@ -402,10 +423,16 @@ class SimpleRAGWorkflow:
         if not self.db_session:
             raise ValueError("db_session required for run_with_expansion_stream(). Pass it to __init__.")
 
-        logger.info(f"Running SimpleRAG with expansion (streaming): query='{query[:50]}...', strategy={expansion_strategy}")
+        logger.info(f"Running SimpleRAG with expansion (streaming): query='{query[:50]}...', strategy={expansion_strategy}, reranker={reranker_preset}")
 
         # Build pipeline (same as run_with_expansion)
         pipeline = AnalysisPipeline("simple_rag_expansion_stream", llm_service=self.llm_service, db_session=self.db_session)
+
+        # Get reranker weights from preset
+        if reranker_preset == "topic_summary":
+            weights = RerankerWeights.topic_summary()
+        else:
+            weights = RerankerWeights.balanced()
 
         # Custom step: prepare segments as a single "theme"
         async def prepare_segments(context, **params):
@@ -432,7 +459,13 @@ class SimpleRAGWorkflow:
             .retrieve_segments_by_search(k=k, time_window_days=time_window_days, **filters)
             .rerank_segments(
                 best_per_episode=True,
-                time_window_days=time_window_days or 30
+                time_window_days=time_window_days or 30,
+                similarity_weight=weights.similarity,
+                popularity_weight=weights.popularity,
+                recency_weight=weights.recency,
+                single_speaker_weight=weights.single_speaker,
+                named_speaker_weight=weights.named_speaker,
+                similarity_floor=weights.similarity_floor
             )
             .custom_step("prepare_segments", prepare_segments)
         )

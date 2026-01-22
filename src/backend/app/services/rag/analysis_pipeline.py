@@ -525,6 +525,7 @@ class AnalysisPipeline:
         recency_weight: float = 0.2,
         single_speaker_weight: float = 0.1,
         named_speaker_weight: float = 0.1,
+        similarity_floor: float = 0.0,
         time_window_days: int = 30
     ) -> "AnalysisPipeline":
         """
@@ -551,6 +552,7 @@ class AnalysisPipeline:
             recency_weight: Weight for recency (default 0.2)
             single_speaker_weight: Weight for single speaker bonus (default 0.1)
             named_speaker_weight: Weight for named speaker bonus (default 0.1)
+            similarity_floor: Minimum similarity threshold (default 0.0 = no floor)
             time_window_days: Time window for recency normalization (default 30)
 
         Returns:
@@ -570,6 +572,7 @@ class AnalysisPipeline:
             "recency_weight": recency_weight,
             "single_speaker_weight": single_speaker_weight,
             "named_speaker_weight": named_speaker_weight,
+            "similarity_floor": similarity_floor,
             "time_window_days": time_window_days
         }))
         return self
@@ -1001,7 +1004,8 @@ class AnalysisPipeline:
                 popularity=params.get("popularity_weight", 0.2),
                 recency=params.get("recency_weight", 0.2),
                 single_speaker=params.get("single_speaker_weight", 0.1),
-                named_speaker=params.get("named_speaker_weight", 0.1)
+                named_speaker=params.get("named_speaker_weight", 0.1),
+                similarity_floor=params.get("similarity_floor", 0.0)
             )
 
             # Build diversity constraints
