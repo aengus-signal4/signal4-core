@@ -115,7 +115,7 @@ services:
         enabled: true
         host: "10.0.0.34"  # worker0 IP
         port: 8004
-        tiers: ["tier_1", "tier_2", "tier_3"]  # Handle all tiers with 80B model
+        tiers: ["tier_1", "tier_2", "tier_3"]  # Accept all tiers, upgrade to 80B model
         allowed_models:
           - "mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit"
         default_model: "mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit"
@@ -163,8 +163,8 @@ processing:
     # MLX backend endpoints (model_server.py instances)
     # These are the machines running model_server.py on port 8004
     mlx_endpoints:
-      "10.0.0.34":    # worker0 - tier_1 and tier_2 (80B, 30B models; tier_2 handles tier_3 overflow)
-        tiers: ["tier_1", "tier_2"]
+      "10.0.0.34":    # worker0 - handles all tiers using 80B model
+        tiers: ["tier_1", "tier_2", "tier_3"]
       "10.0.0.209":   # worker5 - tier_3 only (4B model)
         tiers: ["tier_3"]
 
@@ -813,16 +813,16 @@ scheduled_tasks:
 
     embedding_hydration:
       name: "Embedding Hydration"
-      description: "Generate segment embeddings first, then description embeddings (newest first), up to 1k total per run"
-      enabled: true  # Runs on worker6/head, loads embedding model directly
+      description: "Generate segment embeddings first, then description embeddings (newest first)"
+      enabled: true
       schedule:
         type: run_then_wait
-        wait_seconds: 120  # Wait 2 minutes after completion
+        wait_seconds: 1200  # Wait 20 minutes after completion
       executor:
         type: cli
         host: "10.0.0.4"  # Run on worker6/head/local
         command: "python"
-        args: ["-m", "src.utils.embedding_hydrator", "--batch-size", "32", "--max-per-run", "1000"]
+        args: ["-m", "src.utils.embedding_hydrator", "--batch-size", "32", "--max-per-run", "0"]
         use_screen: true
         screen_name: "embedding_hydration"
       timeout_seconds: 14400

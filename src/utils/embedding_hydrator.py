@@ -111,8 +111,10 @@ class EmbeddingHydrator:
         if torch.backends.mps.is_available():
             torch.mps.synchronize()
             torch.mps.empty_cache()
+            logger.info("MPS cache cleared")
         elif torch.cuda.is_available():
             torch.cuda.empty_cache()
+            logger.info("CUDA cache cleared")
         gc.collect()
 
         logger.info("Cleanup complete")
@@ -141,7 +143,19 @@ class EmbeddingHydrator:
         else:
             self.primary_model = SentenceTransformer(self.embedding_model, trust_remote_code=True, local_files_only=True)
 
-        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+        # Use MPS (Metal GPU) for acceleration - memory leaks are managed by:
+        # 1. Aggressive cache clearing after each batch
+        # 2. Model reload every 20 batches
+        # 3. External memory watchdog in hydrate_embeddings_loop.sh
+        if torch.backends.mps.is_available():
+            device = torch.device("mps")
+            logger.info("Using MPS (Metal GPU) for embedding generation")
+        elif torch.cuda.is_available():
+            device = torch.device("cuda")
+            logger.info("Using CUDA GPU for embedding generation")
+        else:
+            device = torch.device("cpu")
+            logger.info("Using CPU for embedding generation (no GPU available)")
         self.primary_model = self.primary_model.to(device)
 
         test_embedding = self.primary_model.encode(["test"], convert_to_numpy=True)
@@ -176,7 +190,19 @@ class EmbeddingHydrator:
                 local_files_only=True
             )
 
-        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+        # Use MPS (Metal GPU) for acceleration - memory leaks are managed by:
+        # 1. Aggressive cache clearing after each batch
+        # 2. Model reload every 20 batches
+        # 3. External memory watchdog in hydrate_embeddings_loop.sh
+        if torch.backends.mps.is_available():
+            device = torch.device("mps")
+            logger.info("Using MPS (Metal GPU) for alternative model")
+        elif torch.cuda.is_available():
+            device = torch.device("cuda")
+            logger.info("Using CUDA GPU for alternative model")
+        else:
+            device = torch.device("cpu")
+            logger.info("Using CPU for alternative model (no GPU available)")
         self.alternative_model_obj = self.alternative_model_obj.to(device)
 
         test_embedding = self.alternative_model_obj.encode(["test"], convert_to_numpy=True)
@@ -329,10 +355,8 @@ class EmbeddingHydrator:
                     content_ids = [c.id for c in content_ids]
                     query = query.filter(EmbeddingSegment.content_id.in_(content_ids))
 
-            # Exclude segments that are too long or already marked as skipped
-            from sqlalchemy import func
+            # Exclude segments already marked as skipped (text length check removed - we truncate during encoding)
             query = query.filter(
-                func.length(EmbeddingSegment.text) <= 3000,
                 ~EmbeddingSegment.embedding_version.like('SKIPPED%') | EmbeddingSegment.embedding_version.is_(None)
             )
 
@@ -358,147 +382,68 @@ class EmbeddingHydrator:
                                             alternative_only: bool = False,
                                             force_reembed: bool = False,
                                             stitch_versions: Optional[dict] = None) -> List[int]:
-        """Get IDs of segments that need embeddings generated or re-generated."""
-        with get_session() as session:
-            query = session.query(EmbeddingSegment.id)
+        """Get IDs of segments that need embeddings generated or re-generated.
 
+        Uses raw SQL with indexed columns only (embedding_version, embedding_alt_model)
+        to avoid expensive scans on vector columns.
+        """
+        from sqlalchemy import text
+
+        with get_session() as session:
+            # Build version filter based on mode
+            # Key insight: use embedding_version column (indexed) not embedding column (vector)
+            if primary_only or (not alternative_only and not force_reembed):
+                # Primary embeddings: version is NULL or doesn't match Qwen model
+                # Uses partial index: idx_segments_needs_primary
+                version_filter = """
+                    (embedding_version IS NULL OR embedding_version NOT LIKE 'Qwen/%')
+                """
+                params = {}
+            elif alternative_only:
+                # Alternative embeddings: has primary but missing/wrong alt version
+                version_filter = """
+                    embedding_version IS NOT NULL
+                    AND (embedding_alt_model IS NULL
+                         OR embedding_alt_model != :target_version)
+                """
+                params = {'target_version': self.alternative_embedding_version}
+            else:
+                # Both (force_reembed case)
+                version_filter = """
+                    ((embedding_version IS NULL OR embedding_version != :primary_version)
+                     OR (embedding_alt_model IS NULL OR embedding_alt_model != :alt_version))
+                    AND (embedding_version IS NULL OR embedding_version NOT LIKE 'SKIPPED%')
+                """
+                params = {
+                    'primary_version': self.primary_embedding_version,
+                    'alt_version': self.alternative_embedding_version
+                }
+
+            # Build content filter if needed
+            content_filter = ""
             if content_id:
-                # Get specific content
                 content = session.query(Content).filter_by(content_id=content_id).first()
-                if content:
-                    query = query.filter(EmbeddingSegment.content_id == content.id)
-                else:
+                if not content:
                     logger.warning(f"Content {content_id} not found")
                     return []
+                content_filter = "AND es.content_id = :content_id"
+                params['content_id'] = content.id
+            elif project:
+                content_filter = "AND :project = ANY(c.projects)"
+                params['project'] = project
 
-            if project:
-                # Get all content for this project - use PostgreSQL array operator
-                from sqlalchemy import any_
-                content_query = session.query(Content.id).filter(
-                    project == any_(Content.projects)
-                )
-                # Filter by stitch version if provided
-                if stitch_versions:
-                    from sqlalchemy import or_
-                    version_filters = []
-                    # Add exact matches
-                    if stitch_versions.get('exact'):
-                        version_filters.extend([Content.stitch_version == v for v in stitch_versions['exact']])
-                    # Add prefix matches
-                    if stitch_versions.get('prefix'):
-                        version_filters.extend([Content.stitch_version.like(f"{v}%") for v in stitch_versions['prefix']])
-                    if version_filters:
-                        content_query = content_query.filter(or_(*version_filters))
+            # Simple, fast query using indexed columns only
+            sql = text(f"""
+                SELECT es.id
+                FROM embedding_segments es
+                {'JOIN content c ON c.id = es.content_id' if project else ''}
+                WHERE {version_filter}
+                {content_filter}
+                ORDER BY es.id
+            """)
 
-                content_ids = content_query.all()
-                content_ids = [c.id for c in content_ids]
-                query = query.filter(EmbeddingSegment.content_id.in_(content_ids))
-            elif alternative_only:
-                # For alternative embeddings: include projects with config OR content from last 30 days
-                from datetime import datetime, timedelta, timezone
-                from sqlalchemy import or_, any_
-
-                # Get projects needing alt embeddings from config
-                active_projects = self.config.get('active_projects', {})
-                projects_needing_alt = [
-                    proj_name for proj_name, proj_config in active_projects.items()
-                    if proj_config.get('use_alternative_embeddings', False)
-                ]
-
-                conditions = []
-
-                # Add project filters
-                if projects_needing_alt:
-                    project_filters = [
-                        proj == any_(Content.projects) for proj in projects_needing_alt
-                    ]
-                    conditions.append(or_(*project_filters))
-
-                # Add recent content filter (last 30 days)
-                cutoff_date = datetime.now(timezone.utc) - timedelta(days=30)
-                conditions.append(Content.publish_date >= cutoff_date)
-
-                # Combine with OR
-                if conditions:
-                    content_query = session.query(Content.id).filter(or_(*conditions))
-
-                    # Filter by stitch version if provided
-                    if stitch_versions:
-                        version_filters = []
-                        # Add exact matches
-                        if stitch_versions.get('exact'):
-                            version_filters.extend([Content.stitch_version == v for v in stitch_versions['exact']])
-                        # Add prefix matches
-                        if stitch_versions.get('prefix'):
-                            version_filters.extend([Content.stitch_version.like(f"{v}%") for v in stitch_versions['prefix']])
-                        if version_filters:
-                            content_query = content_query.filter(or_(*version_filters))
-
-                    content_ids = content_query.all()
-                    content_ids = [c.id for c in content_ids]
-                    query = query.filter(EmbeddingSegment.content_id.in_(content_ids))
-            elif stitch_versions:
-                # No project specified but stitch versions provided - filter all content
-                from sqlalchemy import or_
-                version_filters = []
-                # Add exact matches
-                if stitch_versions.get('exact'):
-                    version_filters.extend([Content.stitch_version == v for v in stitch_versions['exact']])
-                # Add prefix matches
-                if stitch_versions.get('prefix'):
-                    version_filters.extend([Content.stitch_version.like(f"{v}%") for v in stitch_versions['prefix']])
-                if version_filters:
-                    content_ids = session.query(Content.id).filter(or_(*version_filters)).all()
-                    content_ids = [c.id for c in content_ids]
-                    query = query.filter(EmbeddingSegment.content_id.in_(content_ids))
-
-            # Filter based on what needs to be generated
-            if force_reembed:
-                # Force re-embed: check if embedding_version doesn't match target
-                if primary_only:
-                    query = query.filter(
-                        (EmbeddingSegment.embedding.is_(None)) |
-                        (EmbeddingSegment.embedding_version != self.primary_embedding_version)
-                    )
-                elif alternative_only:
-                    query = query.filter(
-                        (EmbeddingSegment.embedding_alt.is_(None)) |
-                        (EmbeddingSegment.embedding_alt_model != self.alternative_embedding_version)
-                    )
-                else:
-                    # Both: check versions for both columns
-                    query = query.filter(
-                        (EmbeddingSegment.embedding.is_(None)) |
-                        (EmbeddingSegment.embedding_version != self.primary_embedding_version) |
-                        (EmbeddingSegment.embedding_alt.is_(None)) |
-                        (EmbeddingSegment.embedding_alt_model != self.alternative_embedding_version)
-                    )
-            else:
-                # Normal mode: generate missing embeddings OR update wrong versions
-                if primary_only:
-                    query = query.filter(
-                        (EmbeddingSegment.embedding.is_(None)) |
-                        (EmbeddingSegment.embedding_version != self.primary_embedding_version)
-                    )
-                elif alternative_only:
-                    query = query.filter(
-                        EmbeddingSegment.embedding.isnot(None),
-                        (EmbeddingSegment.embedding_alt.is_(None)) |
-                        (EmbeddingSegment.embedding_alt_model != self.alternative_embedding_version)
-                    )
-                else:
-                    # Default: anything missing either primary or alt, or with wrong version
-                    query = query.filter(
-                        (EmbeddingSegment.embedding.is_(None)) |
-                        (EmbeddingSegment.embedding_version != self.primary_embedding_version) |
-                        (EmbeddingSegment.embedding_alt.is_(None)) |
-                        (EmbeddingSegment.embedding_alt_model != self.alternative_embedding_version)
-                    )
-
-            # Order by ID for efficient pagination
-            query = query.order_by(EmbeddingSegment.id)
-
-            segment_ids = [row[0] for row in query.all()]
+            result = session.execute(sql, params)
+            segment_ids = [row[0] for row in result.fetchall()]
             logger.info(f"Found {len(segment_ids)} segment IDs needing embeddings")
             return segment_ids
 
@@ -564,19 +509,22 @@ class EmbeddingHydrator:
         alternative_count = 0
 
         # Process in batches with progress bar
+        MAX_TEXT_LENGTH = 2000  # ~500 tokens, safe for Qwen3-Embedding
         embedding_type = "alternative" if (generate_alternative and not generate_primary) else "primary"
         with tqdm(total=len(segments), desc=f"Generating {embedding_type} embeddings", unit="segment") as pbar:
             for i in range(0, len(segments), batch_size):
                 batch = segments[i:i+batch_size]
-                batch_texts = [seg.text for seg in batch]
+                batch_texts = [seg.text[:MAX_TEXT_LENGTH] if len(seg.text) > MAX_TEXT_LENGTH else seg.text for seg in batch]
 
                 logger.info(f"Processing batch {i//batch_size + 1}/{(len(segments)-1)//batch_size + 1} ({len(batch)} segments)")
 
                 # Clear MPS cache BEFORE embedding generation to ensure clean memory
                 if torch.backends.mps.is_available():
+                    torch.mps.synchronize()
                     torch.mps.empty_cache()
                 elif torch.cuda.is_available():
                     torch.cuda.empty_cache()
+                gc.collect()
 
                 # Generate primary embeddings with internal model batching
                 primary_embeddings = None
@@ -584,12 +532,16 @@ class EmbeddingHydrator:
                     # Batch size for 0.6B model
                     model_batch_size = 32
                     logger.info(f"Generating primary embeddings (model_batch_size={model_batch_size})")
-                    primary_embeddings = self.primary_model.encode(
-                        batch_texts,
-                        convert_to_numpy=True,
-                        show_progress_bar=False,
-                        batch_size=model_batch_size
-                    )
+                    # Use no_grad to prevent gradient tracking memory
+                    with torch.no_grad():
+                        primary_embeddings = self.primary_model.encode(
+                            batch_texts,
+                            convert_to_numpy=True,
+                            show_progress_bar=False,
+                            batch_size=model_batch_size
+                        )
+                    # Ensure numpy array to free any torch tensors
+                    primary_embeddings = np.asarray(primary_embeddings, dtype=np.float32)
 
                 # Generate alternative embeddings with internal model batching
                 alternative_embeddings = None
@@ -597,12 +549,16 @@ class EmbeddingHydrator:
                     # Smaller batch size for 4B model (it's much larger)
                     model_batch_size = 16
                     logger.info(f"Generating alternative embeddings (model_batch_size={model_batch_size})")
-                    alternative_embeddings = self.alternative_model_obj.encode(
-                        batch_texts,
-                        convert_to_numpy=True,
-                        show_progress_bar=False,
-                        batch_size=model_batch_size
-                    )
+                    # Use no_grad to prevent gradient tracking memory
+                    with torch.no_grad():
+                        alternative_embeddings = self.alternative_model_obj.encode(
+                            batch_texts,
+                            convert_to_numpy=True,
+                            show_progress_bar=False,
+                            batch_size=model_batch_size
+                        )
+                    # Ensure numpy array to free any torch tensors
+                    alternative_embeddings = np.asarray(alternative_embeddings, dtype=np.float32)
 
                 # Save to database using bulk update
                 with get_session() as session:
@@ -653,9 +609,11 @@ class EmbeddingHydrator:
 
                 # Clear PyTorch/MPS cache after EVERY batch (important for large batch sizes)
                 if torch.backends.mps.is_available():
+                    torch.mps.synchronize()
                     torch.mps.empty_cache()
                 elif torch.cuda.is_available():
                     torch.cuda.empty_cache()
+                gc.collect()
 
         logger.info(f"Hydration complete: {primary_count} primary embeddings, {alternative_count} alternative embeddings")
 
@@ -825,21 +783,19 @@ class EmbeddingHydrator:
         if generate_alternative:
             self._init_alternative_model()
 
-        # Use streaming pagination instead of loading all IDs at once
-        # This dramatically reduces memory usage for large datasets
-        embedding_type = "alternative (4B)" if (generate_alternative and not generate_alternative) else "primary (0.6B)"
+        embedding_type = "alternative (4B)" if (generate_alternative and not generate_primary) else "primary (0.6B)"
 
-        # First, get a count (fast query using index)
-        total_needing = self._count_missing_embeddings(
+        # Get all segment IDs needing embeddings upfront (fast query on indexed columns only)
+        logger.info(f"Fetching segment IDs needing {embedding_type} embeddings...")
+        segment_ids = self._get_segment_ids_needing_embeddings(
             project=project,
-            primary=(generate_primary and not generate_alternative),
-            alternative=(generate_alternative and not generate_primary),
-            stitch_versions=stitch_versions,
-            recent_content_days=30 if (generate_alternative and not generate_primary) else None
+            primary_only=(generate_primary and not generate_alternative),
+            alternative_only=(generate_alternative and not generate_primary),
+            force_reembed=force_reembed,
+            stitch_versions=stitch_versions
         )
 
-        if total_needing == 0:
-            embedding_type = "alternative (4B)" if (generate_alternative and not generate_primary) else "primary (0.6B)"
+        if not segment_ids:
             logger.info(f"No {embedding_type} embeddings needed")
             return {
                 'status': 'success',
@@ -848,86 +804,45 @@ class EmbeddingHydrator:
                 'total_segments': 0
             }
 
-        # Determine how many to process this run
-        segments_to_process = total_needing
+        # Apply max_per_run limit
+        total_needing = len(segment_ids)
         if max_per_run and total_needing > max_per_run:
             logger.info(f"Found {total_needing:,} segments needing {embedding_type} embeddings, limiting to {max_per_run:,}")
-            segments_to_process = max_per_run
+            segment_ids = segment_ids[:max_per_run]
         else:
             logger.info(f"Found {total_needing:,} segments needing {embedding_type} embeddings")
 
-        logger.info(f"Processing up to {segments_to_process:,} segments in batches of {batch_size}")
+        segments_to_process = len(segment_ids)
+        logger.info(f"Processing {segments_to_process:,} segments in batches of {batch_size}")
 
-        # Process segments in batches using streaming pagination
-        # Fetch batches directly from DB instead of pre-loading all IDs
         total_primary_generated = 0
         total_alternative_generated = 0
-        last_processed_id = 0  # For keyset pagination
         loop_iteration = 0
 
         with tqdm(total=segments_to_process, desc=f"Generating {embedding_type} embeddings", unit="segment") as pbar:
-            while total_primary_generated + total_alternative_generated < segments_to_process:
+            for batch_start in range(0, segments_to_process, batch_size):
                 loop_iteration += 1
+                batch_ids = segment_ids[batch_start:batch_start + batch_size]
 
                 try:
-                    # Fetch next batch using keyset pagination (much more efficient than OFFSET)
+                    # Fetch segment data by IDs (fast primary key lookup)
                     from sqlalchemy import text
                     with get_session() as session:
-                        # Build WHERE clause for filtering
-                        if generate_primary and not generate_alternative:
-                            version_filter = """
-                                AND (es.embedding_version IS NULL
-                                     OR es.embedding_version != :target_version)
-                            """
-                            params = {
-                                'last_id': last_processed_id,
-                                'batch_size': batch_size,
-                                'target_version': self.primary_embedding_version
-                            }
-                        else:
-                            # Alternative embeddings
-                            version_filter = """
-                                AND es.embedding_version IS NOT NULL
-                                AND (es.embedding_alt_model IS NULL
-                                     OR es.embedding_alt_model != :target_version)
-                            """
-                            params = {
-                                'last_id': last_processed_id,
-                                'batch_size': batch_size,
-                                'target_version': self.alternative_embedding_version
-                            }
-
-                        # Add project filter if specified
-                        project_filter = ""
-                        if project:
-                            project_filter = "AND :project = ANY(c.projects)"
-                            params['project'] = project
-
-                        # Filter out segments that are too long (>8000 chars) or already marked as skipped
-                        sql = text(f"""
-                            SELECT es.id, es.text, es.embedding_version, es.embedding_alt_model, es.meta_data
-                            FROM public.embedding_segments es
-                            JOIN public.content c ON c.id = es.content_id
-                            WHERE es.id > :last_id
-                            AND LENGTH(es.text) <= 3000
-                            AND (es.embedding_version IS NULL OR es.embedding_version NOT LIKE 'SKIPPED%')
-                            {version_filter}
-                            {project_filter}
-                            ORDER BY es.id
-                            LIMIT :batch_size
+                        sql = text("""
+                            SELECT id, text, embedding_version, embedding_alt_model, meta_data
+                            FROM public.embedding_segments
+                            WHERE id = ANY(:ids)
+                            ORDER BY id
                         """)
-                        result = session.execute(sql, params)
+                        result = session.execute(sql, {'ids': batch_ids})
                         rows = result.fetchall()
 
                     if not rows:
-                        logger.info(f"No more segments to process after batch {loop_iteration}")
-                        break
+                        logger.warning(f"No segments found for batch {loop_iteration} IDs")
+                        continue
 
                     # Convert rows to simple objects using module-level namedtuple
                     segments = [SegmentData(*row) for row in rows]
-
-                    # Update last_processed_id for next iteration
-                    last_processed_id = segments[-1].id
 
                     # Clean up database result objects
                     del rows
@@ -935,12 +850,13 @@ class EmbeddingHydrator:
 
                 except Exception as e:
                     logger.error(f"Error fetching batch {loop_iteration}: {e}", exc_info=True)
-                    # Try to continue to next batch
                     continue
 
-                # Note: Long segments (>8000 chars) are now filtered out in the SQL query
-                # Process this batch
-                batch_texts = [seg.text for seg in segments]
+                # Truncate long texts to limit memory usage
+                # Qwen3-Embedding: 8192 token limit, ~4 chars/token = ~2000 chars is safe
+                # 32 texts × 2000 chars = 64KB vs 256KB before
+                MAX_TEXT_LENGTH = 2000
+                batch_texts = [seg.text[:MAX_TEXT_LENGTH] if len(seg.text) > MAX_TEXT_LENGTH else seg.text for seg in segments]
 
                 logger.info(f"Processing batch {loop_iteration} with {len(segments)} segments (IDs {segments[0].id} to {segments[-1].id})")
 
@@ -956,25 +872,37 @@ class EmbeddingHydrator:
 
                 # Generate primary embeddings with chunked processing to avoid MPS OOM
                 try:
-                    logger.info(f"About to generate embeddings for {len(batch_texts)} texts")
                     import time
+
+                    # Log text stats to understand memory requirements
+                    text_lengths = [len(t) for t in batch_texts]
+                    total_chars = sum(text_lengths)
+                    max_len = max(text_lengths)
+                    avg_len = total_chars / len(batch_texts) if batch_texts else 0
+                    logger.info(f"Batch text stats: {len(batch_texts)} texts, total={total_chars:,} chars, max={max_len:,}, avg={avg_len:.0f}")
+
                     primary_embeddings = None
 
                     if generate_primary and self.primary_model:
-                        # Local model path (original code)
-                        # Check actual device
                         logger.info(f"Model device: {self.primary_model.device}")
 
-                        # Process in chunks to avoid MPS memory issues with large batches
-                        # Use VERY small chunks to prevent MPS accumulation (MPS has memory leak issues)
-                        max_chunk_size = 32  # Much smaller to force frequent cache clears
-                        model_batch_size = 8  # Also reduce internal batch size
+                        # Log MPS memory before encoding
+                        if torch.backends.mps.is_available():
+                            mem_before = torch.mps.driver_allocated_memory() / 1024**3
+                            logger.info(f"MPS memory before encode(): {mem_before:.2f} GB")
+
+                        # Process in small chunks to avoid MPS memory issues
+                        max_chunk_size = 16  # Reduced from 32
+                        model_batch_size = 4  # Reduced from 8
                         start_time = time.time()
 
                         all_embeddings = []
                         for chunk_start in range(0, len(batch_texts), max_chunk_size):
                             chunk_end = min(chunk_start + max_chunk_size, len(batch_texts))
                             chunk_texts = batch_texts[chunk_start:chunk_end]
+
+                            chunk_lengths = [len(t) for t in chunk_texts]
+                            logger.info(f"Encoding chunk {chunk_start//max_chunk_size + 1}: {len(chunk_texts)} texts, max_len={max(chunk_lengths)}, total_chars={sum(chunk_lengths):,}")
 
                             # Use no_grad to prevent gradient tracking memory
                             with torch.no_grad():
@@ -984,6 +912,11 @@ class EmbeddingHydrator:
                                     show_progress_bar=False,
                                     batch_size=model_batch_size
                                 )
+
+                            # Log MPS memory after this chunk
+                            if torch.backends.mps.is_available():
+                                mem_after = torch.mps.driver_allocated_memory() / 1024**3
+                                logger.info(f"MPS memory after chunk encode: {mem_after:.2f} GB")
 
                             all_embeddings.append(chunk_embeddings)
 
@@ -1342,6 +1275,9 @@ class EmbeddingHydrator:
         total_embedded = 0
         total_skipped = 0
 
+        # Max description length to embed (longer ones are truncated)
+        MAX_DESC_LENGTH = 2000
+
         with get_session() as session:
             # Build query for content needing description embeddings
             # Order by publish_date DESC (newest first) to prioritize recent content
@@ -1396,13 +1332,14 @@ class EmbeddingHydrator:
                     if not content_items:
                         break
 
-                    # Prepare texts for embedding
+                    # Prepare texts for embedding (truncate to MAX_DESC_LENGTH)
                     descriptions = []
                     content_ids = []
                     for content in content_items:
                         desc = content.description.strip() if content.description else ''
                         if desc:
-                            descriptions.append(desc)
+                            # Truncate long descriptions to avoid memory spikes
+                            descriptions.append(desc[:MAX_DESC_LENGTH])
                             content_ids.append(content.id)
                         else:
                             total_skipped += 1
@@ -1443,7 +1380,9 @@ class EmbeddingHydrator:
                         del embeddings, descriptions
                         gc.collect()
                         if torch.backends.mps.is_available():
+                            torch.mps.synchronize()
                             torch.mps.empty_cache()
+                        gc.collect()
 
                     except Exception as e:
                         logger.error(f"Error embedding batch: {e}", exc_info=True)
