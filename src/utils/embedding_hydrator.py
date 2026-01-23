@@ -1332,65 +1332,54 @@ class EmbeddingHydrator:
                     if not content_items:
                         break
 
-                    # Prepare texts for embedding (truncate to MAX_DESC_LENGTH)
-                    descriptions = []
-                    content_ids = []
+                    # Process ONE description at a time to minimize memory footprint
                     for content in content_items:
                         desc = content.description.strip() if content.description else ''
-                        if desc:
-                            # Truncate long descriptions to avoid memory spikes
-                            descriptions.append(desc[:MAX_DESC_LENGTH])
-                            content_ids.append(content.id)
-                        else:
+                        if not desc:
                             total_skipped += 1
+                            pbar.update(1)
+                            continue
 
-                    if not descriptions:
-                        pbar.update(len(content_items))
-                        continue
+                        # Truncate long descriptions
+                        desc = desc[:MAX_DESC_LENGTH]
 
-                    # Generate embeddings
-                    try:
-                        # Clear MPS cache before embedding
-                        if torch.backends.mps.is_available():
-                            torch.mps.synchronize()
-                            torch.mps.empty_cache()
-                        gc.collect()
+                        try:
+                            # Clear MPS cache before each embedding
+                            if torch.backends.mps.is_available():
+                                torch.mps.synchronize()
+                                torch.mps.empty_cache()
+                            gc.collect()
 
-                        # Use local model with small batch size to avoid MPS OOM
-                        with torch.no_grad():
-                            embeddings = self.primary_model.encode(
-                                descriptions,
-                                convert_to_numpy=True,
-                                show_progress_bar=False,
-                                batch_size=8
-                            )
+                            # Embed single description
+                            with torch.no_grad():
+                                embedding = self.primary_model.encode(
+                                    [desc],
+                                    convert_to_numpy=True,
+                                    show_progress_bar=False
+                                )
 
-                        embeddings = np.asarray(embeddings, dtype=np.float32)
+                            embedding = np.asarray(embedding, dtype=np.float32)[0]
 
-                        # Update database
-                        for idx, content_id in enumerate(content_ids):
-                            content = session.query(Content).filter(Content.id == content_id).first()
-                            if content:
-                                content.description_embedding = embeddings[idx].tolist()
-                                total_embedded += 1
+                            # Update database
+                            content.description_embedding = embedding.tolist()
+                            session.commit()
+                            total_embedded += 1
 
-                        session.commit()
+                            # Clear memory
+                            del embedding
+                            gc.collect()
 
-                        # Clear memory
-                        del embeddings, descriptions
-                        gc.collect()
-                        if torch.backends.mps.is_available():
-                            torch.mps.synchronize()
-                            torch.mps.empty_cache()
-                        gc.collect()
+                        except Exception as e:
+                            logger.error(f"Error embedding content {content.id}: {e}", exc_info=True)
+                            session.rollback()
+                            # Continue to next item
+                            continue
 
-                    except Exception as e:
-                        logger.error(f"Error embedding batch: {e}", exc_info=True)
-                        session.rollback()
-                        # Continue to next batch
-                        continue
+                        pbar.update(1)
 
-                    pbar.update(len(content_items))
+                        # Check if we've hit the limit
+                        if effective_limit and total_embedded >= effective_limit:
+                            break
 
                 # Check if we've hit the limit
                 if effective_limit and total_embedded >= effective_limit:
@@ -1436,7 +1425,7 @@ Examples:
   uv run python -m src.utils.embedding_hydrator --max-per-run 0
 
 IMPORTANT:
-  - Default max-per-run is 10,000 embeddings (use --max-per-run 0 for unlimited)
+  - Default max-per-run is 2,000 embeddings (use --max-per-run 0 for unlimited)
   - Default order: segment embeddings FIRST, then description embeddings (by publish_date DESC)
   - The 10k budget is shared across both phases
   - --primary-only or --alternative-only: Only segment embeddings (skips descriptions)
@@ -1453,7 +1442,8 @@ IMPORTANT:
     parser.add_argument("--stitch-version", type=str, default=None, help="Filter to specific stitch version prefix (e.g., 'stitch_v14')")
     parser.add_argument("--embed-descriptions", action="store_true", help="Embed content descriptions (for semantic related episodes)")
     parser.add_argument("--limit", type=int, default=None, help="Limit number of items to process (for testing)")
-    parser.add_argument("--max-per-run", type=int, default=10000, help="Maximum embeddings to generate per run cycle (default: 10000)")
+    parser.add_argument("--max-per-run", type=int, default=2000, help="Maximum embeddings to generate per run cycle (default: 2000)")
+    parser.add_argument("--max-descriptions", type=int, default=64, help="Maximum description embeddings per run (default: 64)")
 
     args = parser.parse_args()
 
@@ -1477,11 +1467,15 @@ IMPORTANT:
 
     # Handle --embed-descriptions ONLY mode (skip segments)
     if args.embed_descriptions:
-        logger.info("Running description embedding mode (only)...")
+        # Use max_descriptions limit (default 64), but respect max_per_run if lower
+        desc_limit = args.max_descriptions
+        if max_per_run is not None:
+            desc_limit = min(desc_limit, max_per_run)
+        logger.info(f"Running description embedding mode (only, max {desc_limit})...")
         result = asyncio.run(hydrator.embed_descriptions(
             batch_size=args.batch_size,
             limit=args.limit,
-            max_per_run=max_per_run
+            max_per_run=desc_limit
         ))
         logger.info(f"Description embedding result: {result}")
 
@@ -1569,10 +1563,14 @@ IMPORTANT:
 
         # Phase 2: Description embeddings (if budget remains)
         if remaining_budget is None or remaining_budget > 0:
-            logger.info("Phase 2: Generating content description embeddings (newest first)...")
+            # Cap description embeddings at max_descriptions (default 64)
+            desc_budget = args.max_descriptions
+            if remaining_budget is not None:
+                desc_budget = min(desc_budget, remaining_budget)
+            logger.info(f"Phase 2: Generating content description embeddings (max {desc_budget}, newest first)...")
             result_desc = asyncio.run(hydrator.embed_descriptions(
                 batch_size=args.batch_size,
-                max_per_run=remaining_budget
+                max_per_run=desc_budget
             ))
             total_generated += result_desc.get('embedded', 0)
 
