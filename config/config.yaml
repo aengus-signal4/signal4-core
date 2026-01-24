@@ -120,7 +120,7 @@ services:
           - "mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit"
         default_model: "mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit"
       head:
-        enabled: false  # Disabled - tier_2 handled by worker0
+        enabled: true  # tier_2 on head node (worker6)
         host: "10.0.0.4"   # head node IP
         port: 8004
         tiers: ["tier_2"]
@@ -165,6 +165,8 @@ processing:
     mlx_endpoints:
       "10.0.0.34":    # worker0 - handles all tiers using 80B model
         tiers: ["tier_1", "tier_2", "tier_3"]
+      "10.0.0.4":     # head node (worker6) - tier_2 only (30B model)
+        tiers: ["tier_2"]
       "10.0.0.209":   # worker5 - tier_3 only (4B model)
         tiers: ["tier_3"]
 
@@ -485,7 +487,7 @@ processing:
       eth: 10.0.0.209
       wifi: 10.0.0.99
       enabled: false
-      task_types: ["stitch:1","diarize:1","convert:1"]
+      task_types: ["transcribe:1","diarize:1","stitch:1","convert:1"]
       max_concurrent_tasks: 1
       type: "worker"
       services:
@@ -497,7 +499,7 @@ processing:
       eth: 10.0.0.4
       wifi: 10.0.0.215
       enabled: true
-      task_types: ["download_rumble:1","download_podcast:1","download_youtube:1","transcribe:3"]
+      task_types: ["download_rumble:1","download_podcast:1","download_youtube:1","transcribe:1"]
       max_concurrent_tasks: 1
       type: "head"
       services:

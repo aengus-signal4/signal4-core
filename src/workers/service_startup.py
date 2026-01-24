@@ -121,13 +121,13 @@ class ServiceStartupManager:
         if self.backend_enabled:
             await self._start_backend()
 
-        # Start LLM server
-        if self.llm_enabled:
-            await self._start_llm_server()
-
-        # Start model servers (infrastructure services)
+        # Start model servers BEFORE LLM balancer so they're healthy when balancer initializes
         if self.model_servers_enabled:
             await self._start_model_servers()
+
+        # Start LLM server (balancer) - needs model servers to be running
+        if self.llm_enabled:
+            await self._start_llm_server()
 
         # Start dashboards last (they depend on other services being up)
         if self.dashboards_enabled:

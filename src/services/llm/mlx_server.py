@@ -70,14 +70,19 @@ MODEL_CONFIGS = {
         "aliases": ["qwen3:80b", "80b", "large", "tier_1", "tier1", "best"],
         "description": "80B parameter model - best quality"
     },
+    "mlx-community/Qwen3-30B-A3B-4bit": {
+        "rank": 2,  # Tier 2 - Balanced (30B MoE)
+        "aliases": ["qwen3:30b", "30b", "medium", "tier_2", "tier2", "balanced"],
+        "description": "30B parameter MoE model - balanced speed/quality"
+    },
     "mlx-community/Qwen3-4B-Instruct-2507-4bit": {
-        "rank": 2,  # Tier 2 - Balanced
-        "aliases": ["qwen3:4b-instruct", "qwen3:4b", "4b", "medium", "tier_2", "tier2", "balanced"],
-        "description": "4B parameter model - balanced speed/quality"
+        "rank": 3,  # Tier 3 - Fast
+        "aliases": ["qwen3:4b-instruct", "qwen3:4b", "4b", "tier_3", "tier3"],
+        "description": "4B parameter model - fast"
     },
     "mlx-community/LFM2-8B-A1B-4bit": {
-        "rank": 3,  # Tier 3 - Fastest
-        "aliases": ["lfm2:8b", "8b", "small", "fast", "tier_3", "tier3", "fastest"],
+        "rank": 4,  # Tier 4 - Fastest (legacy)
+        "aliases": ["lfm2:8b", "8b", "small", "fast", "fastest"],
         "description": "8B parameter model - fastest"
     }
 }
