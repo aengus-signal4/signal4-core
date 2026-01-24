@@ -4,16 +4,73 @@ Explore Router
 
 API endpoints for exploring content within a project.
 Provides statistics, recent episodes, and browse functionality.
+
+Includes in-memory caching with 2-hour TTL for overview queries.
 """
 
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import func, desc, text
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict, Any, Tuple
 import time
+import threading
 
 from ..utils.backend_logger import get_logger
 logger = get_logger("explore_router")
+
+
+# ============================================================================
+# In-Memory TTL Cache
+# ============================================================================
+
+class TTLCache:
+    """Simple thread-safe TTL cache for overview queries."""
+
+    def __init__(self, ttl_seconds: int = 7200):  # 2 hours default
+        self._cache: Dict[str, Tuple[Any, float]] = {}
+        self._lock = threading.Lock()
+        self.ttl_seconds = ttl_seconds
+
+    def get(self, key: str) -> Optional[Any]:
+        """Get value if exists and not expired."""
+        with self._lock:
+            if key not in self._cache:
+                return None
+            value, timestamp = self._cache[key]
+            if time.time() - timestamp > self.ttl_seconds:
+                del self._cache[key]
+                return None
+            return value
+
+    def set(self, key: str, value: Any) -> None:
+        """Set value with current timestamp."""
+        with self._lock:
+            self._cache[key] = (value, time.time())
+
+    def invalidate(self, key: str) -> None:
+        """Remove a specific key from cache."""
+        with self._lock:
+            self._cache.pop(key, None)
+
+    def clear(self) -> None:
+        """Clear all cached entries."""
+        with self._lock:
+            self._cache.clear()
+
+    def stats(self) -> Dict[str, Any]:
+        """Get cache statistics."""
+        with self._lock:
+            now = time.time()
+            valid = sum(1 for _, (_, ts) in self._cache.items() if now - ts <= self.ttl_seconds)
+            return {
+                "total_entries": len(self._cache),
+                "valid_entries": valid,
+                "ttl_seconds": self.ttl_seconds
+            }
+
+
+# Global cache instance (2-hour TTL)
+_overview_cache = TTLCache(ttl_seconds=7200)
 
 from src.database.session import get_session
 from src.database.models import Content, Channel, EmbeddingSegment
@@ -139,8 +196,16 @@ async def get_project_stats(
 
     Returns counts of episodes, channels, segments, and total duration.
     Uses the embedding cache tables for efficient queries.
+    Cached for 2 hours.
     """
     start_time = time.time()
+
+    # Check cache
+    cache_key = f"stats:{project}:{time_window_days}"
+    cached = _overview_cache.get(cache_key)
+    if cached:
+        logger.debug(f"Cache HIT for stats/{project} (time_window={time_window_days})")
+        return cached
 
     try:
         with get_session() as session:
@@ -170,7 +235,7 @@ async def get_project_stats(
             ).fetchone()
 
             if not result or result.total_episodes == 0:
-                # No data found, return zeros
+                # No data found, return zeros (don't cache empty results)
                 processing_time = (time.time() - start_time) * 1000
                 return ProjectStatsResponse(
                     success=True,
@@ -212,7 +277,7 @@ async def get_project_stats(
 
             processing_time = (time.time() - start_time) * 1000
 
-            return ProjectStatsResponse(
+            response = ProjectStatsResponse(
                 success=True,
                 stats=ProjectStats(
                     project=project,
@@ -225,6 +290,12 @@ async def get_project_stats(
                     processing_time_ms=processing_time
                 )
             )
+
+            # Cache the response
+            _overview_cache.set(cache_key, response)
+            logger.debug(f"Cache SET for stats/{project} (time_window={time_window_days})")
+
+            return response
 
     except Exception as e:
         logger.error(f"Error fetching project stats for {project}: {e}", exc_info=True)
@@ -240,8 +311,16 @@ async def get_release_heatmap(
     Get episode release counts by hour for heatmap visualization.
 
     Returns hourly counts for the specified number of days.
+    Cached for 2 hours.
     """
     start_time = time.time()
+
+    # Check cache
+    cache_key = f"heatmap:{project}:{days}"
+    cached = _overview_cache.get(cache_key)
+    if cached:
+        logger.debug(f"Cache HIT for heatmap/{project} (days={days})")
+        return cached
 
     try:
         with get_session() as session:
@@ -275,12 +354,18 @@ async def get_release_heatmap(
 
             processing_time = (time.time() - start_time) * 1000
 
-            return HeatmapResponse(
+            response = HeatmapResponse(
                 success=True,
                 project=project,
                 data=data,
                 processing_time_ms=processing_time
             )
+
+            # Cache the response
+            _overview_cache.set(cache_key, response)
+            logger.debug(f"Cache SET for heatmap/{project} (days={days})")
+
+            return response
 
     except Exception as e:
         logger.error(f"Error fetching heatmap data for {project}: {e}", exc_info=True)
@@ -303,8 +388,25 @@ async def get_recent_episodes(
 
     Returns episode cards with title, channel, date, thumbnail, and short description.
     Supports filtering by channel, date range, and keyword search.
+    Cached for 2 hours (default view only - filters bypass cache).
     """
     start_time = time.time()
+
+    # Only cache the default view (no filters, first page)
+    is_default_view = (
+        channel_id is None and
+        start_date is None and
+        end_date is None and
+        search is None and
+        offset == 0
+    )
+
+    if is_default_view:
+        cache_key = f"recent:{project}:{time_window_days}:{limit}"
+        cached = _overview_cache.get(cache_key)
+        if cached:
+            logger.debug(f"Cache HIT for recent/{project} (time_window={time_window_days}, limit={limit})")
+            return cached
 
     try:
         with get_session() as session:
@@ -399,7 +501,7 @@ async def get_recent_episodes(
 
             processing_time = (time.time() - start_time) * 1000
 
-            return RecentEpisodesResponse(
+            response = RecentEpisodesResponse(
                 success=True,
                 project=project,
                 time_window_days=time_window_days,
@@ -408,6 +510,35 @@ async def get_recent_episodes(
                 processing_time_ms=processing_time
             )
 
+            # Cache the default view
+            if is_default_view:
+                _overview_cache.set(cache_key, response)
+                logger.debug(f"Cache SET for recent/{project} (time_window={time_window_days}, limit={limit})")
+
+            return response
+
     except Exception as e:
         logger.error(f"Error fetching recent episodes for {project}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/cache/stats")
+async def get_cache_stats():
+    """
+    Get cache statistics for monitoring.
+
+    Returns the number of cached entries and TTL configuration.
+    """
+    return _overview_cache.stats()
+
+
+@router.post("/cache/clear")
+async def clear_cache():
+    """
+    Clear the overview cache.
+
+    Useful for forcing fresh data after content updates.
+    """
+    _overview_cache.clear()
+    logger.info("Overview cache cleared")
+    return {"success": True, "message": "Cache cleared"}
