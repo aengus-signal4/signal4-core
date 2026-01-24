@@ -585,6 +585,7 @@ class LLMBalancer:
             "temperature": request.temperature,
             "top_p": request.top_p,
             "priority": request.priority,
+            "task_type": request.task_type.value,
         }
         if request.seed is not None:
             payload["seed"] = request.seed
