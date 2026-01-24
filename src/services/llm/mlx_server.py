@@ -298,15 +298,13 @@ class MLXManager:
 
         # Check if requested model is allowed on this worker
         if resolved_model not in self.allowed_models:
-            logger.warning(f"Requested model {resolved_model} not allowed on this worker ({self.local_ip})")
-            # Find best allowed model as fallback
+            # Find best allowed model as fallback (silently - completion log shows upgrade)
             allowed_by_rank = sorted(
                 [m for m in self.allowed_models],
                 key=lambda m: MODEL_CONFIGS[m]['rank']
             )
             if allowed_by_rank:
                 resolved_model = allowed_by_rank[0]  # Best ranked allowed model
-                logger.info(f"Using best allowed model: {resolved_model}")
             else:
                 raise RuntimeError(f"No allowed models configured for this worker")
 
