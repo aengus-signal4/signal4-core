@@ -37,6 +37,8 @@ class ScheduleState:
     # Screen session tracking for restart recovery
     screen_session_name: Optional[str] = None  # Name of running screen session
     execution_start_time: Optional[datetime] = None  # When the current execution started
+    # Pause support - task won't run until after this time
+    paused_until: Optional[datetime] = None
 
 
 class BaseSchedule:

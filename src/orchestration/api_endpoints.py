@@ -986,6 +986,38 @@ def create_api_endpoints(orchestrator) -> FastAPI:
             logger.error(f"Error setting scheduled task {task_id} enabled={enabled}: {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
 
+    @app.post("/api/scheduled_tasks/{task_id}/pause")
+    async def pause_scheduled_task(task_id: str, seconds: int, kill: bool = False):
+        """Pause a scheduled task for a specified duration.
+
+        Args:
+            task_id: The task to pause
+            seconds: Duration in seconds to pause (task won't run until this elapses)
+            kill: If true, also kill the screen session if task is currently running
+        """
+        try:
+            if hasattr(orchestrator, 'scheduled_task_manager'):
+                result = orchestrator.scheduled_task_manager.pause_task(task_id, seconds, kill_if_running=kill)
+                return result
+            else:
+                raise HTTPException(status_code=501, detail="Scheduled task manager not available")
+        except Exception as e:
+            logger.error(f"Error pausing scheduled task {task_id}: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/api/scheduled_tasks/{task_id}/unpause")
+    async def unpause_scheduled_task(task_id: str):
+        """Remove pause from a scheduled task, allowing it to run on its normal schedule."""
+        try:
+            if hasattr(orchestrator, 'scheduled_task_manager'):
+                result = orchestrator.scheduled_task_manager.unpause_task(task_id)
+                return result
+            else:
+                raise HTTPException(status_code=501, detail="Scheduled task manager not available")
+        except Exception as e:
+            logger.error(f"Error unpausing scheduled task {task_id}: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
     # === Code Deployment Endpoints ===
 
     @app.post("/api/deployment/deploy")

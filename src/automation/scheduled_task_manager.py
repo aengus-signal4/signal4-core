@@ -180,6 +180,11 @@ class ScheduledTaskManager:
                             task.state.execution_start_time = datetime.fromisoformat(
                                 task_state['execution_start_time']
                             )
+                        # Load pause state
+                        if task_state.get('paused_until'):
+                            task.state.paused_until = datetime.fromisoformat(
+                                task_state['paused_until']
+                            )
 
                 logger.info(f"Loaded state for {len(tasks_state)} tasks")
 
@@ -209,6 +214,8 @@ class ScheduledTaskManager:
                     'is_running': task.state.is_running,
                     'screen_session_name': task.state.screen_session_name,
                     'execution_start_time': task.state.execution_start_time.isoformat() if task.state.execution_start_time else None,
+                    # Persist pause state
+                    'paused_until': task.state.paused_until.isoformat() if task.state.paused_until else None,
                 }
 
             with open(self.state_file, 'w') as f:
@@ -326,6 +333,16 @@ class ScheduledTaskManager:
                     # Skip disabled tasks
                     if not task.enabled:
                         continue
+
+                    # Skip paused tasks (auto-clear expired pauses)
+                    if task.state.paused_until:
+                        if now < task.state.paused_until:
+                            continue  # Still paused
+                        else:
+                            # Pause expired, clear it
+                            logger.info(f"Task {task_id} pause expired, resuming normal schedule")
+                            task.state.paused_until = None
+                            self._save_state()
 
                     # Skip already running tasks, but verify screen sessions still exist
                     if task.state.is_running:
@@ -510,6 +527,82 @@ class ScheduledTaskManager:
             'message': f'Task {task_id} {"enabled" if enabled else "disabled"}'
         }
 
+    def pause_task(self, task_id: str, duration_seconds: int, kill_if_running: bool = False) -> Dict[str, Any]:
+        """Pause a task for a specified duration.
+
+        Args:
+            task_id: The task to pause
+            duration_seconds: How long to pause (task won't run until this time elapses)
+            kill_if_running: If True, kill the screen session if the task is currently running
+
+        Returns:
+            Status dict with pause details
+        """
+        task = self.tasks.get(task_id)
+        if not task:
+            return {
+                'status': 'error',
+                'message': f'Task {task_id} not found'
+            }
+
+        now = datetime.now(timezone.utc)
+        paused_until = now + timedelta(seconds=duration_seconds)
+        task.state.paused_until = paused_until
+
+        killed_screen = False
+        if kill_if_running and task.state.is_running and task.state.screen_session_name:
+            import subprocess
+            try:
+                subprocess.run(
+                    ['screen', '-S', task.state.screen_session_name, '-X', 'quit'],
+                    capture_output=True,
+                    timeout=10
+                )
+                task.state.is_running = False
+                task.state.screen_session_name = None
+                task.state.execution_start_time = None
+                killed_screen = True
+                logger.info(f"Killed screen session for task {task_id}")
+            except Exception as e:
+                logger.warning(f"Failed to kill screen session for task {task_id}: {e}")
+
+        self._save_state()
+
+        minutes = duration_seconds // 60
+        logger.info(f"Task {task_id} paused until {paused_until.isoformat()} ({minutes} minutes)")
+
+        return {
+            'status': 'success',
+            'message': f'Task {task_id} paused for {minutes} minutes',
+            'paused_until': paused_until.isoformat(),
+            'killed_screen': killed_screen
+        }
+
+    def unpause_task(self, task_id: str) -> Dict[str, Any]:
+        """Remove pause from a task, allowing it to run on its normal schedule."""
+        task = self.tasks.get(task_id)
+        if not task:
+            return {
+                'status': 'error',
+                'message': f'Task {task_id} not found'
+            }
+
+        was_paused = task.state.paused_until is not None
+        task.state.paused_until = None
+        self._save_state()
+
+        if was_paused:
+            logger.info(f"Task {task_id} unpaused")
+            return {
+                'status': 'success',
+                'message': f'Task {task_id} unpaused'
+            }
+        else:
+            return {
+                'status': 'success',
+                'message': f'Task {task_id} was not paused'
+            }
+
     def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
         """Get status of a specific task"""
         task = self.tasks.get(task_id)
@@ -524,6 +617,8 @@ class ScheduledTaskManager:
             'description': task.description,
             'enabled': task.enabled,
             'is_running': task.state.is_running,
+            'is_paused': task.state.paused_until is not None,
+            'paused_until': task.state.paused_until.isoformat() if task.state.paused_until else None,
             'screen_session': task.state.screen_session_name,
             'execution_start_time': task.state.execution_start_time.isoformat() if task.state.execution_start_time else None,
             'schedule': {
