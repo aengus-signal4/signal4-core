@@ -83,6 +83,7 @@ dependencies = [
     "modelscope>=1.34.0",
     "mlx-vlm==0.3.3",
     "ddgs>=9.9.0",
+    "vadersentiment>=3.3.2",
 ]
 
 [project.optional-dependencies]
