@@ -1,0 +1,1285 @@
+⏺ Here's the complete dump of your explore-data skill:
+
+  ---
+  Skill Structure
+
+  ~/.claude/skills/explore-data/
+  ├── SKILL.md                          # Main skill definition
+  ├── scripts/
+  │   └── llm_classify.py               # LLM classification helper
+  └── templates/
+      ├── meo_theme.R                   # R theme/palettes
+      └── meo_theme.py                  # Python theme/palettes
+
+  ---
+  SKILL.md
+
+  ---
+  name: explore-data
+  description: |
+    Explore empirical data (survey or social/digital trace) to answer research questions. User passes question(s) as input:
+    - "What predicts X?" / "How does Y vary by Z?"
+    - "Compare engagement across platforms"
+    - "Show time trends in posting activity"
+    Generates R or Python analysis code with MEO styling. Auto-detects data type.
+    CRITICAL: Only reads header + first row of data files.
+    STATEFUL: Maintains analysis log across sessions.
+  allowed-tools:
+    - Read
+    - Write
+    - Edit
+    - Bash
+    - Glob
+    - Grep
+    - AskUserQuestion
+  ---
+
+  # Explore Data Skill
+
+  Systematically explore empirical data to answer research questions. Supports:
+  - **Survey data**: Individual respondents, questionnaire items, demographics
+  - **Social/digital trace data**: Posts, engagement metrics, user metadata, time series
+
+  ## CRITICAL DATA ACCESS RULE
+
+  **NEVER read more than the header row and first data row of any dataset.**
+
+  This ensures privacy, token efficiency, and focus on structure over raw data.
+
+  ---
+
+  ## ANALYSIS LOG (Statefulness)
+
+  **ALWAYS check and update the analysis log** at `analysis/.explore-data-log.md`.
+
+  ### At Session Start
+
+  Read the log to understand what has already been tried:
+
+  ```bash
+  cat analysis/.explore-data-log.md 2>/dev/null || echo "No previous analyses found."
+
+  Use this context to:
+  - Avoid repeating failed approaches
+  - Build on successful prior analyses
+  - Reference previous findings when relevant
+
+  After Each Analysis
+
+  Append to the log with this format:
+
+  ## [YYYY-MM-DD HH:MM] Question: [user's question]
+
+  **Approach:** [brief description of analytical strategy]
+  **Variables:** [outcome] ~ [predictors] | controls: [controls]
+  **Code:** `analysis/[filename].R`
+  **Status:** Success | Error | Inconclusive
+
+  **Key Result:** [1-2 sentence summary of main finding]
+
+  **Errors/Notes:** [any issues encountered, or "None"]
+
+  ---
+
+  Log File Creation
+
+  If the log doesn't exist, create it:
+
+  # Explore Data Analysis Log
+
+  This file tracks all exploratory analyses performed on this dataset.
+  Maintained automatically by the explore-data skill.
+
+  ---
+
+  ---
+  Step 1: Detect Data Type
+
+  Search for data files:
+
+  find . -name "*.csv" -name "*.parquet" -type f 2>/dev/null | head -20
+
+  Survey data indicators:
+  - Qualtrics-style columns: StartDate, EndDate, ResponseId, *_time_*
+  - Battery items: var_1, var_2, var_3
+  - Demographics: age, gender, education, income
+
+  Social data indicators:
+  - Post columns: id, text, platform, date, seed
+  - Engagement: like_count, share_count, comment_count
+  - Seedlist/metadata file with: SeedID, SeedName, MainType, SubType
+  - Parquet files (common for large social datasets)
+
+  ---
+  Survey Data Workflow
+
+  Variables to Identify
+
+  - Outcome: What to explain/predict
+  - Predictors: What might influence outcomes
+  - Controls: Demographics
+  - Weights: Survey weights if available
+
+  Analysis Types
+
+  | Type            | When to Use            | R Function                 |
+  |-----------------|------------------------|----------------------------|
+  | Frequencies     | Categorical outcomes   | count()                    |
+  | Cross-tabs      | Group comparisons      | group_by() %>% summarise() |
+  | OLS regression  | Continuous outcome     | lm()                       |
+  | Logistic        | Binary outcome         | glm(..., family=binomial)  |
+  | Survey-weighted | When weights available | survey::svyglm()           |
+
+  Caption (REQUIRED)
+
+  caption <- survey_caption(n = nrow(df), start_date = min(df$StartDate), end_date = max(df$StartDate))
+
+  Output: "Based on 1,847 respondents surveyed October 15, 2025 to January 9, 2026. A comparable random sample would be within ±2.3 percentage points 19 times out of 20."
+
+  ---
+  Social Data Workflow
+
+  Data Structure
+
+  Typically two files that need joining:
+  1. Posts file (parquet/csv): id, platform, date, seed, text, engagement counts
+  2. Seedlist/metadata (csv): SeedID, SeedName, MainType, SubType, Party, Province
+
+  # Load and join
+  posts <- read_parquet("data.parquet")
+  seeds <- fread("seedlist.csv")
+  df <- posts %>% left_join(seeds, by = c("seed" = "SeedID"))
+
+  Variables to Identify
+
+  - Grouping: Platform, entity type, party, province
+  - Metrics: Engagement (likes + shares + comments), post count
+  - Time: Daily/weekly/monthly aggregation
+  - Filters: Date range, platform, entity type
+
+  Analysis Types
+
+  | Type                    | When to Use                         | R Pattern                          |
+  |-------------------------|-------------------------------------|------------------------------------|
+  | Time series             | Trends over time                    | group_by(date) %>% summarise()     |
+  | Platform comparison     | Cross-platform                      | group_by(platform) %>% summarise() |
+  | Entity comparison       | Politicians vs Influencers vs Media | group_by(MainType)                 |
+  | Engagement distribution | Who gets attention                  | Gini coefficient, top-N share      |
+  | Content analysis        | Text patterns                       | Keywords, language detection       |
+
+  Caption (REQUIRED)
+
+  caption <- social_caption(
+    n_posts = nrow(df),
+    n_accounts = n_distinct(df$seed),
+    start_date = min(df$date),
+    end_date = max(df$date),
+    platforms = unique(df$platform)
+  )
+
+  Output: "Based on 2.3M posts from 1,847 accounts across Facebook, Instagram, X, TikTok, YouTube (January 1, 2023 to October 13, 2025)."
+
+  ---
+  LLM-Based Text Classification
+
+  For open-ended survey responses or social media post classification, consider LLM-based coding when keyword/regex approaches are insufficient.
+
+  When to Use
+
+  - Classifying open-text survey responses (sentiment, themes, topics)
+  - Coding social media posts (stance, topic, misinformation, etc.)
+  - Tasks requiring semantic understanding beyond keyword matching
+
+  When Keywords Are Sufficient
+
+  - Simple presence/absence detection (e.g., "mentions climate change")
+  - Language detection
+  - Counting specific terms or hashtags
+  - Pattern matching with clear lexical markers
+
+  Try keyword approaches first - they're faster, cheaper, and more reproducible. Only escalate to LLM classification when semantic nuance is required.
+
+  Step 1: Ask User for Model Preference
+
+  Use AskUserQuestion:
+  - Question: "This analysis requires classifying text. Which approach?"
+  - Options:
+    a. Local (mlx-lm) - Free, private, ~500 items/min on M-series Mac
+    b. Remote API - Faster, requires API key, ~$X per 1000 items
+
+  Step 2: Estimate Scale
+
+  Calculate and report:
+  n_items = len(df)
+  avg_tokens = df['text'].str.split().str.len().mean() * 1.3  # rough token estimate
+  total_tokens = n_items * (avg_tokens + 100)  # include prompt overhead
+
+  print(f"Items to classify: {n_items:,}")
+  print(f"Estimated tokens: {total_tokens:,.0f}")
+  print(f"Estimated API cost (Claude Haiku): ${total_tokens * 0.25 / 1_000_000:.2f}")
+  print(f"Estimated local time: {n_items / 500:.1f} minutes")
+
+  Step 3a: Local Classification (mlx-lm)
+
+  Available model: Qwen/Qwen3-30B-A3B-MLX-4bit
+
+  Validation workflow (REQUIRED):
+  1. Sample 50-100 items for validation set
+  2. Run local model on validation set
+  3. Have Sonnet review local model outputs with AskUserQuestion confirmation
+  4. If accuracy acceptable (>85%), proceed with full classification
+  5. If not, refine prompt and repeat
+
+  Or use the helper script:
+  # Estimate costs first
+  python3 ~/.claude/skills/explore-data/scripts/llm_classify.py \
+    --input data.csv --text-col "text" --categories "a,b,c" --estimate
+
+  # Validation run
+  python3 ~/.claude/skills/explore-data/scripts/llm_classify.py \
+    --input data.csv --text-col "text" --categories "a,b,c" \
+    --validate-only --sample-size 100
+
+  # Full classification (local)
+  python3 ~/.claude/skills/explore-data/scripts/llm_classify.py \
+    --input data.csv --text-col "text" --categories "a,b,c" \
+    --output analysis/data/classified.csv
+
+  # Full classification (remote API)
+  python3 ~/.claude/skills/explore-data/scripts/llm_classify.py \
+    --input data.csv --text-col "text" --categories "a,b,c" \
+    --output analysis/data/classified.csv \
+    --remote --api-key-env ANTHROPIC_API_KEY
+
+  Step 3b: Remote API Classification
+
+  If user chooses remote API, ask for:
+  - API provider (Anthropic Claude, OpenAI, etc.)
+  - API key (store in environment variable, never in code)
+
+  Cost estimates per 1000 items (avg 100 tokens each):
+  | Model         | Input Cost | Output Cost | Total  |
+  |---------------|------------|-------------|--------|
+  | Claude Haiku  | $0.025     | $0.013      | ~$0.04 |
+  | Claude Sonnet | $0.30      | $0.15       | ~$0.45 |
+  | GPT-4o-mini   | $0.015     | $0.06       | ~$0.08 |
+
+  Step 4: Validation Protocol
+
+  REQUIRED before full deployment:
+
+  1. Create validation sample:
+  validation_sample = df.sample(n=min(100, len(df)), random_state=42)
+
+  2. Run classification on sample
+  3. Present results to user with Sonnet review:
+  I've classified 100 sample items. Here are examples from each category:
+
+  **Category A (n=34):**
+  - "example text 1..." → A
+  - "example text 2..." → A
+
+  **Category B (n=42):**
+  - "example text 3..." → B
+  ...
+
+  Should I proceed with full classification, or refine the categories/prompt?
+
+  4. Only proceed after user confirmation
+
+  Step 5: Save Classification Results
+
+  # Save to CSV
+  df.to_csv("analysis/data/classified_texts.csv", index=False)
+
+  # Log the classification run
+  log_entry = f"""
+  ## Classification: {datetime.now().strftime("%Y-%m-%d %H:%M")}
+
+  **Task:** {task_description}
+  **Categories:** {categories}
+  **Model:** {model_used}
+  **N items:** {len(df):,}
+  **Validation accuracy:** {accuracy}%
+
+  ---
+  """
+  with open("analysis/.explore-data-log.md", "a") as f:
+      f.write(log_entry)
+
+  ---
+  Common Variable Patterns
+
+  Survey (Qualtrics)
+
+  | Pattern        | Meaning                   |
+  |----------------|---------------------------|
+  | *_time_*       | Timing metadata (exclude) |
+  | *_1, *_2       | Battery items             |
+  | medTrst_*      | Media trust               |
+  | party_rating_* | Party thermometers        |
+
+  Social (MEO)
+
+  | Pattern                                | Meaning                                    |
+  |----------------------------------------|--------------------------------------------|
+  | seed / SeedID                          | Account identifier                         |
+  | MainType                               | Entity type (Politician, Influencer, News) |
+  | SubType                                | Subcategory                                |
+  | like_count, share_count, comment_count | Engagement metrics                         |
+
+  ---
+  Generate Analysis Code
+
+  For R: Source the theme template:
+  source("~/.claude/skills/explore-data/templates/meo_theme.R")
+
+  For Python:
+  exec(open(os.path.expanduser("~/.claude/skills/explore-data/templates/meo_theme.py")).read())
+
+  ---
+  Output Structure
+
+  analysis/
+  ├── explore_data.Rproj       # RStudio project
+  ├── .explore-data-log.md     # Analysis history (stateful log)
+  ├── [slug]_analysis.R        # Analysis scripts
+  ├── data/                    # Input data (symlinks/copies)
+  ├── figures/                 # Output plots (bright)
+  │   ├── [slug]_*.png
+  │   ├── [slug]_*.svg
+  │   ├── dark/                # Dark mode versions
+  │   └── reference/           # SVGs + underlying data CSVs
+  └── tables/
+      └── [slug]_results.csv
+
+  ---
+  DETAILED PARAGRAPH ANALYSIS (Required Output)
+
+  Every analysis must conclude with 1-2 substantive paragraphs that directly answer the user's research question. This is NOT a bullet-point summary—it is a cohesive narrative interpretation.
+
+  Structure
+
+  Paragraph 1 - Direct Answer:
+  Begin with a clear, direct answer to the research question. State the main finding with specific numbers (coefficients, percentages, effect sizes). Identify which variables matter most and in what direction. Compare effect sizes when
+  multiple predictors are involved.
+
+  Paragraph 2 - Context and Implications:
+  Situate the finding in context. Discuss what the results mean substantively (not just statistically). Note any surprising findings or null results that are theoretically interesting. Acknowledge limitations relevant to interpreting the
+  specific findings. Suggest what follow-up questions the results raise.
+
+  Example Output
+
+  Question: What predicts trust in social media as a news source?
+
+  Trust in social media as a news source is primarily predicted by age and political ideology, with younger respondents and those identifying as conservative showing substantially higher trust levels. Specifically, each decade decrease in 
+  age is associated with a 0.31-point increase in social media trust (on a 5-point scale, p < .001), while conservative ideology shows a 0.47-point advantage over liberal identification (p < .001). Education shows a modest negative 
+  relationship (β = -0.12, p = .03), though this effect is considerably smaller than age or ideology. Party identification, income, and gender do not significantly predict social media trust when other factors are controlled.
+
+  These findings suggest that social media trust is shaped more by generational experience with digital platforms than by traditional socioeconomic factors. The strong ideology effect may reflect differential exposure to mainstream media 
+  criticism or platform-specific content ecosystems. Notably, the null effect for party identification suggests that ideology—rather than partisan attachment per se—drives the relationship, which has implications for understanding media 
+  trust as an attitude rooted in broader worldview rather than political team membership. A limitation is that this cross-sectional design cannot distinguish whether age effects reflect cohort differences or lifecycle changes; panel data 
+  would help disentangle these mechanisms.
+
+  Anti-patterns (DO NOT DO)
+
+  ❌ Bullet-point lists of findings
+  ❌ "The regression was significant" without interpretation
+  ❌ Repeating what the table shows without adding insight
+  ❌ Generic caveats not specific to the analysis
+  ❌ Ending with "more research is needed" without specificity
+
+  ---
+
+  ## scripts/llm_classify.py
+
+  ```python
+  #!/usr/bin/env python3
+  """
+  LLM-based text classification using local mlx-lm or remote API.
+
+  Usage:
+      # Local (mlx-lm)
+      python3 llm_classify.py --input data.csv --text-col "text" \
+          --categories "positive,negative,neutral" --output classified.csv
+
+      # With custom prompt
+      python3 llm_classify.py --input data.csv --text-col "response" \
+          --categories "agree,disagree,uncertain" \
+          --prompt-template "prompts/stance.txt" --output classified.csv
+
+      # Validation mode (sample only)
+      python3 llm_classify.py --input data.csv --text-col "text" \
+          --categories "topic1,topic2,topic3" --validate-only --sample-size 50
+
+      # Remote API
+      python3 llm_classify.py --input data.csv --text-col "text" \
+          --categories "positive,negative,neutral" --output classified.csv \
+          --remote --api-key-env ANTHROPIC_API_KEY --model claude-3-haiku-20240307
+  """
+
+  import argparse
+  import json
+  import os
+  import subprocess
+  import sys
+  from datetime import datetime
+  from pathlib import Path
+
+  import pandas as pd
+  from tqdm import tqdm
+
+  # Default local model
+  LOCAL_MODEL = "Qwen/Qwen3-30B-A3B-MLX-4bit"
+
+  # Default prompt template
+  DEFAULT_PROMPT = """/no_think
+  Classify the following text into exactly one category: {categories}
+
+  Text: "{text}"
+
+  Respond with ONLY the category name, nothing else.
+
+  Category:"""
+
+
+  def classify_local(text: str, categories: list[str], prompt_template: str) -> str:
+      """Classify text using local mlx-lm model."""
+      prompt = prompt_template.format(
+          text=text[:2000],  # Truncate very long texts
+          categories=", ".join(categories)
+      )
+
+      try:
+          result = subprocess.run(
+              ["mlx_lm.generate",
+               "--model", LOCAL_MODEL,
+               "--prompt", prompt,
+               "--max-tokens", "20"],
+              capture_output=True,
+              text=True,
+              timeout=60
+          )
+          output = result.stdout.strip()
+          # Extract just the category from the response
+          for cat in categories:
+              if cat.lower() in output.lower():
+                  return cat
+          return output.split('\n')[0].strip()  # First line if no match
+      except subprocess.TimeoutExpired:
+          return "ERROR_TIMEOUT"
+      except Exception as e:
+          return f"ERROR_{str(e)[:50]}"
+
+
+  def classify_remote(text: str, categories: list[str], prompt_template: str,
+                      api_key: str, model: str = "claude-3-haiku-20240307") -> str:
+      """Classify text using remote API (Anthropic)."""
+      try:
+          import anthropic
+          client = anthropic.Anthropic(api_key=api_key)
+
+          prompt = prompt_template.format(
+              text=text[:2000],
+              categories=", ".join(categories)
+          )
+
+          message = client.messages.create(
+              model=model,
+              max_tokens=20,
+              messages=[{"role": "user", "content": prompt}]
+          )
+          output = message.content[0].text.strip()
+
+          for cat in categories:
+              if cat.lower() in output.lower():
+                  return cat
+          return output
+      except Exception as e:
+          return f"ERROR_{str(e)[:50]}"
+
+
+  def batch_classify(df: pd.DataFrame, text_col: str, categories: list[str],
+                     prompt_template: str, output_col: str = "classification",
+                     checkpoint_file: str = None, remote: bool = False,
+                     api_key: str = None, model: str = None) -> pd.DataFrame:
+      """Batch classify with progress bar and checkpointing."""
+      results = []
+      start_idx = 0
+
+      # Resume from checkpoint if exists
+      if checkpoint_file and os.path.exists(checkpoint_file):
+          with open(checkpoint_file) as f:
+              checkpoint = json.load(f)
+              results = checkpoint.get("results", [])
+              start_idx = len(results)
+              print(f"Resuming from item {start_idx}")
+
+      classify_fn = (
+          lambda t: classify_remote(t, categories, prompt_template, api_key, model)
+          if remote else
+          lambda t: classify_local(t, categories, prompt_template)
+      )
+
+      for idx in tqdm(range(start_idx, len(df)), desc="Classifying"):
+          row = df.iloc[idx]
+          text = str(row[text_col]) if pd.notna(row[text_col]) else ""
+
+          if not text.strip():
+              classification = "EMPTY"
+          else:
+              classification = classify_fn(text)
+
+          results.append({"idx": idx, "classification": classification})
+
+          # Checkpoint every 50 items
+          if checkpoint_file and len(results) % 50 == 0:
+              with open(checkpoint_file, "w") as f:
+                  json.dump({"results": results, "timestamp": datetime.now().isoformat()}, f)
+
+      # Apply results to dataframe
+      df = df.copy()
+      df[output_col] = [r["classification"] for r in results]
+
+      # Clean up checkpoint
+      if checkpoint_file and os.path.exists(checkpoint_file):
+          os.remove(checkpoint_file)
+
+      return df
+
+
+  def estimate_cost(df: pd.DataFrame, text_col: str) -> dict:
+      """Estimate classification costs and time."""
+      n_items = len(df)
+      avg_words = df[text_col].astype(str).str.split().str.len().mean()
+      avg_tokens = avg_words * 1.3  # Rough token estimate
+
+      return {
+          "n_items": n_items,
+          "avg_tokens_per_item": avg_tokens,
+          "local_time_min": n_items / 500,  # ~500 items/min on M-series
+          "api_cost_haiku": n_items * 0.00004,  # ~$0.04 per 1000
+          "api_cost_sonnet": n_items * 0.00045,  # ~$0.45 per 1000
+      }
+
+
+  def main():
+      parser = argparse.ArgumentParser(description="LLM-based text classification")
+      parser.add_argument("--input", required=True, help="Input CSV file")
+      parser.add_argument("--text-col", required=True, help="Column containing text to classify")
+      parser.add_argument("--categories", required=True, help="Comma-separated list of categories")
+      parser.add_argument("--output", help="Output CSV file (required unless --validate-only)")
+      parser.add_argument("--output-col", default="classification", help="Name for classification column")
+      parser.add_argument("--prompt-template", help="Path to custom prompt template file")
+
+      # Validation mode
+      parser.add_argument("--validate-only", action="store_true", help="Only run on sample for validation")
+      parser.add_argument("--sample-size", type=int, default=50, help="Sample size for validation")
+
+      # Remote API options
+      parser.add_argument("--remote", action="store_true", help="Use remote API instead of local")
+      parser.add_argument("--api-key-env", default="ANTHROPIC_API_KEY", help="Environment variable for API key")
+      parser.add_argument("--model", default="claude-3-haiku-20240307", help="Remote model to use")
+
+      # Estimation only
+      parser.add_argument("--estimate", action="store_true", help="Only estimate costs, don't classify")
+
+      args = parser.parse_args()
+
+      # Load data
+      df = pd.read_csv(args.input)
+      categories = [c.strip() for c in args.categories.split(",")]
+
+      # Load prompt template
+      if args.prompt_template:
+          with open(args.prompt_template) as f:
+              prompt_template = f.read()
+      else:
+          prompt_template = DEFAULT_PROMPT
+
+      # Estimate mode
+      if args.estimate:
+          est = estimate_cost(df, args.text_col)
+          print(f"\n=== Classification Estimate ===")
+          print(f"Items to classify: {est['n_items']:,}")
+          print(f"Avg tokens/item: {est['avg_tokens_per_item']:.0f}")
+          print(f"\nLocal (mlx-lm):")
+          print(f"  Estimated time: {est['local_time_min']:.1f} minutes")
+          print(f"  Cost: Free")
+          print(f"\nRemote API:")
+          print(f"  Claude Haiku: ${est['api_cost_haiku']:.2f}")
+          print(f"  Claude Sonnet: ${est['api_cost_sonnet']:.2f}")
+          return
+
+      # Validation mode
+      if args.validate_only:
+          sample = df.sample(n=min(args.sample_size, len(df)), random_state=42)
+          print(f"\n=== Validation Sample (n={len(sample)}) ===\n")
+
+          api_key = os.environ.get(args.api_key_env) if args.remote else None
+          result = batch_classify(
+              sample, args.text_col, categories, prompt_template,
+              args.output_col, remote=args.remote, api_key=api_key, model=args.model
+          )
+
+          # Show distribution
+          print("\n=== Classification Distribution ===")
+          print(result[args.output_col].value_counts())
+
+          # Show examples
+          print("\n=== Examples by Category ===")
+          for cat in categories:
+              cat_rows = result[result[args.output_col] == cat]
+              if len(cat_rows) > 0:
+                  print(f"\n{cat} (n={len(cat_rows)}):")
+                  for _, row in cat_rows.head(3).iterrows():
+                      text = str(row[args.text_col])[:100]
+                      print(f"  - \"{text}...\"")
+
+          # Save validation results
+          if args.output:
+              result.to_csv(args.output, index=False)
+              print(f"\nValidation results saved to: {args.output}")
+          return
+
+      # Full classification
+      if not args.output:
+          parser.error("--output required for full classification")
+
+      api_key = os.environ.get(args.api_key_env) if args.remote else None
+      if args.remote and not api_key:
+          print(f"Error: {args.api_key_env} environment variable not set")
+          sys.exit(1)
+
+      checkpoint_file = args.output.replace(".csv", "_checkpoint.json")
+
+      result = batch_classify(
+          df, args.text_col, categories, prompt_template,
+          args.output_col, checkpoint_file,
+          remote=args.remote, api_key=api_key, model=args.model
+      )
+
+      result.to_csv(args.output, index=False)
+      print(f"\nClassification complete. Results saved to: {args.output}")
+
+      # Show distribution
+      print("\n=== Final Distribution ===")
+      print(result[args.output_col].value_counts())
+
+
+  if __name__ == "__main__":
+      main()
+
+  ---
+  templates/meo_theme.R
+
+  # ==============================================================================
+  # MEO Theme and Color Palettes for Data Analysis
+  # Source this file at the top of analysis scripts:
+  #   source("~/.claude/skills/explore-data/templates/meo_theme.R")
+  # ==============================================================================
+
+  library(ggplot2)
+  library(showtext)
+
+  # ------------------------------------------------------------------------------
+  # Font Setup
+  # ------------------------------------------------------------------------------
+
+  font_add_google("Poppins", "poppins")
+  showtext_auto()
+  showtext_opts(dpi = 300)
+
+  # ------------------------------------------------------------------------------
+  # Themes (Light and Dark)
+  # ------------------------------------------------------------------------------
+
+  theme_meo <- theme_minimal(base_family = "poppins", base_size = 10) +
+    theme(
+      axis.title.x = element_text(size = 9),
+      axis.title.y = element_text(size = 9),
+      axis.text.y = element_text(size = 8),
+      axis.text.x = element_text(size = 8),
+      plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(size = 10, hjust = 0.5),
+      plot.caption = element_text(size = 8, hjust = 1),
+      legend.position = "bottom",
+      panel.grid.minor.x = element_blank(),
+      legend.title = element_blank(),
+      legend.text = element_text(size = 9),
+      strip.text = element_text(size = 10),
+      axis.ticks = element_blank(),
+      plot.margin = margin(0.2, 0.8, 0.2, 0.8, "cm")
+    )
+
+  theme_meo_dark <- theme_minimal(base_family = "poppins", base_size = 10) +
+    theme(
+      axis.title.x = element_text(size = 9, color = "white"),
+      axis.title.y = element_text(size = 9, color = "white"),
+      axis.text.y = element_text(size = 8, color = "grey80"),
+      axis.text.x = element_text(size = 8, color = "grey80"),
+      plot.title = element_text(size = 12, face = "bold", hjust = 0.5, color = "white"),
+      plot.subtitle = element_text(size = 10, hjust = 0.5, color = "grey80"),
+      plot.caption = element_text(size = 8, hjust = 1, color = "grey60"),
+      legend.position = "bottom",
+      panel.grid.major = element_line(color = "grey30"),
+      panel.grid.minor.x = element_blank(),
+      legend.title = element_blank(),
+      legend.text = element_text(size = 9, color = "white"),
+      strip.text = element_text(size = 10, color = "white"),
+      axis.ticks = element_blank(),
+      plot.margin = margin(0.2, 0.8, 0.2, 0.8, "cm"),
+      plot.background = element_rect(fill = "#1a1a1a", color = NA),
+      panel.background = element_rect(fill = "#1a1a1a", color = NA),
+      legend.background = element_rect(fill = "#1a1a1a", color = NA)
+    )
+
+  # Aliases for backward compatibility
+  theme_survey <- theme_meo
+  theme_survey_dark <- theme_meo_dark
+
+  theme_set(theme_meo)
+
+  # ------------------------------------------------------------------------------
+  # Color Palettes
+  # ------------------------------------------------------------------------------
+
+  party_colors <- c(
+    "Conservative" = "#1A4AAD",
+    "Liberal" = "#D71B1E",
+    "NDP" = "#F86634",
+    "Green" = "#229A44",
+    "Bloc Québécois" = "#00C4FF",
+    "People's Party" = "#442D7B",
+    "All Canadians" = "black"
+  )
+
+  platform_colors <- c(
+    "Facebook" = "#3B5998",
+    "YouTube" = "#FF0000",
+    "Instagram" = "#C13584",
+    "X" = "black",
+    "X/Twitter" = "black",
+    "Twitter" = "black",
+    "TikTok" = "#69C9D0",
+    "Tiktok" = "#69C9D0",
+    "Bluesky" = "#1DA1F2",
+    "Telegram" = "#0bc367"
+  )
+
+  meo_colors <- c("#467742", "#6D4A4D", "#434E7C", "#272B26", "#69A849",
+                  "#FF8200", "#6BADC6", "#F2E96B", "#D7D6D4")
+
+  entity_colors <- c(
+    "Civil Society" = "#467742",
+    "Influencer" = "#434E7C",
+    "News" = "#6BADC6",
+    "Politician" = "#FF8200"
+  )
+
+  country_colors <- c(
+    "China" = "#DC143C",
+    "India" = "#FF9933",
+    "Russia" = "#0039A6",
+    "US" = "#002868",
+    "United States" = "#002868",
+    "UK" = "#012169"
+  )
+
+  # ------------------------------------------------------------------------------
+  # Helper Functions
+  # ------------------------------------------------------------------------------
+
+  #' Get MEO color by index (cycles if > 9)
+  meo_color <- function(i) {
+    meo_colors[((i - 1) %% length(meo_colors)) + 1]
+  }
+
+  #' Scale for party colors
+  scale_fill_party <- function(...) scale_fill_manual(values = party_colors, ...)
+  scale_color_party <- function(...) scale_color_manual(values = party_colors, ...)
+
+  #' Scale for platform colors
+  scale_fill_platform <- function(...) scale_fill_manual(values = platform_colors, ...)
+  scale_color_platform <- function(...) scale_color_manual(values = platform_colors, ...)
+
+  #' Scale for entity colors
+  scale_fill_entity <- function(...) scale_fill_manual(values = entity_colors, ...)
+  scale_color_entity <- function(...) scale_color_manual(values = entity_colors, ...)
+
+  #' Scale for MEO colors
+  scale_fill_meo <- function(...) scale_fill_manual(values = meo_colors, ...)
+  scale_color_meo <- function(...) scale_color_manual(values = meo_colors, ...)
+
+  # ------------------------------------------------------------------------------
+  # Caption Functions
+  # ------------------------------------------------------------------------------
+
+  #' Generate survey caption with sample details
+  survey_caption <- function(n, start_date, end_date, confidence = 0.95, extra = NULL) {
+    z <- qnorm(1 - (1 - confidence) / 2)
+    moe <- z * sqrt(0.25 / n) * 100
+
+    conf_text <- if (confidence == 0.95) {
+      "19 times out of 20"
+    } else if (confidence == 0.99) {
+      "99 times out of 100"
+    } else {
+      paste0(confidence * 100, "% of the time")
+    }
+
+    caption <- sprintf(
+      "Based on %s respondents surveyed %s to %s. A comparable random sample would be within ±%.1f percentage points %s.",
+      format(n, big.mark = ","),
+      format(as.Date(start_date), "%B %d, %Y"),
+      format(as.Date(end_date), "%B %d, %Y"),
+      moe,
+      conf_text
+    )
+
+    if (!is.null(extra)) caption <- paste(caption, extra)
+    caption
+  }
+
+  #' Generate social/digital trace data caption
+  social_caption <- function(n_posts, n_accounts, start_date, end_date, platforms = NULL, extra = NULL) {
+    format_num <- function(x) {
+      if (x >= 1e6) paste0(round(x / 1e6, 1), "M")
+      else if (x >= 1e3) paste0(round(x / 1e3, 1), "K")
+      else format(x, big.mark = ",")
+    }
+
+    platform_text <- if (!is.null(platforms) && length(platforms) > 0) {
+      paste0(" across ", paste(platforms, collapse = ", "))
+    } else ""
+
+    caption <- sprintf(
+      "Based on %s posts from %s accounts%s (%s to %s).",
+      format_num(n_posts),
+      format(n_accounts, big.mark = ","),
+      platform_text,
+      format(as.Date(start_date), "%B %d, %Y"),
+      format(as.Date(end_date), "%B %d, %Y")
+    )
+
+    if (!is.null(extra)) caption <- paste(caption, extra)
+    caption
+  }
+
+  # ------------------------------------------------------------------------------
+  # Save Functions
+  # ------------------------------------------------------------------------------
+
+  #' Save plot in multiple formats (bright and dark modes)
+  save_plot <- function(plot, name, data = NULL, width = 6.5, height = 4.5, dpi = 300) {
+    dir.create("analysis/figures", showWarnings = FALSE, recursive = TRUE)
+    dir.create("analysis/figures/dark", showWarnings = FALSE, recursive = TRUE)
+    dir.create("analysis/figures/transparent", showWarnings = FALSE, recursive = TRUE)
+
+    # Create reference subdirectory for this figure
+    ref_dir <- file.path("analysis/figures/reference", name)
+    dir.create(ref_dir, showWarnings = FALSE, recursive = TRUE)
+
+    base_path <- file.path("analysis/figures", name)
+    dark_path <- file.path("analysis/figures/dark", name)
+    trans_path <- file.path("analysis/figures/transparent", name)
+
+    # Save bright version
+    ggsave(paste0(base_path, ".png"), plot = plot,
+           width = width, height = height, dpi = dpi, bg = "white")
+
+    # Save dark version
+    plot_dark <- plot + theme_meo_dark
+    ggsave(paste0(dark_path, ".png"), plot = plot_dark,
+           width = width, height = height, dpi = dpi, bg = "#1a1a1a")
+
+    # Save transparent version (bright theme, no background)
+    plot_trans <- plot + theme(
+      plot.background = element_rect(fill = "transparent", color = NA),
+      panel.background = element_rect(fill = "transparent", color = NA),
+      legend.background = element_rect(fill = "transparent", color = NA),
+      legend.box.background = element_rect(fill = "transparent", color = NA)
+    )
+    ggsave(paste0(trans_path, ".png"), plot = plot_trans,
+           width = width, height = height, dpi = dpi, bg = "transparent")
+
+    # Save reference materials in subdirectory
+    ggsave(file.path(ref_dir, paste0(name, ".svg")), plot = plot,
+           width = width, height = height, dpi = dpi, bg = "white")
+
+    # Save underlying data as CSV for replication
+    ggdat <- ggplot_build(plot)$data
+    for (i in seq_along(ggdat)) {
+      write.csv(ggdat[[i]], file.path(ref_dir, paste0("layer", i, "_data.csv")), row.names = FALSE)
+    }
+
+    # Save source data if provided
+    if (!is.null(data)) {
+      write.csv(data, file.path(ref_dir, "source_data.csv"), row.names = FALSE)
+      saveRDS(data, file.path(ref_dir, "data.rds"))
+    }
+
+    # Save plot object for exact reproduction
+    saveRDS(plot, file.path(ref_dir, "plot.rds"))
+
+    message(paste("Saved:", name, "(bright + dark + transparent + reference data)"))
+  }
+
+  # ------------------------------------------------------------------------------
+  # Setup directories and locale
+  # ------------------------------------------------------------------------------
+
+  dir.create("analysis/figures", showWarnings = FALSE, recursive = TRUE)
+  dir.create("analysis/figures/dark", showWarnings = FALSE, recursive = TRUE)
+  dir.create("analysis/figures/transparent", showWarnings = FALSE, recursive = TRUE)
+  dir.create("analysis/figures/reference", showWarnings = FALSE, recursive = TRUE)
+  dir.create("analysis/tables", showWarnings = FALSE, recursive = TRUE)
+  dir.create("analysis/data", showWarnings = FALSE, recursive = TRUE)
+
+  Sys.setlocale("LC_TIME", "en_CA.UTF-8")
+
+  message("MEO theme loaded. Use theme_meo (bright) or theme_meo_dark.")
+
+  ---
+  templates/meo_theme.py
+
+  # ==============================================================================
+  # MEO Theme and Color Palettes for Data Analysis (Python)
+  # Source this file at the top of analysis scripts:
+  #   exec(open(os.path.expanduser("~/.claude/skills/explore-data/templates/meo_theme.py")).read())
+  # ==============================================================================
+
+  import os
+  import matplotlib.pyplot as plt
+  import matplotlib as mpl
+  import matplotlib.font_manager as fm
+
+  # ------------------------------------------------------------------------------
+  # Font Setup - Use Poppins (matching R theme)
+  # ------------------------------------------------------------------------------
+
+  try:
+      available_fonts = [f.name for f in fm.fontManager.ttflist]
+      if 'Poppins' in available_fonts:
+          FONT_FAMILY = 'Poppins'
+      else:
+          FONT_FAMILY = 'sans-serif'
+  except:
+      FONT_FAMILY = 'sans-serif'
+
+  # ------------------------------------------------------------------------------
+  # Theme Settings (Light)
+  # ------------------------------------------------------------------------------
+
+  THEME_LIGHT = {
+      'font.family': FONT_FAMILY,
+      'font.size': 10,
+      'axes.titlesize': 12,
+      'axes.titleweight': 'bold',
+      'axes.labelsize': 9,
+      'axes.labelcolor': 'black',
+      'axes.edgecolor': 'none',
+      'xtick.labelsize': 8,
+      'ytick.labelsize': 8,
+      'xtick.color': 'black',
+      'ytick.color': 'black',
+      'xtick.bottom': False,
+      'ytick.left': False,
+      'legend.fontsize': 9,
+      'figure.titlesize': 12,
+      'figure.dpi': 300,
+      'figure.facecolor': 'white',
+      'axes.facecolor': 'white',
+      'savefig.dpi': 300,
+      'savefig.bbox': 'tight',
+      'savefig.facecolor': 'white',
+      'axes.spines.top': False,
+      'axes.spines.right': False,
+      'axes.spines.bottom': False,
+      'axes.spines.left': False,
+      'axes.grid': True,
+      'axes.grid.which': 'both',
+      'grid.alpha': 0.3,
+      'grid.color': 'grey',
+      'grid.linewidth': 0.5,
+      'text.color': 'black',
+  }
+
+  THEME_DARK = {
+      'font.family': FONT_FAMILY,
+      'font.size': 10,
+      'axes.titlesize': 12,
+      'axes.titleweight': 'bold',
+      'axes.labelsize': 9,
+      'axes.labelcolor': 'white',
+      'axes.edgecolor': 'none',
+      'xtick.labelsize': 8,
+      'ytick.labelsize': 8,
+      'xtick.color': '#cccccc',
+      'ytick.color': '#cccccc',
+      'xtick.bottom': False,
+      'ytick.left': False,
+      'legend.fontsize': 9,
+      'figure.titlesize': 12,
+      'figure.dpi': 300,
+      'figure.facecolor': '#1a1a1a',
+      'axes.facecolor': '#1a1a1a',
+      'savefig.dpi': 300,
+      'savefig.bbox': 'tight',
+      'savefig.facecolor': '#1a1a1a',
+      'axes.spines.top': False,
+      'axes.spines.right': False,
+      'axes.spines.bottom': False,
+      'axes.spines.left': False,
+      'axes.grid': True,
+      'axes.grid.which': 'both',
+      'grid.alpha': 0.3,
+      'grid.color': '#4d4d4d',
+      'grid.linewidth': 0.5,
+      'text.color': 'white',
+      'legend.facecolor': '#1a1a1a',
+      'legend.edgecolor': 'grey',
+      'legend.labelcolor': 'white',
+  }
+
+  plt.rcParams.update(THEME_LIGHT)
+
+  def set_theme_light():
+      """Switch to light theme."""
+      plt.rcParams.update(THEME_LIGHT)
+
+  def set_theme_dark():
+      """Switch to dark theme."""
+      plt.rcParams.update(THEME_DARK)
+
+  # ------------------------------------------------------------------------------
+  # Color Palettes
+  # ------------------------------------------------------------------------------
+
+  PARTY_COLORS = {
+      "Conservative": "#1A4AAD",
+      "Liberal": "#D71B1E",
+      "NDP": "#F86634",
+      "Green": "#229A44",
+      "Bloc Québécois": "#00C4FF",
+      "People's Party": "#442D7B",
+      "All Canadians": "black"
+  }
+
+  PLATFORM_COLORS = {
+      "Facebook": "#3B5998",
+      "YouTube": "#FF0000",
+      "Instagram": "#C13584",
+      "X": "black",
+      "X/Twitter": "black",
+      "Twitter": "black",
+      "TikTok": "#69C9D0",
+      "Tiktok": "#69C9D0",
+      "Bluesky": "#1DA1F2",
+      "Telegram": "#0bc367"
+  }
+
+  MEO_COLORS = ["#467742", "#6D4A4D", "#434E7C", "#272B26", "#69A849",
+                "#FF8200", "#6BADC6", "#F2E96B", "#D7D6D4"]
+
+  ENTITY_COLORS = {
+      "Civil Society": "#467742",
+      "Influencer": "#434E7C",
+      "News": "#6BADC6",
+      "Politician": "#FF8200"
+  }
+
+  COUNTRY_COLORS = {
+      "China": "#DC143C",
+      "India": "#FF9933",
+      "Russia": "#0039A6",
+      "US": "#002868",
+      "United States": "#002868",
+      "UK": "#012169"
+  }
+
+  # ------------------------------------------------------------------------------
+  # Helper Functions
+  # ------------------------------------------------------------------------------
+
+  def meo_color(i):
+      """Get MEO color by index (cycles if > 9)."""
+      return MEO_COLORS[(i - 1) % len(MEO_COLORS)]
+
+  def get_party_palette(parties):
+      """Get color list for party names."""
+      return [PARTY_COLORS.get(p, "#888888") for p in parties]
+
+  def get_platform_palette(platforms):
+      """Get color list for platform names."""
+      return [PLATFORM_COLORS.get(p, "#888888") for p in platforms]
+
+  def get_entity_palette(entities):
+      """Get color list for entity types."""
+      return [ENTITY_COLORS.get(e, "#888888") for e in entities]
+
+  # ------------------------------------------------------------------------------
+  # Caption Functions
+  # ------------------------------------------------------------------------------
+
+  def survey_caption(n, start_date, end_date, confidence=0.95, extra=None):
+      """Generate survey caption with sample details."""
+      from datetime import datetime
+      from scipy import stats
+      import math
+
+      z = stats.norm.ppf(1 - (1 - confidence) / 2)
+      moe = z * math.sqrt(0.25 / n) * 100
+
+      if confidence == 0.95:
+          conf_text = "19 times out of 20"
+      elif confidence == 0.99:
+          conf_text = "99 times out of 100"
+      else:
+          conf_text = f"{confidence * 100}% of the time"
+
+      if isinstance(start_date, str):
+          start_date = datetime.strptime(start_date, "%Y-%m-%d")
+      if isinstance(end_date, str):
+          end_date = datetime.strptime(end_date, "%Y-%m-%d")
+
+      caption = (
+          f"Based on {n:,} respondents surveyed {start_date.strftime('%B %d, %Y')} to "
+          f"{end_date.strftime('%B %d, %Y')}. A comparable random sample would be within "
+          f"±{moe:.1f} percentage points {conf_text}."
+      )
+
+      if extra:
+          caption = f"{caption} {extra}"
+      return caption
+
+  def social_caption(n_posts, n_accounts, start_date, end_date, platforms=None, extra=None):
+      """Generate social/digital trace data caption."""
+      from datetime import datetime
+
+      def format_num(x):
+          if x >= 1e6:
+              return f"{x/1e6:.1f}M"
+          elif x >= 1e3:
+              return f"{x/1e3:.1f}K"
+          else:
+              return f"{x:,}"
+
+      platform_text = ""
+      if platforms and len(platforms) > 0:
+          platform_text = f" across {', '.join(platforms)}"
+
+      if isinstance(start_date, str):
+          start_date = datetime.strptime(start_date, "%Y-%m-%d")
+      if isinstance(end_date, str):
+          end_date = datetime.strptime(end_date, "%Y-%m-%d")
+
+      caption = (
+          f"Based on {format_num(n_posts)} posts from {n_accounts:,} accounts{platform_text} "
+          f"({start_date.strftime('%B %d, %Y')} to {end_date.strftime('%B %d, %Y')})."
+      )
+
+      if extra:
+          caption = f"{caption} {extra}"
+      return caption
+
+  # ------------------------------------------------------------------------------
+  # Save Functions
+  # ------------------------------------------------------------------------------
+
+  def save_plot(fig, name, data=None, tight=True):
+      """Save plot in multiple formats (bright, dark, transparent) with reference data."""
+      os.makedirs("analysis/figures", exist_ok=True)
+      os.makedirs("analysis/figures/dark", exist_ok=True)
+      os.makedirs("analysis/figures/transparent", exist_ok=True)
+
+      ref_dir = f"analysis/figures/reference/{name}"
+      os.makedirs(ref_dir, exist_ok=True)
+
+      base_path = f"analysis/figures/{name}"
+      dark_path = f"analysis/figures/dark/{name}"
+      trans_path = f"analysis/figures/transparent/{name}"
+
+      # Save bright version
+      set_theme_light()
+      fig.set_facecolor('white')
+      for ax in fig.get_axes():
+          ax.set_facecolor('white')
+          ax.tick_params(colors='black')
+          ax.xaxis.label.set_color('black')
+          ax.yaxis.label.set_color('black')
+          ax.title.set_color('black')
+          for spine in ax.spines.values():
+              spine.set_color('black')
+
+      fig.savefig(f"{base_path}.png", dpi=300,
+                  bbox_inches='tight' if tight else None,
+                  facecolor='white', edgecolor='none')
+
+      # Save transparent version
+      fig.set_facecolor('none')
+      for ax in fig.get_axes():
+          ax.set_facecolor('none')
+      fig.savefig(f"{trans_path}.png", dpi=300,
+                  bbox_inches='tight' if tight else None,
+                  facecolor='none', edgecolor='none', transparent=True)
+
+      # Save dark version
+      set_theme_dark()
+      fig.set_facecolor('#1a1a1a')
+      for ax in fig.get_axes():
+          ax.set_facecolor('#1a1a1a')
+          ax.tick_params(colors='#cccccc')
+          ax.xaxis.label.set_color('white')
+          ax.yaxis.label.set_color('white')
+          ax.title.set_color('white')
+          for spine in ax.spines.values():
+              spine.set_color('grey')
+          if ax.get_legend():
+              ax.get_legend().get_frame().set_facecolor('#1a1a1a')
+              for text in ax.get_legend().get_texts():
+                  text.set_color('white')
+
+      for text in fig.texts:
+          text.set_color('white')
+
+      fig.savefig(f"{dark_path}.png", dpi=300,
+                  bbox_inches='tight' if tight else None,
+                  facecolor='#1a1a1a', edgecolor='none')
+
+      # Save reference materials
+      set_theme_light()
+      fig.set_facecolor('white')
+      for ax in fig.get_axes():
+          ax.set_facecolor('white')
+          ax.tick_params(colors='black')
+          ax.xaxis.label.set_color('black')
+          ax.yaxis.label.set_color('black')
+          ax.title.set_color('black')
+          for spine in ax.spines.values():
+              spine.set_color('black')
+      for text in fig.texts:
+          text.set_color('black')
+      fig.savefig(f"{ref_dir}/{name}.svg",
+                  bbox_inches='tight' if tight else None,
+                  facecolor='white', edgecolor='none')
+
+      if data is not None:
+          import pandas as pd
+          if isinstance(data, pd.DataFrame):
+              data.to_csv(f"{ref_dir}/source_data.csv", index=False)
+
+      print(f"Saved: {name} (bright + dark + transparent + reference data)")
+
+  # ------------------------------------------------------------------------------
+  # Setup directories
+  # ------------------------------------------------------------------------------
+
+  os.makedirs("analysis/figures", exist_ok=True)
+  os.makedirs("analysis/figures/dark", exist_ok=True)
+  os.makedirs("analysis/figures/transparent", exist_ok=True)
+  os.makedirs("analysis/figures/reference", exist_ok=True)
+  os.makedirs("analysis/tables", exist_ok=True)
+  os.makedirs("analysis/data", exist_ok=True)
+
+  print("MEO theme loaded. Use set_theme_light() or set_theme_dark() to switch.")
