@@ -27,7 +27,7 @@ def upgrade() -> None:
     # Partial index for completed tasks queries with time filtering
     # Used by: get_completed_tasks_with_duration, throughput charts
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_task_queue_completed_at_desc
+        CREATE INDEX IF NOT EXISTS idx_task_queue_completed_at_desc
         ON tasks.task_queue(completed_at DESC)
         WHERE status = 'completed' AND completed_at IS NOT NULL
     """)
@@ -35,7 +35,7 @@ def upgrade() -> None:
     # Composite index for worker performance queries
     # Used by: get_worker_performance_stats, worker throughput tables
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_task_queue_worker_completed
+        CREATE INDEX IF NOT EXISTS idx_task_queue_worker_completed
         ON tasks.task_queue(worker_id, task_type, completed_at DESC)
         WHERE status = 'completed'
     """)
@@ -43,7 +43,7 @@ def upgrade() -> None:
     # Composite index for task queue status grouped queries
     # Used by: get_task_queue_status, task type aggregations
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_task_queue_type_status
+        CREATE INDEX IF NOT EXISTS idx_task_queue_type_status
         ON tasks.task_queue(task_type, status)
     """)
 
