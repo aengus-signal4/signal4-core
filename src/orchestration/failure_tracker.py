@@ -253,6 +253,7 @@ class FailureTracker:
             "content unavailable",
             "video unavailable",
             "bad url",
+            "no chunks found",
         ]
 
         error_lower = error_message.lower()
