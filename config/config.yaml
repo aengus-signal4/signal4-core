@@ -125,8 +125,8 @@ services:
         port: 8004
         tiers: ["tier_2"]
         allowed_models:
-          - "mlx-community/Qwen3-30B-A3B-4bit"
-        default_model: "mlx-community/Qwen3-30B-A3B-4bit"
+          - "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit"
+        default_model: "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit"
       worker5:
         enabled: false  # Host is down
         host: "10.0.0.209" # worker5 IP
@@ -194,9 +194,9 @@ processing:
     model_keep_warm_seconds: 300
     allowed_models:
       - "mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit"
-      - "mlx-community/Qwen3-30B-A3B-4bit"
+      - "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit"
       - "mlx-community/Qwen3-4B-Instruct-2507-4bit"
-    default_model: "mlx-community/Qwen3-30B-A3B-4bit"
+    default_model: "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit"
 
   # Speaker identification configuration
   speaker_identification:
@@ -427,7 +427,7 @@ processing:
       eth: 10.0.0.34
       wifi: 10.0.0.28
       enabled: true
-      task_types: ["download_podcast:1","diarize:1"]
+      task_types: ["download_podcast:1"]
       max_concurrent_tasks: 1
       type: "worker"
       download_mode: cookie
@@ -487,7 +487,7 @@ processing:
       eth: 10.0.0.209
       wifi: 10.0.0.99
       enabled: false
-      task_types: ["transcribe:1","diarize:1","stitch:1","convert:1"]
+      task_types: ["transcribe:1","stitch:2","convert:1"]
       max_concurrent_tasks: 1
       type: "worker"
       services:
@@ -499,7 +499,7 @@ processing:
       eth: 10.0.0.4
       wifi: 10.0.0.215
       enabled: true
-      task_types: ["download_rumble:1","download_podcast:1","download_youtube:1","transcribe:1"]
+      task_types: ["download_rumble:1","download_podcast:1","download_youtube:1","diarize:1"]
       max_concurrent_tasks: 1
       type: "head"
       services:

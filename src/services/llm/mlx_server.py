@@ -70,10 +70,10 @@ MODEL_CONFIGS = {
         "aliases": ["qwen3:80b", "80b", "large", "tier_1", "tier1", "best"],
         "description": "80B parameter model - best quality"
     },
-    "mlx-community/Qwen3-30B-A3B-4bit": {
-        "rank": 2,  # Tier 2 - Balanced (30B MoE)
+    "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit": {
+        "rank": 2,  # Tier 2 - Balanced (30B MoE Instruct)
         "aliases": ["qwen3:30b", "30b", "medium", "tier_2", "tier2", "balanced"],
-        "description": "30B parameter MoE model - balanced speed/quality"
+        "description": "30B parameter MoE Instruct model - balanced speed/quality"
     },
     "mlx-community/Qwen3-4B-Instruct-2507-4bit": {
         "rank": 3,  # Tier 3 - Fast
@@ -445,6 +445,16 @@ class MLXManager:
         # Build prompt from messages
         if tokenizer.chat_template is not None:
             messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
+
+            # Disable Qwen3 thinking mode for non-Instruct models (e.g., Qwen3-30B-A3B-4bit)
+            # Instruct models don't have thinking mode, so skip them
+            if "Instruct" not in best_model and "Qwen3" in best_model:
+                for i in range(len(messages) - 1, -1, -1):
+                    if messages[i]["role"] == "user":
+                        if "/no_think" not in messages[i]["content"]:
+                            messages[i]["content"] = messages[i]["content"].rstrip() + " /no_think"
+                        break
+
             prompt = tokenizer.apply_chat_template(messages, add_generation_prompt=True)
         else:
             # Fallback to simple concatenation
