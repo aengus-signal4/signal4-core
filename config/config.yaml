@@ -112,7 +112,7 @@ services:
     enabled: true  # Enable model servers as infrastructure services
     instances:
       worker0:
-        enabled: true
+        enabled: false  # Disabled - worker0 LLM server off
         host: "10.0.0.34"  # worker0 IP
         port: 8004
         tiers: ["tier_1", "tier_2", "tier_3"]  # Accept all tiers, upgrade to 80B model
@@ -125,8 +125,8 @@ services:
         port: 8004
         tiers: ["tier_2"]
         allowed_models:
-          - "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit"
-        default_model: "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit"
+          - "local:mlx_qwen3_omni_4bit"  # Qwen3-Omni-30B with audio support
+        default_model: "local:mlx_qwen3_omni_4bit"
       worker5:
         enabled: false  # Host is down
         host: "10.0.0.209" # worker5 IP
@@ -194,9 +194,9 @@ processing:
     model_keep_warm_seconds: 300
     allowed_models:
       - "mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit"
-      - "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit"
+      - "local:mlx_qwen3_omni_4bit"  # Qwen3-Omni-30B with audio support
       - "mlx-community/Qwen3-4B-Instruct-2507-4bit"
-    default_model: "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit"
+    default_model: "local:mlx_qwen3_omni_4bit"
 
   # Speaker identification configuration
   speaker_identification:
@@ -847,7 +847,7 @@ scheduled_tasks:
     speaker_id_phase2:
       name: "Speaker ID Phase 2"
       description: "Speaker identification Phase 2: Text evidence"
-      enabled: true
+      enabled: false  # Disabled for now
       schedule:
         type: run_then_wait
         wait_seconds: 600  # Wait 10 minutes after completion
