@@ -115,6 +115,11 @@ class LabelPropagationConfig:
     name_merge_threshold: float = 0.70     # Centroid similarity to merge names
     prefer_full_names: bool = True         # Prefer "First Last" format over nicknames
 
+    # Phase 1 corroboration weighting for centroid building
+    use_phase1_weighting: bool = True      # Weight embeddings by Phase 1 corroboration
+    phase1_corroborated_weight: float = 1.0   # Weight for anchors corroborated by Phase 1
+    phase1_uncorroborated_weight: float = 0.1  # Weight for anchors NOT in Phase 1 metadata
+
 
 class LabelPropagationStrategy:
     """
@@ -173,6 +178,9 @@ class LabelPropagationStrategy:
             'handles_flagged': 0,
             'suggested_merges': 0,
             'suggested_do_not_merge': 0,
+            # Phase 1 corroboration metrics
+            'phase1_corroborated_anchors': 0,
+            'phase1_uncorroborated_anchors': 0,
             'errors': []
         }
 
@@ -366,6 +374,58 @@ class LabelPropagationStrategy:
         if any(ind in name.lower() for ind in handle_indicators):
             return True
         return False
+
+    def _is_phase1_corroborated(self, name: str, speaker_data: Dict) -> bool:
+        """
+        Check if Phase 2 identified name is corroborated by Phase 1 metadata.
+
+        Returns True if the identified name appears in the episode's hosts or guests
+        (extracted by Phase 1 from episode title/description).
+
+        This helps filter out contaminated anchors where diarization merged
+        a pre-roll ad voice with the main speaker (e.g., Jordan Peterson ad
+        merged with Matt Walsh, but Phase 1 correctly identifies Matt Walsh
+        as host and doesn't mention Jordan Peterson).
+        """
+        episode_names = speaker_data.get('episode_names', set())
+        if not episode_names:
+            return False
+
+        name_lower = name.lower()
+
+        # Check for exact or partial match
+        for ep_name in episode_names:
+            # Exact match
+            if name_lower == ep_name:
+                return True
+            # Partial match (e.g., "Jordan Peterson" matches "Jordan B. Peterson")
+            name_parts = name_lower.split()
+            ep_parts = ep_name.split()
+            if len(name_parts) >= 2 and len(ep_parts) >= 2:
+                # Match if first and last name match
+                if name_parts[0] == ep_parts[0] and name_parts[-1] == ep_parts[-1]:
+                    return True
+            # Single word match for common cases
+            if len(name_parts) == 1 or len(ep_parts) == 1:
+                if name_lower in ep_name or ep_name in name_lower:
+                    return True
+
+        return False
+
+    def _get_phase1_weight(self, name: str, speaker_data: Dict) -> float:
+        """
+        Get embedding weight based on Phase 1 corroboration.
+
+        Anchors corroborated by Phase 1 metadata get full weight.
+        Anchors not mentioned in Phase 1 get reduced weight.
+        """
+        if not self.config.use_phase1_weighting:
+            return 1.0
+
+        if self._is_phase1_corroborated(name, speaker_data):
+            return self.config.phase1_corroborated_weight
+        else:
+            return self.config.phase1_uncorroborated_weight
 
     def _get_sample_segments_for_name(self, name: str, speakers: List[Dict], n_samples: int = 3) -> List[Dict]:
         """
@@ -674,26 +734,46 @@ class LabelPropagationStrategy:
         # Stage 2: Analyze embeddings and generate suggestions (no auto-merge)
         logger.info("  Stage 2: Analyzing embeddings for suggestions...")
 
-        # Build centroids for each name
+        # Build centroids for each name (weighted by Phase 1 corroboration)
         name_data = {}  # name -> {centroid, speakers, total_hours}
+        phase1_stats = {'corroborated': 0, 'uncorroborated': 0}
+
         for name, speakers in speakers_by_name.items():
             if not speakers:
                 continue
 
-            # Get embeddings for this name's speakers
+            # Get embeddings and weights for this name's speakers
             embeddings = []
+            weights = []
             total_duration = 0
             for sp in speakers:
                 if sp.get('embedding') is not None:
                     embeddings.append(sp['embedding'])
+                    weight = self._get_phase1_weight(name, sp)
+                    weights.append(weight)
                     total_duration += sp.get('duration', 0) or 0
+
+                    # Track stats
+                    if weight >= self.config.phase1_corroborated_weight:
+                        phase1_stats['corroborated'] += 1
+                    else:
+                        phase1_stats['uncorroborated'] += 1
 
             if not embeddings:
                 continue
 
-            # Compute centroid
+            # Compute weighted centroid
             emb_array = np.array(embeddings, dtype=np.float32)
-            centroid = np.mean(emb_array, axis=0)
+            weights_array = np.array(weights, dtype=np.float32)
+
+            # Normalize weights to sum to 1
+            weight_sum = weights_array.sum()
+            if weight_sum > 0:
+                weights_normalized = weights_array / weight_sum
+                centroid = np.average(emb_array, axis=0, weights=weights_normalized)
+            else:
+                centroid = np.mean(emb_array, axis=0)
+
             norm = np.linalg.norm(centroid)
             if norm > 0:
                 centroid = centroid / norm
@@ -704,8 +784,16 @@ class LabelPropagationStrategy:
                 'total_hours': total_duration / 3600,
                 'quality_score': self._score_name_quality(name),
                 'is_handle': self._is_likely_handle(name),
-                'n_episodes': len(set(sp.get('content_id') for sp in speakers))
+                'n_episodes': len(set(sp.get('content_id') for sp in speakers)),
+                'n_corroborated': sum(1 for sp in speakers if self._is_phase1_corroborated(name, sp)),
+                'n_uncorroborated': sum(1 for sp in speakers if not self._is_phase1_corroborated(name, sp))
             }
+
+        if self.config.use_phase1_weighting:
+            logger.info(f"  Phase 1 weighting: {phase1_stats['corroborated']} corroborated, "
+                       f"{phase1_stats['uncorroborated']} uncorroborated anchors")
+            self.stats['phase1_corroborated_anchors'] = phase1_stats['corroborated']
+            self.stats['phase1_uncorroborated_anchors'] = phase1_stats['uncorroborated']
 
         self.stats['names_before_standardization'] = len(name_data)
         self.stats['names_after_standardization'] = len(name_data)  # No auto-merge
@@ -1180,20 +1268,41 @@ class LabelPropagationStrategy:
         id_to_idx: Dict[int, int],
         embeddings: np.ndarray
     ) -> Dict[str, np.ndarray]:
-        """Build centroid embeddings for each label from anchor speakers."""
-        label_embeddings: Dict[str, List[np.ndarray]] = defaultdict(list)
+        """Build centroid embeddings for each label from anchor speakers.
+
+        Uses Phase 1 corroboration weighting to reduce impact of contaminated
+        anchors (e.g., pre-roll ad voices merged with main speaker).
+        """
+        label_data: Dict[str, Dict] = defaultdict(lambda: {'embeddings': [], 'weights': []})
 
         for sp_id, label in labels.items():
             if sp_id in all_speakers:
-                label_embeddings[label].append(all_speakers[sp_id]['embedding'])
+                sp_data = all_speakers[sp_id]
+                label_data[label]['embeddings'].append(sp_data['embedding'])
+                label_data[label]['weights'].append(self._get_phase1_weight(label, sp_data))
 
-        # Compute mean centroid for each label
+        # Compute weighted centroid for each label
         centroids = {}
-        for label, embs in label_embeddings.items():
-            if embs:
-                centroid = np.mean(embs, axis=0)
-                centroid = centroid / np.linalg.norm(centroid)
-                centroids[label] = centroid
+        for label, data in label_data.items():
+            embs = data['embeddings']
+            weights = data['weights']
+
+            if not embs:
+                continue
+
+            emb_array = np.array(embs, dtype=np.float32)
+            weights_array = np.array(weights, dtype=np.float32)
+
+            # Normalize weights
+            weight_sum = weights_array.sum()
+            if weight_sum > 0:
+                weights_normalized = weights_array / weight_sum
+                centroid = np.average(emb_array, axis=0, weights=weights_normalized)
+            else:
+                centroid = np.mean(emb_array, axis=0)
+
+            centroid = centroid / np.linalg.norm(centroid)
+            centroids[label] = centroid
 
         return centroids
 
