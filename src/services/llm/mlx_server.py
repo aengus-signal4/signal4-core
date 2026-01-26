@@ -18,17 +18,26 @@ Key features:
 4. Per-worker model restrictions based on config
 5. Keeps models warm in memory (configurable timeout)
 6. Audio input support via Qwen3-Omni (tier_2)
+7. **Tier 2 hot-swap**: Automatically switches between instruct (text) and omni (audio) models
 
 Three-tier model system:
 - Tier 1 (best):     mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit  (text only)
-- Tier 2 (balanced): local:mlx_qwen3_omni_4bit                        (text + audio, short clips <30s)
+- Tier 2 (balanced): Hot-swaps between instruct (default) and omni (audio)
+  - Instruct: mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit (text only, better quality)
+  - Omni:     local:mlx_qwen3_omni_4bit (text + audio, loads on audio request)
 - Tier 3 (fast):     mlx-community/Qwen3-4B-Instruct-2507-4bit       (text only)
 
+Tier 2 Hot-Swap Behavior:
+- Default mode: instruct (better for text-only tasks)
+- Audio request triggers swap: unload instruct -> load omni
+- After 5 minutes of no audio: unload omni (next request loads instruct)
+- Memory constraint: only one tier_2 model loaded at a time
+
 Usage examples:
-  # Text-only request
+  # Text-only request (uses instruct by default)
   request = {"model": "tier_2", "messages": [{"role": "user", "content": "..."}]}
 
-  # Audio + text request (tier_2 only)
+  # Audio + text request (hot-swaps to omni)
   request = {
       "model": "tier_2",
       "messages": [{"role": "user", "content": "Analyze this audio..."}],
@@ -36,6 +45,7 @@ Usage examples:
   }
 
 Response includes "model_used" and "audio_processed" fields.
+Check /status for tier_2_hot_swap status (mode, time until swap back to instruct).
 """
 
 import asyncio
@@ -81,6 +91,7 @@ except ImportError:
 
 # Model configurations with hierarchy (rank 1 = best quality)
 # Models marked as "omni" support audio input via mlx-vlm
+# Note: tier_2 has two variants - instruct (text-only, default) and omni (audio support)
 MODEL_CONFIGS = {
     "mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit": {
         "rank": 1,  # Tier 1 - Best quality
@@ -88,9 +99,15 @@ MODEL_CONFIGS = {
         "description": "80B parameter model - best quality",
         "omni": False,
     },
+    "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit": {
+        "rank": 2,  # Tier 2 - Instruct (text-only, default for tier_2)
+        "aliases": ["qwen3:30b-instruct", "30b-instruct", "tier_2_instruct"],
+        "description": "30B parameter Instruct model - text only (default for tier_2)",
+        "omni": False,
+    },
     "local:mlx_qwen3_omni_4bit": {
-        "rank": 2,  # Tier 2 - Balanced (30B Omni with audio support)
-        "aliases": ["qwen3:omni", "omni", "30b", "medium", "tier_2", "tier2", "balanced"],
+        "rank": 2,  # Tier 2 - Omni (audio support, loaded on demand)
+        "aliases": ["qwen3:omni", "omni", "30b", "medium", "tier_2", "tier2", "balanced", "tier_2_omni"],
         "description": "30B parameter Omni model - text + audio input (short clips <30s)",
         "omni": True,
         "local_path": "scripts/qwen3_omni_captioner/mlx_qwen3_omni_4bit",
@@ -108,6 +125,11 @@ MODEL_CONFIGS = {
         "omni": False,
     }
 }
+
+# Hot-swap configuration for tier_2 models
+TIER_2_INSTRUCT_MODEL = "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit"
+TIER_2_OMNI_MODEL = "local:mlx_qwen3_omni_4bit"
+AUDIO_IDLE_TIMEOUT_SECONDS = 300  # 5 minutes - swap back to instruct after no audio requests
 
 
 # Request/Response models
@@ -153,12 +175,20 @@ class LLMResponse(BaseModel):
     task_type: str
 
 
+class Tier2HotSwapStatus(BaseModel):
+    """Tier 2 hot-swap status for instruct/omni models."""
+    mode: str = Field(description="Current mode: 'instruct' or 'omni'")
+    last_audio_request_seconds_ago: Optional[float] = Field(default=None, description="Seconds since last audio request")
+    seconds_until_instruct_swap: Optional[float] = Field(default=None, description="Seconds until swap back to instruct (if in omni mode)")
+
+
 class ServerStatus(BaseModel):
     """Server status information."""
     status: str
     models_loaded: List[str]
     model_status: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     allowed_models: List[str]
+    tier_2_hot_swap: Tier2HotSwapStatus = Field(default_factory=lambda: Tier2HotSwapStatus(mode="instruct"))
     active_requests: int
     queued_requests: int
     total_requests_processed: int
@@ -172,7 +202,11 @@ class ServerStatus(BaseModel):
 class MLXManager:
     """Manages local MLX model loading and request processing."""
 
-    def __init__(self, max_concurrent: int = 5, max_queue_size: int = 100):
+    def __init__(self, max_concurrent: int = 1, max_queue_size: int = 100):
+        # IMPORTANT: max_concurrent must be 1 for MLX on Apple Silicon
+        # Metal GPU does not support concurrent command encoders from multiple threads
+        # Concurrent inference causes "A command encoder is already encoding" crash
+        # The LLM balancer handles distribution across multiple workers instead
         self.max_concurrent = max_concurrent
         self.max_queue_size = max_queue_size
         self.executor = ThreadPoolExecutor(max_workers=max_concurrent)
@@ -203,6 +237,11 @@ class MLXManager:
         # Background tasks
         self.unload_task = None
         self.queue_processors = []
+        self.audio_swap_task = None  # Background task for tier_2 hot-swap
+
+        # Tier 2 hot-swap tracking (instruct <-> omni)
+        self.last_audio_request_time = 0.0  # Timestamp of last audio request
+        self.tier_2_mode = "instruct"  # Current mode: "instruct" or "omni"
 
         # Statistics
         self.requests_by_task_type = {task_type.value: 0 for task_type in TaskType}
@@ -272,6 +311,10 @@ class MLXManager:
         self.unload_task = asyncio.create_task(self._model_unloader())
         logger.info("Model unloader task started")
 
+        # Start tier_2 audio hot-swap monitor (checks if we should swap back to instruct)
+        self.audio_swap_task = asyncio.create_task(self._audio_swap_monitor())
+        logger.info("Tier 2 audio hot-swap monitor started")
+
         # Start queue processors
         for i in range(self.max_concurrent):
             processor = asyncio.create_task(self._queue_processor(i))
@@ -305,6 +348,48 @@ class MLXManager:
                 break
             except Exception as e:
                 logger.error(f"Error in model unloader: {e}")
+
+    async def _audio_swap_monitor(self):
+        """Background task to swap tier_2 back to instruct mode after audio idle timeout.
+
+        Hot-swap logic for tier_2:
+        - Default: instruct model (better for text)
+        - On audio request: unload instruct, load omni
+        - After 5 minutes of no audio: unload omni, load instruct (on next request)
+        """
+        while True:
+            try:
+                await asyncio.sleep(60)  # Check every minute
+
+                # Only relevant if we're in omni mode
+                if self.tier_2_mode != "omni":
+                    continue
+
+                # Check if we should swap back to instruct
+                current_time = time.time()
+                time_since_audio = current_time - self.last_audio_request_time
+
+                if time_since_audio > AUDIO_IDLE_TIMEOUT_SECONDS:
+                    # Check if omni model is actually loaded
+                    async with self.model_lock:
+                        if TIER_2_OMNI_MODEL in self.loaded_models:
+                            logger.info(f"Tier 2 hot-swap: No audio requests for {int(time_since_audio)}s, unloading omni model")
+                            try:
+                                del self.loaded_models[TIER_2_OMNI_MODEL]
+                                if TIER_2_OMNI_MODEL in self.models_last_used:
+                                    del self.models_last_used[TIER_2_OMNI_MODEL]
+                                logger.info(f"Tier 2 hot-swap: Omni model unloaded, will load instruct on next request")
+                            except Exception as e:
+                                logger.error(f"Error unloading omni model: {e}")
+
+                        # Switch mode back to instruct
+                        self.tier_2_mode = "instruct"
+                        logger.info("Tier 2 mode switched back to instruct")
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in audio swap monitor: {e}")
 
     def _resolve_model_name(self, requested_model: str) -> str:
         """Resolve model alias to full model name."""
@@ -354,6 +439,72 @@ class MLXManager:
                 best_rank = model_rank
 
         return best_model
+
+    async def _select_tier_2_model(self, has_audio: bool, request_id: str) -> str:
+        """Select the appropriate tier_2 model based on whether audio is present.
+
+        Hot-swap logic:
+        - Default: instruct model (better for text-only tasks)
+        - Audio request: unload instruct, load omni, update last_audio_request_time
+        - No audio for 5 minutes: background task unloads omni, next request loads instruct
+
+        Memory constraints require unloading one model before loading the other.
+        """
+        # Check if either tier_2 model is allowed on this worker
+        instruct_allowed = TIER_2_INSTRUCT_MODEL in self.allowed_models
+        omni_allowed = TIER_2_OMNI_MODEL in self.allowed_models
+
+        if has_audio:
+            # Audio request - need omni model
+            if not omni_allowed:
+                logger.warning(f"[{request_id}] Audio requested but omni model not allowed, falling back to instruct")
+                return TIER_2_INSTRUCT_MODEL if instruct_allowed else self.allowed_models[0]
+
+            # Update last audio request time
+            self.last_audio_request_time = time.time()
+
+            # Check if we need to swap from instruct to omni
+            if self.tier_2_mode == "instruct":
+                async with self.model_lock:
+                    # Unload instruct model first (memory constraints)
+                    if TIER_2_INSTRUCT_MODEL in self.loaded_models:
+                        logger.info(f"[{request_id}] Tier 2 hot-swap: Unloading instruct for audio request")
+                        del self.loaded_models[TIER_2_INSTRUCT_MODEL]
+                        if TIER_2_INSTRUCT_MODEL in self.models_last_used:
+                            del self.models_last_used[TIER_2_INSTRUCT_MODEL]
+
+                    self.tier_2_mode = "omni"
+                    logger.info(f"[{request_id}] Tier 2 hot-swap: Switching to omni mode for audio")
+
+            return TIER_2_OMNI_MODEL
+
+        else:
+            # Text-only request - prefer instruct model
+            if not instruct_allowed:
+                # Fall back to omni for text if instruct not available
+                return TIER_2_OMNI_MODEL if omni_allowed else self.allowed_models[0]
+
+            # Check if we need to swap from omni to instruct
+            # (This is normally handled by the background task, but handle edge cases)
+            if self.tier_2_mode == "omni":
+                # Check if we've been idle long enough to swap back
+                time_since_audio = time.time() - self.last_audio_request_time
+                if time_since_audio > AUDIO_IDLE_TIMEOUT_SECONDS:
+                    async with self.model_lock:
+                        # Unload omni model first (memory constraints)
+                        if TIER_2_OMNI_MODEL in self.loaded_models:
+                            logger.info(f"[{request_id}] Tier 2 hot-swap: Unloading omni (idle {int(time_since_audio)}s)")
+                            del self.loaded_models[TIER_2_OMNI_MODEL]
+                            if TIER_2_OMNI_MODEL in self.models_last_used:
+                                del self.models_last_used[TIER_2_OMNI_MODEL]
+
+                        self.tier_2_mode = "instruct"
+                        logger.info(f"[{request_id}] Tier 2 hot-swap: Switching to instruct mode")
+                else:
+                    # Still in omni mode, use omni for text (don't swap mid-session)
+                    return TIER_2_OMNI_MODEL
+
+            return TIER_2_INSTRUCT_MODEL
 
     async def _ensure_model_loaded(self, model_name: str) -> Tuple[Any, Any]:
         """Ensure a model is loaded and return (model, tokenizer/processor)."""
@@ -476,10 +627,25 @@ class MLXManager:
                 return heapq.heappop(self.request_queue)
             return None
 
+    def _is_tier_2_request(self, model: str) -> bool:
+        """Check if this is a tier_2 request (should use hot-swap logic)."""
+        # Check direct aliases
+        tier_2_aliases = ["tier_2", "tier2", "30b", "medium", "balanced"]
+        if model.lower() in tier_2_aliases:
+            return True
+        # Check if resolved model is a tier_2 model
+        resolved = self._resolve_model_name(model)
+        return resolved in [TIER_2_INSTRUCT_MODEL, TIER_2_OMNI_MODEL]
+
     async def _process_llm_request(self, request: LLMRequest, request_id: str) -> Dict[str, Any]:
         """Process LLM request locally using MLX."""
         # Choose best model based on hierarchy
         best_model = self._choose_best_model(request.model)
+
+        # Tier 2 hot-swap logic: use instruct by default, omni only for audio
+        has_audio = request.audio_path is not None
+        if self._is_tier_2_request(request.model) or best_model in [TIER_2_INSTRUCT_MODEL, TIER_2_OMNI_MODEL]:
+            best_model = await self._select_tier_2_model(has_audio, request_id)
 
         # Check if this is an Omni model
         model_config = MODEL_CONFIGS.get(best_model, {})
@@ -735,11 +901,20 @@ class MLXManager:
                 "rank": MODEL_CONFIGS[model_name]['rank']
             }
 
+        # Tier 2 hot-swap status
+        time_since_audio = current_time - self.last_audio_request_time if self.last_audio_request_time else None
+        tier_2_status = {
+            "mode": self.tier_2_mode,
+            "last_audio_request_seconds_ago": round(time_since_audio, 1) if time_since_audio else None,
+            "seconds_until_instruct_swap": round(max(0, AUDIO_IDLE_TIMEOUT_SECONDS - time_since_audio), 1) if time_since_audio and self.tier_2_mode == "omni" else None,
+        }
+
         return {
             "status": "healthy",
             "models_loaded": list(self.loaded_models.keys()),
             "model_status": model_status,
             "allowed_models": self.allowed_models,
+            "tier_2_hot_swap": tier_2_status,
             "active_requests": self.active_requests,
             "queued_requests": self.queued_requests,
             "total_requests_processed": self.total_requests,
@@ -764,7 +939,7 @@ async def lifespan(app: FastAPI):
     logger.info("Starting MLX Model Server (Apple Silicon acceleration)")
     logger.info("=" * 60)
 
-    max_concurrent = int(os.environ.get('LLM_MAX_CONCURRENT', 5))
+    max_concurrent = int(os.environ.get('LLM_MAX_CONCURRENT', 1))
     max_queue_size = int(os.environ.get('LLM_MAX_QUEUE_SIZE', 100))
     logger.info(f"Max concurrent requests: {max_concurrent}")
     logger.info(f"Max queue size: {max_queue_size}")
@@ -777,12 +952,20 @@ async def lifespan(app: FastAPI):
 
     logger.info("Shutting down MLX Model Server...")
     if mlx_manager:
+        # Cancel background tasks
         if mlx_manager.unload_task:
             mlx_manager.unload_task.cancel()
             try:
                 await mlx_manager.unload_task
             except asyncio.CancelledError:
                 pass
+        if mlx_manager.audio_swap_task:
+            mlx_manager.audio_swap_task.cancel()
+            try:
+                await mlx_manager.audio_swap_task
+            except asyncio.CancelledError:
+                pass
+        # Cancel queue processors
         for processor in mlx_manager.queue_processors:
             processor.cancel()
         await asyncio.gather(*mlx_manager.queue_processors, return_exceptions=True)

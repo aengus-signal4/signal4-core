@@ -177,7 +177,8 @@ class ServiceStartupManager:
         cmd: List[str],
         port: int,
         service_description: str,
-        log_file: Optional[str] = None
+        log_file: Optional[str] = None,
+        working_dir: Optional[str] = None
     ) -> bool:
         """Start a service in a named screen session.
 
@@ -187,6 +188,7 @@ class ServiceStartupManager:
             port: Port the service listens on (for health checking)
             service_description: Human-readable description for logging
             log_file: Optional log file path (relative to base_path)
+            working_dir: Optional working directory (defaults to base_path)
 
         Returns:
             True if service started successfully
@@ -220,8 +222,9 @@ class ServiceStartupManager:
                 log_path.parent.mkdir(parents=True, exist_ok=True)
                 cmd_str = f'{cmd_str} 2>&1 | tee -a {shlex.quote(str(log_path))}'
 
-            # Wrap command to run in project directory
-            wrapped_cmd = f'cd {shlex.quote(str(self.base_path))} && {cmd_str}'
+            # Wrap command to run in specified directory (or base_path by default)
+            run_dir = working_dir if working_dir else str(self.base_path)
+            wrapped_cmd = f'cd {shlex.quote(run_dir)} && {cmd_str}'
 
             # Start screen session
             screen_cmd = ['screen', '-dmS', screen_name, 'bash', '-c', wrapped_cmd]
@@ -412,20 +415,48 @@ class ServiceStartupManager:
     async def _start_local_model_server(self, instance_name: str, port: int, config: dict):
         """Start a local model server instance in a screen session"""
         screen_name = f'model_server_{instance_name}'
-        cmd = [
-            str(self.uv_path), 'run', 'python',
-            str(self.model_server_script),
-            '--port', str(port),
-            '--host', '0.0.0.0'
-        ]
 
-        await self._start_in_screen(
-            screen_name=screen_name,
-            cmd=cmd,
-            port=port,
-            service_description=f'Model server {instance_name}',
-            log_file=f'logs/services/model_server_{instance_name}.log'
+        # Check if any Omni models are requested (requires mlx-vlm from isolated env)
+        allowed_models = config.get('allowed_models', [])
+        omni_models = ["local:mlx_qwen3_omni_4bit", "qwen3:omni", "omni"]
+        needs_omni = any(
+            any(omni in model.lower() for omni in omni_models)
+            for model in allowed_models
         )
+
+        if needs_omni:
+            # Use isolated env with mlx-vlm for Omni/audio support
+            # Must run from the env directory for uv to pick up the correct pyproject.toml
+            env_dir = self.base_path / 'src' / 'services' / 'llm' / 'env'
+            cmd = [
+                str(self.uv_path), 'run', 'python',
+                'run_mlx_server.py',
+                '--port', str(port),
+                '--host', '0.0.0.0'
+            ]
+            await self._start_in_screen(
+                screen_name=screen_name,
+                cmd=cmd,
+                port=port,
+                service_description=f'Model server {instance_name} (Omni)',
+                log_file=f'logs/services/model_server_{instance_name}.log',
+                working_dir=str(env_dir)
+            )
+        else:
+            # Use standard mlx_server.py for text-only models
+            cmd = [
+                str(self.uv_path), 'run', 'python',
+                str(self.model_server_script),
+                '--port', str(port),
+                '--host', '0.0.0.0'
+            ]
+            await self._start_in_screen(
+                screen_name=screen_name,
+                cmd=cmd,
+                port=port,
+                service_description=f'Model server {instance_name}',
+                log_file=f'logs/services/model_server_{instance_name}.log'
+            )
 
     async def _start_remote_model_server(self, instance_name: str, host: str, port: int, config: dict):
         """Start a remote model server instance via SSH"""
@@ -457,21 +488,53 @@ class ServiceStartupManager:
                 allowed_models = config.get('allowed_models', [])
                 default_model = config.get('default_model', '')
 
-                # Create startup script
-                startup_script = f'''#!/bin/bash
+                # Check if any Omni models are requested (requires mlx-vlm from isolated env)
+                omni_models = ["local:mlx_qwen3_omni_4bit", "qwen3:omni", "omni"]
+                needs_omni = any(
+                    any(omni in model.lower() for omni in omni_models)
+                    for model in allowed_models
+                )
+
+                if needs_omni:
+                    # Use isolated env with mlx-vlm for Omni/audio support
+                    startup_script = f'''#!/bin/bash
 set -e
 
 # Change to project directory
 cd /Users/signal4/signal4/core
 
 # Kill any existing model server on this port
-pkill -f "port {port}" || true
+pkill -f "mlx_server" || true
+pkill -f "run_mlx_server" || true
+sleep 2
+
+# Start model server using isolated env with mlx-vlm
+echo "[$(date)] Starting model server {instance_name} (Omni mode) on port {port}"
+cd src/services/llm/env
+/Users/signal4/.local/bin/uv run python run_mlx_server.py \\
+    --port {port} \\
+    --host 0.0.0.0 \\
+    > /tmp/model_server_{instance_name}.log 2>&1 &
+
+echo $! > /tmp/model_server_{instance_name}.pid
+echo "[$(date)] Model server {instance_name} (Omni) started with PID $!"
+'''
+                else:
+                    # Use standard uv run for text-only models (no mlx-vlm needed)
+                    startup_script = f'''#!/bin/bash
+set -e
+
+# Change to project directory
+cd /Users/signal4/signal4/core
+
+# Kill any existing model server on this port
+pkill -f "mlx_server" || true
 sleep 2
 
 # Set environment variables
 export PYTHONPATH=/Users/signal4/signal4/core:$PYTHONPATH
 
-# Start model server
+# Start model server (text-only mode)
 echo "[$(date)] Starting model server {instance_name} on port {port}"
 /Users/signal4/.local/bin/uv run python src/services/llm/mlx_server.py \\
     --port {port} \\
