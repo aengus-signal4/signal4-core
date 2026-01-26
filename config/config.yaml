@@ -112,7 +112,7 @@ services:
     enabled: true  # Enable model servers as infrastructure services
     instances:
       worker0:
-        enabled: false  # Disabled - worker0 LLM server off
+        enabled: true  # 80B model for tier_1/tier_2/tier_3
         host: "10.0.0.34"  # worker0 IP
         port: 8004
         tiers: ["tier_1", "tier_2", "tier_3"]  # Accept all tiers, upgrade to 80B model
@@ -120,13 +120,14 @@ services:
           - "mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit"
         default_model: "mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit"
       head:
-        enabled: true  # tier_2 on head node (worker6)
+        enabled: true  # tier_2 on head node (worker6) with hot-swap between instruct/omni
         host: "10.0.0.4"   # head node IP
         port: 8004
         tiers: ["tier_2"]
         allowed_models:
-          - "local:mlx_qwen3_omni_4bit"  # Qwen3-Omni-30B with audio support
-        default_model: "local:mlx_qwen3_omni_4bit"
+          - "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit"  # Default for text (hot-swap)
+          - "local:mlx_qwen3_omni_4bit"  # Loaded on demand for audio (hot-swap)
+        default_model: "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit"
       worker5:
         enabled: false  # Host is down
         host: "10.0.0.209" # worker5 IP
@@ -464,7 +465,7 @@ processing:
       eth: 10.0.0.203
       wifi: 10.0.0.76
       enabled: true
-      task_types: ["convert:1","cleanup:1","transcribe:1","stitch:2"]
+      task_types: ["convert:1","cleanup:1","stitch:1"]
       type: "worker"
       services:
         task_processor:
@@ -475,7 +476,7 @@ processing:
       eth: 10.0.0.51
       wifi: 10.0.0.163
       enabled: true
-      task_types: ["convert:1","cleanup:1","transcribe:1","stitch:2"]
+      task_types: ["convert:1","cleanup:1","stitch:1"]
       max_concurrent_tasks: 1
       type: "worker"
       services:
@@ -847,7 +848,7 @@ scheduled_tasks:
     speaker_id_phase2:
       name: "Speaker ID Phase 2"
       description: "Speaker identification Phase 2: Text evidence"
-      enabled: false  # Disabled for now
+      enabled: true
       schedule:
         type: run_then_wait
         wait_seconds: 600  # Wait 10 minutes after completion

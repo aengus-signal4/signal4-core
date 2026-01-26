@@ -121,6 +121,7 @@ class LLMClient:
         tier: Optional[str] = None,
         task_type: Optional[str] = None,
         retries: int = 3,
+        backoff_base: float = 2.0,
     ) -> str:
         """
         Make a single LLM call with retry logic.
@@ -135,6 +136,7 @@ class LLMClient:
             tier: Override default tier
             task_type: Override default task type
             retries: Number of retry attempts
+            backoff_base: Base for exponential backoff (default 2.0 = 1,2,4s; use 3.0 for slower 3,9,27s)
 
         Returns:
             Response text from LLM
@@ -166,23 +168,25 @@ class LLMClient:
                     elif resp.status == 503:
                         # Server at capacity, retry with backoff
                         error_text = await resp.text()
-                        logger.warning(f"LLM server at capacity (attempt {attempt + 1}): {error_text}")
+                        logger.warning(f"LLM server at capacity (attempt {attempt + 1}/{retries}): {error_text}")
                         last_error = RuntimeError(f"Server at capacity: {error_text}")
                     else:
                         error_text = await resp.text()
                         last_error = RuntimeError(f"LLM request failed ({resp.status}): {error_text}")
-                        logger.error(f"LLM error (attempt {attempt + 1}): {last_error}")
+                        logger.error(f"LLM error (attempt {attempt + 1}/{retries}): {last_error}")
 
             except aiohttp.ClientError as e:
                 last_error = RuntimeError(f"LLM connection error: {e}")
-                logger.warning(f"LLM connection error (attempt {attempt + 1}): {e}")
+                logger.warning(f"LLM connection error (attempt {attempt + 1}/{retries}): {e}")
             except asyncio.TimeoutError:
                 last_error = RuntimeError(f"LLM request timed out after {self.timeout}s")
-                logger.warning(f"LLM timeout (attempt {attempt + 1})")
+                logger.warning(f"LLM timeout (attempt {attempt + 1}/{retries})")
 
             # Exponential backoff before retry
             if attempt < retries - 1:
-                await asyncio.sleep(2 ** attempt)
+                backoff_seconds = backoff_base ** attempt
+                logger.info(f"Retrying in {backoff_seconds:.0f}s...")
+                await asyncio.sleep(backoff_seconds)
 
         raise last_error or RuntimeError("LLM request failed after all retries")
 

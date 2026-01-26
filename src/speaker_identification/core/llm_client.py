@@ -348,7 +348,11 @@ class MLXLLMClient:
         temperature: float = 0.1,
         max_tokens: int = 2048
     ) -> str:
-        """Call LLM via unified client."""
+        """Call LLM via unified client with slow backoff for Phase 2.
+
+        Uses 5 retries with slower exponential backoff (base 3 = 3,9,27,81s)
+        to handle temporary LLM server issues gracefully.
+        """
         messages = [
             {
                 "role": "system",
@@ -360,11 +364,15 @@ class MLXLLMClient:
             }
         ]
 
+        # Use 5 retries with slower backoff (3^n seconds: 3, 9, 27, 81)
+        # for speaker ID which is LLM-heavy and can wait for server recovery
         return await self._client.call(
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
             priority=priority,
+            retries=5,
+            backoff_base=3.0,
         )
 
     async def _call_llm_batch(

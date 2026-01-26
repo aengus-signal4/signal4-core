@@ -123,6 +123,7 @@ class LLMRequest(BaseModel):
     think: bool = Field(default=False, description="Enable model thinking")
     priority: int = Field(default=1, ge=1, le=99, description="Request priority (1-99, lower = higher priority)")
     task_type: TaskType = Field(default=TaskType.STITCH, description="Task type for endpoint routing")
+    audio_path: Optional[str] = Field(default=None, description="Path to audio file for Omni model (tier_2 only, <30s recommended)")
 
 class LLMResponse(BaseModel):
     """Generic LLM response."""
@@ -330,13 +331,13 @@ class LLMManager:
                 logger.info(f"{self.backend_type.upper()} endpoint {endpoint}:{self.backend_port} is available")
             else:
                 self.endpoint_status[endpoint] = False
-                logger.warning(f"{self.backend_type.upper()} endpoint {endpoint}:{self.backend_port} is not available")
+                logger.warning(f"{self.backend_type.upper()} endpoint {endpoint}:{self.backend_port} is not available (will retry)")
 
         if not available_endpoints:
-            raise RuntimeError(f"No {self.backend_type.upper()} endpoints are available - LLM server cannot initialize")
+            logger.warning(f"No {self.backend_type.upper()} endpoints are currently available - server will wait for endpoints to become healthy")
+        else:
+            logger.info(f"Available {self.backend_type.upper()} endpoints: {available_endpoints}")
 
-        logger.info(f"Available {self.backend_type.upper()} endpoints: {available_endpoints}")
-        
         logger.info("Initializing LLM Manager with lazy loading...")
         logger.info(f"Models will be loaded on first use and kept warm for {self.model_keep_warm_seconds} seconds")
         logger.info(f"Backend supports up to {self.max_concurrent} concurrent requests with queue size {self.max_queue_size}")
@@ -346,28 +347,65 @@ class LLMManager:
             self.unload_task = asyncio.create_task(self._model_unloader())
             logger.info("Model unloader task started")
 
-        # Initialize separate queues and processors for each endpoint
+        # Initialize queues for ALL configured endpoints (processors start when healthy)
         for endpoint in self.backend_endpoints:
-            if self.endpoint_status.get(endpoint, False):  # Only for healthy endpoints
-                self.endpoint_queues[endpoint] = []
-                self.endpoint_active_requests[endpoint] = 0
+            self.endpoint_queues[endpoint] = []
+            self.endpoint_active_requests[endpoint] = 0
 
-                # Start processors per endpoint
-                # MLX model_server handles its own concurrency, so we use 1 processor per endpoint
-                # Ollama can handle multiple concurrent requests
-                processors_per_endpoint = 1 if self.backend_type == "mlx" else 5
-                endpoint_processors = []
-                for i in range(processors_per_endpoint):
-                    processor = asyncio.create_task(self._endpoint_queue_processor(endpoint, i))
-                    endpoint_processors.append(processor)
-                    self.queue_processors.append(processor)  # Keep in main list for shutdown
+        # Start processors only for currently healthy endpoints
+        for endpoint in self.backend_endpoints:
+            if self.endpoint_status.get(endpoint, False):
+                self._start_endpoint_processors(endpoint)
 
-                self.endpoint_processors[endpoint] = endpoint_processors
-                logger.info(f"Started {processors_per_endpoint} queue processor(s) for endpoint {endpoint}")
+        # Start background task to monitor and activate unhealthy endpoints
+        self.endpoint_monitor_task = asyncio.create_task(self._endpoint_health_monitor())
+        logger.info("Endpoint health monitor task started")
 
         total_processors = sum(len(procs) for procs in self.endpoint_processors.values())
         logger.info(f"Started {total_processors} total queue processor tasks across {len(self.endpoint_processors)} endpoints")
         logger.info(f"Task routing configuration: {dict(self.task_routing)}")
+
+    def _start_endpoint_processors(self, endpoint: str):
+        """Start queue processors for an endpoint."""
+        if endpoint in self.endpoint_processors:
+            return  # Already has processors
+
+        # MLX model_server handles its own concurrency, so we use 1 processor per endpoint
+        # Ollama can handle multiple concurrent requests
+        processors_per_endpoint = 1 if self.backend_type == "mlx" else 5
+        endpoint_processors = []
+        for i in range(processors_per_endpoint):
+            processor = asyncio.create_task(self._endpoint_queue_processor(endpoint, i))
+            endpoint_processors.append(processor)
+            self.queue_processors.append(processor)  # Keep in main list for shutdown
+
+        self.endpoint_processors[endpoint] = endpoint_processors
+        logger.info(f"Started {processors_per_endpoint} queue processor(s) for endpoint {endpoint}")
+
+    async def _endpoint_health_monitor(self):
+        """Background task to monitor endpoint health and activate newly healthy endpoints."""
+        while True:
+            try:
+                await asyncio.sleep(10)  # Check every 10 seconds
+
+                for endpoint in self.backend_endpoints:
+                    was_healthy = self.endpoint_status.get(endpoint, False)
+                    is_healthy = await self._check_endpoint_health(endpoint)
+
+                    if is_healthy and not was_healthy:
+                        # Endpoint just became healthy
+                        logger.info(f"Endpoint {endpoint} is now healthy, activating...")
+                        self.endpoint_status[endpoint] = True
+                        self._start_endpoint_processors(endpoint)
+                    elif not is_healthy and was_healthy:
+                        # Endpoint became unhealthy (processors will handle failures gracefully)
+                        logger.warning(f"Endpoint {endpoint} is now unhealthy")
+                        self.endpoint_status[endpoint] = False
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in endpoint health monitor: {e}")
             
     async def _model_unloader(self):
         """Background task to unload models that haven't been used recently."""
@@ -579,6 +617,10 @@ class LLMManager:
         if request.max_tokens:
             payload["max_tokens"] = request.max_tokens
 
+        # Forward audio_path for Omni model (tier_2 hot-swap)
+        if request.audio_path:
+            payload["audio_path"] = request.audio_path
+
         logger.info(f"[{request_id}] Sending request to MLX endpoint {endpoint}:{self.backend_port} with model {request.model} (task_type: {request.task_type})")
 
         import requests as req_lib
@@ -721,6 +763,9 @@ class LLMManager:
         - Lower tier requests (e.g., tier_3) can use higher tier endpoints (tier_2, tier_1) as fallback
         - Higher tier endpoints are only used if they have zero load (idle)
         - Primary (native tier) endpoints are always preferred
+
+        Audio routing:
+        - Requests with audio_path MUST go to head node (10.0.0.4) - only node with Omni model
         """
         # Check if config needs reloading (periodic check)
         await self._check_config_reload()
@@ -743,6 +788,16 @@ class LLMManager:
 
         if not healthy_endpoints:
             return None
+
+        # Audio requests MUST go to head node (only node with Omni model for hot-swap)
+        if request.audio_path:
+            audio_endpoint = "10.0.0.4"  # Head node with tier_2 hot-swap (instruct/omni)
+            if audio_endpoint in healthy_endpoints:
+                logger.info(f"ROUTE: Audio request -> {audio_endpoint} (Omni model required)")
+                return audio_endpoint
+            else:
+                logger.error(f"ROUTE FAILED: Audio request requires {audio_endpoint} but it's unhealthy")
+                return None
 
         # For MLX backend, use tier-aware routing with fallback
         if self.backend_type == "mlx" and self.endpoint_tiers:
@@ -1218,6 +1273,13 @@ async def lifespan(app: FastAPI):
             llm_manager.unload_task.cancel()
             try:
                 await llm_manager.unload_task
+            except asyncio.CancelledError:
+                pass
+        # Cancel the endpoint health monitor task
+        if hasattr(llm_manager, 'endpoint_monitor_task') and llm_manager.endpoint_monitor_task:
+            llm_manager.endpoint_monitor_task.cancel()
+            try:
+                await llm_manager.endpoint_monitor_task
             except asyncio.CancelledError:
                 pass
         # Cancel queue processors
