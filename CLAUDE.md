@@ -78,3 +78,4 @@ For detailed information, read these files when needed:
 | Directory structure | `.claude/docs/directory-structure.md` |
 | Investigation commands (psql, S3, Python) | `.claude/docs/investigation-commands.md` |
 | Backend logging | `.claude/docs/backend-logging.md` |
+| Omni audio analysis | `.claude/docs/omni-audio-analysis.md` |
