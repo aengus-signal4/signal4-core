@@ -216,11 +216,81 @@ class YouTubeDownloader:
                 skip_state_audit=True
             )
 
-        # Default: treat as transient error
+        # HTTP 416 Range Not Satisfiable - corrupted partial download
+        if "HTTP Error 416" in error_message:
+            return create_error_result(
+                error_code=ErrorCode.CORRUPT_MEDIA,
+                error_message=error_message,
+                permanent=True,
+                skip_state_audit=True
+            )
+
+        # HTTP 4xx errors (except 429 rate limit) are permanent content errors
+        http_4xx_match = re.search(r'HTTP Error (4\d\d)', error_message)
+        if http_4xx_match:
+            status_code = http_4xx_match.group(1)
+            if status_code == '429':
+                # Rate limited - transient, should retry later
+                return create_error_result(
+                    error_code=ErrorCode.RATE_LIMITED,
+                    error_message=error_message,
+                    permanent=False
+                )
+            else:
+                # Other 4xx errors are permanent (400, 401, 403, 404, etc.)
+                return create_error_result(
+                    error_code=ErrorCode.VIDEO_UNAVAILABLE,
+                    error_message=error_message,
+                    permanent=True,
+                    skip_state_audit=True
+                )
+
+        # yt-dlp specific permanent errors
+        yt_dlp_permanent_patterns = [
+            "unable to download video data",
+            "is not a valid URL",
+            "Unsupported URL",
+            "Unable to extract",
+            "Incomplete YouTube ID",
+            "Premieres in",
+        ]
+        if any(pattern.lower() in error_message.lower() for pattern in yt_dlp_permanent_patterns):
+            return create_error_result(
+                error_code=ErrorCode.VIDEO_UNAVAILABLE,
+                error_message=error_message,
+                permanent=True,
+                skip_state_audit=True
+            )
+
+        # Network/transient errors - only these should retry
+        transient_patterns = [
+            "timed out",
+            "timeout",
+            "connection reset",
+            "connection refused",
+            "temporarily unavailable",
+            "try again",
+            "socket",
+            "network",
+            "ETIMEDOUT",
+            "ECONNRESET",
+            "ECONNREFUSED",
+        ]
+        if any(pattern.lower() in error_message.lower() for pattern in transient_patterns):
+            return create_error_result(
+                error_code=ErrorCode.NETWORK_ERROR,
+                error_message=error_message,
+                permanent=False
+            )
+
+        # Default: treat unknown errors as PERMANENT to avoid infinite retries
+        # Better to block and manually review than hammer YouTube repeatedly
+        logger.warning(f"Unknown error treated as permanent: {error_message}")
         return create_error_result(
-            error_code=ErrorCode.NETWORK_ERROR,
+            error_code=ErrorCode.UNKNOWN_ERROR,
             error_message=error_message,
-            permanent=False
+            permanent=True,
+            skip_state_audit=True
         )
     
     def _parse_rate_limit(self, rate_str: Optional[str | int]) -> Optional[int]:
@@ -621,13 +691,14 @@ class YouTubeDownloader:
             logger.error(f"Error uploading to S3: {str(e)}")
             return False
 
-    def _update_content_state(self, content_id: str, is_downloaded: bool, blocked_download: bool = False) -> None:
+    def _update_content_state(self, content_id: str, is_downloaded: bool, blocked_download: bool = False, permanent_block: bool = False) -> None:
         """Update content download state in database.
 
         Args:
             content_id: Content ID
             is_downloaded: Whether content is successfully downloaded
             blocked_download: Whether download should be blocked
+            permanent_block: Whether this is a permanent block (prevents retry)
         """
         try:
             from src.database.session import get_session
@@ -640,8 +711,15 @@ class YouTubeDownloader:
                     content.is_downloaded = is_downloaded
                     content.blocked_download = blocked_download
                     content.last_updated = datetime.now(timezone.utc)
+
+                    # Set permanent_block in meta_data to prevent task recreation
+                    if permanent_block:
+                        meta = content.meta_data or {}
+                        meta['permanent_block'] = 'true'
+                        content.meta_data = meta
+
                     session.commit()
-                    logger.info(f"Updated content state: is_downloaded={is_downloaded}, blocked_download={blocked_download}")
+                    logger.info(f"Updated content state: is_downloaded={is_downloaded}, blocked_download={blocked_download}, permanent_block={permanent_block}")
                 else:
                     logger.warning(f"Content {content_id} not found in database")
 
@@ -676,8 +754,8 @@ class YouTubeDownloader:
             if download_result['status'] != 'success':
                 # If download failed with permanent error, update database
                 if download_result.get('permanent'):
-                    logger.warning(f"Permanent download failure for {content_id}, setting blocked_download=True")
-                    self._update_content_state(content_id, is_downloaded=False, blocked_download=True)
+                    logger.warning(f"Permanent download failure for {content_id}, setting blocked_download=True, permanent_block=True")
+                    self._update_content_state(content_id, is_downloaded=False, blocked_download=True, permanent_block=True)
 
                 # Error already logged in _download_video or _handle_download_error
                 return download_result
@@ -701,7 +779,8 @@ class YouTubeDownloader:
             return create_error_result(
                 error_code=ErrorCode.UNKNOWN_ERROR,
                 error_message=str(e),
-                permanent=False
+                permanent=True,
+                skip_state_audit=True
             )
 
 if __name__ == "__main__":

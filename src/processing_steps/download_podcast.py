@@ -212,7 +212,7 @@ class PodcastDownloader:
 
                                 if not output_path.exists() or downloaded_size == 0:
                                      logger.error("Download finished but file is missing or empty.")
-                                     return create_error_result(ErrorCode.EMPTY_RESULT, 'File missing or empty after download')
+                                     return create_error_result(ErrorCode.EMPTY_RESULT, 'File missing or empty after download', permanent=True, skip_state_audit=True)
 
                                 if total_size > 0 and downloaded_size < total_size:
                                     logger.warning(f"Incomplete download: Expected {total_size} bytes, got {downloaded_size} bytes.")
@@ -351,17 +351,17 @@ class PodcastDownloader:
             if output_path.exists() and output_path.stat().st_size > 0:
                 return create_success_result()
             else:
-                return create_error_result(ErrorCode.EMPTY_RESULT, 'Download completed but file is empty')
+                return create_error_result(ErrorCode.EMPTY_RESULT, 'Download completed but file is empty', permanent=True, skip_state_audit=True)
 
         except requests.exceptions.SSLError as e:
             logger.error(f"Requests SSL error (even with verify=False): {e}")
             return create_error_result(ErrorCode.NOT_FOUND, f"SSL error persists - content unavailable", permanent=True)
         except requests.exceptions.RequestException as e:
             logger.error(f"Requests library failed: {e}")
-            return create_error_result(ErrorCode.PROCESS_FAILED, f"Requests download failed: {e}")
+            return create_error_result(ErrorCode.PROCESS_FAILED, f"Requests download failed: {e}", permanent=True, skip_state_audit=True)
         except Exception as e:
             logger.error(f"Unexpected error in requests download: {e}", exc_info=True)
-            return create_error_result(ErrorCode.UNKNOWN_ERROR, f"Requests download error: {e}")
+            return create_error_result(ErrorCode.UNKNOWN_ERROR, f"Requests download error: {e}", permanent=True, skip_state_audit=True)
 
     def _extract_ytdlp_error(self, stderr_text: str) -> str:
         """Extract just the ERROR lines from yt-dlp output, filtering out debug noise."""
@@ -404,7 +404,7 @@ class PodcastDownloader:
                 except OSError as e:
                     logger.error(f"Failed to delete existing output file {output_path} before yt-dlp: {e}")
                     # If we can't delete it, yt-dlp will likely fail anyway or behave unexpectedly.
-                    return create_error_result(ErrorCode.PROCESS_FAILED, f'Failed to delete pre-existing output file for yt-dlp: {e}')
+                    return create_error_result(ErrorCode.PROCESS_FAILED, f'Failed to delete pre-existing output file for yt-dlp: {e}', permanent=True, skip_state_audit=True)
             # --- END NEW ---
 
             # Build the yt-dlp command with browser-like headers
@@ -533,7 +533,7 @@ class PodcastDownloader:
                     else:
                         # No file found, this is a real failure
                         error_msg = self._extract_ytdlp_error(stderr_text)
-                        return create_error_result(ErrorCode.PROCESS_FAILED, f"yt-dlp command failed: {error_msg}")
+                        return create_error_result(ErrorCode.PROCESS_FAILED, f"yt-dlp command failed: {error_msg}", permanent=True, skip_state_audit=True)
 
             # Check for downloaded file
             downloaded_file = None
@@ -579,7 +579,7 @@ class PodcastDownloader:
 
         except FileNotFoundError as fnf_err:
             logger.error(f"yt-dlp fallback failed: {str(fnf_err)}")
-            return create_error_result(ErrorCode.NOT_FOUND, str(fnf_err))
+            return create_error_result(ErrorCode.NOT_FOUND, str(fnf_err), permanent=True, skip_state_audit=True)
         except Exception as e:
             error_detail = str(e)
             if hasattr(e, 'exc_info') and e.exc_info and e.exc_info[1]:
@@ -591,7 +591,7 @@ class PodcastDownloader:
                 logger.error(f"HTTP 403 Forbidden error detected - marking as ACCESS_DENIED for permanent ban")
                 return create_error_result(ErrorCode.ACCESS_DENIED, f"HTTP 403 Forbidden: {error_detail}", permanent=True)
             
-            return create_error_result(ErrorCode.PROCESS_FAILED, f"yt-dlp download failed: {error_detail}")
+            return create_error_result(ErrorCode.PROCESS_FAILED, f"yt-dlp download failed: {error_detail}", permanent=True, skip_state_audit=True)
 
     def _run_ytdlp(self, url: str, ydl_opts: dict) -> None:
         """Run yt-dlp download in a synchronous context"""
@@ -720,7 +720,7 @@ class PodcastDownloader:
                 logger.info(f"Successfully downloaded episode to {temp_output_path}")
                 if not temp_output_path.exists() or temp_output_path.stat().st_size == 0:
                      logger.error(f"Downloaded file {temp_output_path} is missing or empty after successful status.")
-                     return create_error_result(ErrorCode.EMPTY_RESULT, 'Downloaded file missing or empty')
+                     return create_error_result(ErrorCode.EMPTY_RESULT, 'Downloaded file missing or empty', permanent=True, skip_state_audit=True)
 
                 # Optional: Add a final validation check on the newly downloaded file
                 logger.debug(f"Validating newly downloaded file: {temp_output_path}")
@@ -728,7 +728,7 @@ class PodcastDownloader:
                 logger.debug(f"Audio duration validation result: {final_duration}")
                 if final_duration is None or final_duration <= 1.0:
                     logger.error(f"Newly downloaded file {temp_output_path} failed validation (duration: {final_duration}). Not uploading.")
-                    return create_error_result(ErrorCode.CORRUPT_MEDIA, 'Downloaded file failed validation')
+                    return create_error_result(ErrorCode.CORRUPT_MEDIA, 'Downloaded file failed validation', permanent=True, skip_state_audit=True)
                 logger.info(f"Newly downloaded file validation successful (Duration: {final_duration:.2f}s). Proceeding with upload.")
 
                 logger.info(f"Uploading {temp_output_path} to S3 at {s3_key_target}")
@@ -757,7 +757,7 @@ class PodcastDownloader:
 
         except Exception as e:
             logger.error(f"Unexpected error during download process for {episode_url}: {str(e)}", exc_info=True)
-            return create_error_result(ErrorCode.UNKNOWN_ERROR, f'Unexpected download error: {str(e)}')
+            return create_error_result(ErrorCode.UNKNOWN_ERROR, f'Unexpected download error: {str(e)}', permanent=True, skip_state_audit=True)
         finally:
             if episode_temp_dir.exists():
                 logger.debug(f"Cleaning up temporary directory: {episode_temp_dir}")
