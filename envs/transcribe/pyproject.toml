@@ -1,0 +1,63 @@
+[project]
+name = "signal4-transcribe"
+version = "0.1.0"
+description = "Environment for transcription tasks (Whisper, Parakeet)"
+requires-python = "==3.12.11"
+
+dependencies = [
+    # MLX stack (Apple Silicon optimized)
+    "mlx>=0.16,<1.0",
+    "mlx-lm>=0.18,<1.0",
+    "mlx-whisper>=0.4.3",
+    "parakeet-mlx>=0.5.0",
+
+    # PyTorch (for some transcription methods)
+    "torch>=2.5,<2.6",
+    "torchaudio>=2.5,<2.6",
+
+    # Transformers/HuggingFace
+    "transformers>=4.53.0",
+    "huggingface-hub>=0.23,<1.0",
+    "tokenizers>=0.19,<1.0",
+    "safetensors>=0.4,<1.0",
+
+    # Audio processing
+    "soundfile>=0.12,<1.0",
+    "numpy>=1.26,<3.0",
+    "scipy>=1.12,<2.0",
+
+    # Text normalization
+    "whisper-normalizer>=0.1,<1.0",
+
+    # HTTP (required by logger/ip_utils)
+    "aiohttp>=3.9,<4.0",
+    "requests>=2.31,<3.0",
+
+    # S3/storage
+    "boto3>=1.34,<2.0",
+    "minio>=7.2.20",
+
+    # Database
+    "sqlalchemy>=2.0,<3.0",
+    "psycopg2-binary>=2.9,<3.0",
+    "pgvector>=0.4.2",
+
+    # Auth (required by database models)
+    "bcrypt>=4.0.0",
+
+    # Data processing (required by database manager)
+    "pandas>=2.0,<3.0",
+
+    # Configuration/utilities
+    "pyyaml>=6.0,<7.0",
+    "python-dotenv>=1.0,<2.0",
+    "pydantic>=2.0,<3.0",
+    "pydantic-settings>=2.0,<3.0",
+
+    # Progress tracking
+    "tqdm>=4.66,<5.0",
+]
+
+[tool.uv]
+package = false
+compile-bytecode = false

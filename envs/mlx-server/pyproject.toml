@@ -1,0 +1,40 @@
+[project]
+name = "signal4-mlx-server"
+version = "0.1.0"
+description = "Environment for MLX LLM model server (Apple Silicon)"
+requires-python = "==3.12.11"
+
+dependencies = [
+    # MLX stack (Apple Silicon optimized)
+    "mlx>=0.16,<1.0",
+    "mlx-lm>=0.18,<1.0",
+    "mlx-vlm>=0.3.3",
+
+    # FastAPI server
+    "fastapi>=0.115,<1.0",
+    "uvicorn>=0.30,<1.0",
+
+    # HTTP client (for health checks)
+    "httpx>=0.27,<1.0",
+    "aiohttp>=3.9,<4.0",
+    "requests>=2.31,<3.0",
+
+    # Transformers/HuggingFace (for tokenizers)
+    "transformers>=4.53.0",
+    "huggingface-hub>=0.23,<1.0",
+    "tokenizers>=0.19,<1.0",
+    "safetensors>=0.4,<1.0",
+
+    # Numerical
+    "numpy>=1.26,<3.0",
+
+    # Configuration/utilities
+    "pyyaml>=6.0,<7.0",
+    "python-dotenv>=1.0,<2.0",
+    "pydantic>=2.0,<3.0",
+    "pydantic-settings>=2.0,<3.0",
+]
+
+[tool.uv]
+package = false
+compile-bytecode = false
