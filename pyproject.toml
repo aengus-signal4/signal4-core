@@ -81,7 +81,7 @@ dependencies = [
     "einops>=0.8.1",
     "funasr>=1.3.0",
     "modelscope>=1.34.0",
-    "mlx-vlm==0.3.3",
+    # mlx-vlm removed from core - only needed for Omni models, which use env/ isolated environment
     "ddgs>=9.9.0",
     "vadersentiment>=3.3.2",
 ]

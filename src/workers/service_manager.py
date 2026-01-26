@@ -499,11 +499,21 @@ class ServiceManager:
         return results
     
     def _create_model_server_script(self, worker_id: str, port: int, models: str) -> str:
-        """Create startup script for model server"""
+        """Create startup script for model server.
+
+        Uses the special env/ with mlx-vlm only when Omni models are needed (tier_2 audio).
+        Text-only workers use the standard uv run from core to avoid mlx-vlm dependency issues.
+        """
         project_dir = self.project_dir
 
-        return f"""#!/bin/bash
-# Model server startup script for {worker_id}
+        # Check if any Omni models are requested (requires mlx-vlm)
+        omni_models = ["local:mlx_qwen3_omni_4bit", "qwen3:omni", "omni"]
+        needs_omni = any(omni in models.lower() for omni in omni_models)
+
+        if needs_omni:
+            # Use isolated env with mlx-vlm for Omni/audio support
+            return f"""#!/bin/bash
+# Model server startup script for {worker_id} (Omni/audio mode)
 
 set -e
 cd {project_dir}
@@ -517,17 +527,46 @@ mkdir -p logs/content_processing
 
 # Kill any existing model server
 pkill -f "mlx_server.py" || true
+pkill -f "run_mlx_server.py" || true
 sleep 2
 
-# Start model server
-echo "[$(date)] Starting model server with models: {models}"
+# Start model server using isolated env with mlx-vlm
+echo "[$(date)] Starting model server (Omni mode) with models: {models}"
+cd src/services/llm/env
+uv run python run_mlx_server.py --port {port} \\
+    2>&1 | tee -a {project_dir}/logs/content_processing/model_server_{worker_id}.log &
+
+echo $! > /tmp/model_server_{worker_id}.pid
+echo "[$(date)] Model server (Omni) started with PID $!"
+"""
+        else:
+            # Use standard uv run for text-only models (no mlx-vlm needed)
+            return f"""#!/bin/bash
+# Model server startup script for {worker_id} (text-only mode)
+
+set -e
+cd {project_dir}
+
+# Set environment variables
+export MallocStackLogging=0
+export MallocStackLoggingNoCompact=0
+
+# Create log directory
+mkdir -p logs/content_processing
+
+# Kill any existing model server
+pkill -f "mlx_server.py" || true
+pkill -f "run_mlx_server.py" || true
+sleep 2
+
+# Start model server using standard core environment (no mlx-vlm)
+echo "[$(date)] Starting model server (text-only) with models: {models}"
 uv run python src/services/llm/mlx_server.py \\
     --port {port} \\
-    --models {models} \\
     2>&1 | tee -a logs/content_processing/model_server_{worker_id}.log &
 
 echo $! > /tmp/model_server_{worker_id}.pid
-echo "[$(date)] Model server started with PID $!"
+echo "[$(date)] Model server (text-only) started with PID $!"
 """
     
     def _create_llm_server_script(self, worker_id: str, port: int) -> str:

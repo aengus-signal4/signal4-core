@@ -7,9 +7,9 @@ FastAPI server that provides local LLM inference using MLX for Apple Silicon acc
 This server processes requests locally - the LLM balancer handles routing across nodes.
 
 PREREQUISITES:
-- MLX installed: `pip install mlx-lm`
+- MLX installed: `pip install mlx-lm mlx-vlm`
 - Models downloaded locally or will be pulled on first use
-- Apple Silicon Mac (M1/M2/M3 series)
+- Apple Silicon Mac (M1/M2/M3/M4 series)
 
 Key features:
 1. Native MLX acceleration for Apple Silicon
@@ -17,18 +17,25 @@ Key features:
 3. Priority-based queuing (1-99, lower numbers = higher priority)
 4. Per-worker model restrictions based on config
 5. Keeps models warm in memory (configurable timeout)
+6. Audio input support via Qwen3-Omni (tier_2)
 
 Three-tier model system:
-- Tier 1 (best):    mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit  (aliases: tier_1, tier1, best, 80b)
-- Tier 2 (balanced): mlx-community/Qwen3-4B-Instruct-2507-4bit      (aliases: tier_2, tier2, balanced, 4b)
-- Tier 3 (fastest):  mlx-community/LFM2-8B-A1B-4bit                  (aliases: tier_3, tier3, fastest, 8b)
+- Tier 1 (best):     mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit  (text only)
+- Tier 2 (balanced): local:mlx_qwen3_omni_4bit                        (text + audio, short clips <30s)
+- Tier 3 (fast):     mlx-community/Qwen3-4B-Instruct-2507-4bit       (text only)
 
 Usage examples:
-  request = {"model": "tier_1", "messages": [...]}  # Request tier 1
-  request = {"model": "tier_2", "messages": [...]}  # Request tier 2
-  request = {"model": "tier_3", "messages": [...]}  # Request tier 3
+  # Text-only request
+  request = {"model": "tier_2", "messages": [{"role": "user", "content": "..."}]}
 
-Response includes "model_used" field showing actual model that processed the request.
+  # Audio + text request (tier_2 only)
+  request = {
+      "model": "tier_2",
+      "messages": [{"role": "user", "content": "Analyze this audio..."}],
+      "audio_path": "/path/to/audio.wav"  # Short clips <30s recommended
+  }
+
+Response includes "model_used" and "audio_processed" fields.
 """
 
 import asyncio
@@ -62,28 +69,43 @@ except ImportError:
     logger.warning("mlx-lm not available - install with: pip install mlx-lm")
     MLX_AVAILABLE = False
 
+# MLX-VLM imports for Omni models (audio support)
+try:
+    from mlx_vlm import load as vlm_load
+    from mlx_vlm.models.qwen3_omni_moe.omni_utils import prepare_omni_inputs
+    MLX_VLM_AVAILABLE = True
+except ImportError:
+    logger.warning("mlx-vlm not available for Omni models - audio support disabled")
+    MLX_VLM_AVAILABLE = False
+
 
 # Model configurations with hierarchy (rank 1 = best quality)
+# Models marked as "omni" support audio input via mlx-vlm
 MODEL_CONFIGS = {
     "mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit": {
         "rank": 1,  # Tier 1 - Best quality
         "aliases": ["qwen3:80b", "80b", "large", "tier_1", "tier1", "best"],
-        "description": "80B parameter model - best quality"
+        "description": "80B parameter model - best quality",
+        "omni": False,
     },
-    "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit": {
-        "rank": 2,  # Tier 2 - Balanced (30B MoE Instruct)
-        "aliases": ["qwen3:30b", "30b", "medium", "tier_2", "tier2", "balanced"],
-        "description": "30B parameter MoE Instruct model - balanced speed/quality"
+    "local:mlx_qwen3_omni_4bit": {
+        "rank": 2,  # Tier 2 - Balanced (30B Omni with audio support)
+        "aliases": ["qwen3:omni", "omni", "30b", "medium", "tier_2", "tier2", "balanced"],
+        "description": "30B parameter Omni model - text + audio input (short clips <30s)",
+        "omni": True,
+        "local_path": "scripts/qwen3_omni_captioner/mlx_qwen3_omni_4bit",
     },
     "mlx-community/Qwen3-4B-Instruct-2507-4bit": {
         "rank": 3,  # Tier 3 - Fast
         "aliases": ["qwen3:4b-instruct", "qwen3:4b", "4b", "tier_3", "tier3"],
-        "description": "4B parameter model - fast"
+        "description": "4B parameter model - fast",
+        "omni": False,
     },
     "mlx-community/LFM2-8B-A1B-4bit": {
         "rank": 4,  # Tier 4 - Fastest (legacy)
         "aliases": ["lfm2:8b", "8b", "small", "fast", "fastest"],
-        "description": "8B parameter model - fastest"
+        "description": "8B parameter model - fastest",
+        "omni": False,
     }
 }
 
@@ -101,6 +123,7 @@ class LLMMessage(BaseModel):
     """A single message in an LLM conversation."""
     role: str = Field(..., description="Role: 'system', 'user', or 'assistant'")
     content: str = Field(..., description="Message content")
+    audio_path: Optional[str] = Field(default=None, description="Path to audio file (for Omni models)")
 
 
 class LLMRequest(BaseModel):
@@ -108,7 +131,7 @@ class LLMRequest(BaseModel):
     messages: List[LLMMessage] = Field(..., description="List of messages")
     model: str = Field(
         default="tier_2",
-        description="Model to use - supports tier_1 (80B), tier_2 (4B), tier_3 (8B) or full model names"
+        description="Model to use - supports tier_1 (80B), tier_2 (Omni 30B), tier_3 (4B) or full model names"
     )
     temperature: float = Field(default=0.1, ge=0.0, le=2.0)
     max_tokens: Optional[int] = Field(default=None, description="Max tokens for response")
@@ -116,6 +139,7 @@ class LLMRequest(BaseModel):
     seed: Optional[int] = Field(default=42, description="Random seed for reproducibility")
     priority: int = Field(default=1, ge=1, le=99, description="Request priority (1-99, lower = higher priority)")
     task_type: TaskType = Field(default=TaskType.TEXT, description="Task type")
+    audio_path: Optional[str] = Field(default=None, description="Path to audio file for Omni model (short clips <30s recommended)")
 
 
 class LLMResponse(BaseModel):
@@ -332,7 +356,7 @@ class MLXManager:
         return best_model
 
     async def _ensure_model_loaded(self, model_name: str) -> Tuple[Any, Any]:
-        """Ensure a model is loaded and return (model, tokenizer)."""
+        """Ensure a model is loaded and return (model, tokenizer/processor)."""
         # Check if model is allowed on this worker
         if model_name not in self.allowed_models:
             raise RuntimeError(
@@ -348,13 +372,34 @@ class MLXManager:
             if model_name in self.loaded_models:
                 return self.loaded_models[model_name]
 
+            # Check if this is an Omni model
+            model_config = MODEL_CONFIGS.get(model_name, {})
+            is_omni = model_config.get("omni", False)
+
             # Load model
-            logger.info(f"Loading model {model_name}...")
+            logger.info(f"Loading model {model_name} (omni={is_omni})...")
             try:
-                model, tokenizer = load(model_name)
-                self.loaded_models[model_name] = (model, tokenizer)
-                logger.info(f"Successfully loaded model {model_name}")
-                return (model, tokenizer)
+                if is_omni:
+                    if not MLX_VLM_AVAILABLE:
+                        raise RuntimeError("mlx-vlm not available - cannot load Omni model")
+                    # Resolve local path for Omni model
+                    local_path = model_config.get("local_path")
+                    if local_path:
+                        # Resolve relative to core directory
+                        import pathlib
+                        core_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
+                        model_path = str(core_dir / local_path)
+                    else:
+                        model_path = model_name
+                    logger.info(f"Loading Omni model from: {model_path}")
+                    model, processor = vlm_load(model_path, trust_remote_code=True)
+                    self.loaded_models[model_name] = (model, processor)
+                    logger.info(f"Successfully loaded Omni model {model_name}")
+                else:
+                    model, tokenizer = load(model_name)
+                    self.loaded_models[model_name] = (model, tokenizer)
+                    logger.info(f"Successfully loaded model {model_name}")
+                return self.loaded_models[model_name]
             except Exception as e:
                 logger.error(f"Failed to load model {model_name}: {e}")
                 raise
@@ -436,40 +481,65 @@ class MLXManager:
         # Choose best model based on hierarchy
         best_model = self._choose_best_model(request.model)
 
+        # Check if this is an Omni model
+        model_config = MODEL_CONFIGS.get(best_model, {})
+        is_omni = model_config.get("omni", False)
+
         # Ensure model is loaded
-        model, tokenizer = await self._ensure_model_loaded(best_model)
+        model, tokenizer_or_processor = await self._ensure_model_loaded(best_model)
 
         # Update last used time
         self.models_last_used[best_model] = time.time()
 
-        # Build prompt from messages
-        if tokenizer.chat_template is not None:
-            messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
-
-            # Disable Qwen3 thinking mode for non-Instruct models (e.g., Qwen3-30B-A3B-4bit)
-            # Instruct models don't have thinking mode, so skip them
-            if "Instruct" not in best_model and "Qwen3" in best_model:
-                for i in range(len(messages) - 1, -1, -1):
-                    if messages[i]["role"] == "user":
-                        if "/no_think" not in messages[i]["content"]:
-                            messages[i]["content"] = messages[i]["content"].rstrip() + " /no_think"
-                        break
-
-            prompt = tokenizer.apply_chat_template(messages, add_generation_prompt=True)
-        else:
-            # Fallback to simple concatenation
-            prompt = "\n\n".join([f"{msg.role}: {msg.content}" for msg in request.messages])
-
-        # Generate response in executor to avoid blocking
+        # Route to appropriate generation method
         loop = asyncio.get_event_loop()
-        response_data = await loop.run_in_executor(
-            self.executor,
-            self._generate_mlx_response,
-            model,
-            tokenizer,
-            prompt,
-            request
-        )
+
+        if is_omni and request.audio_path:
+            # Use Omni model with audio input
+            response_data = await loop.run_in_executor(
+                self.executor,
+                self._generate_omni_response,
+                model,
+                tokenizer_or_processor,
+                request
+            )
+        elif is_omni:
+            # Omni model but text-only request
+            response_data = await loop.run_in_executor(
+                self.executor,
+                self._generate_omni_text_response,
+                model,
+                tokenizer_or_processor,
+                request
+            )
+        else:
+            # Standard text model
+            # Build prompt from messages
+            if tokenizer_or_processor.chat_template is not None:
+                messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
+
+                # Disable Qwen3 thinking mode for non-Instruct models (e.g., Qwen3-30B-A3B-4bit)
+                # Instruct models don't have thinking mode, so skip them
+                if "Instruct" not in best_model and "Qwen3" in best_model:
+                    for i in range(len(messages) - 1, -1, -1):
+                        if messages[i]["role"] == "user":
+                            if "/no_think" not in messages[i]["content"]:
+                                messages[i]["content"] = messages[i]["content"].rstrip() + " /no_think"
+                            break
+
+                prompt = tokenizer_or_processor.apply_chat_template(messages, add_generation_prompt=True)
+            else:
+                # Fallback to simple concatenation
+                prompt = "\n\n".join([f"{msg.role}: {msg.content}" for msg in request.messages])
+
+            response_data = await loop.run_in_executor(
+                self.executor,
+                self._generate_mlx_response,
+                model,
+                tokenizer_or_processor,
+                prompt,
+                request
+            )
 
         return {
             "response": response_data['text'],
@@ -477,7 +547,8 @@ class MLXManager:
             "endpoint_used": "localhost",
             "priority": request.priority,
             "task_type": request.task_type.value,
-            "mlx_stats": response_data.get('stats', {})
+            "mlx_stats": response_data.get('stats', {}),
+            "audio_processed": is_omni and request.audio_path is not None,
         }
 
     def _generate_mlx_response(self, model, tokenizer, prompt: str, request: LLMRequest) -> Dict[str, Any]:
@@ -523,6 +594,95 @@ class MLXManager:
             }
         except Exception as e:
             logger.error(f"MLX generation error: {e}")
+            raise
+
+    def _generate_omni_response(self, model, processor, request: LLMRequest) -> Dict[str, Any]:
+        """Generate response using Omni model with audio input (runs in executor).
+
+        Audio Limitations:
+        - Short clips recommended (<30 seconds)
+        - Longer audio uses more memory (~80GB for 15s, ~145GB for 120s)
+        - Audio is processed natively - no separate transcription needed
+        """
+        try:
+            # Build conversation with audio
+            # Get text content from the last user message
+            text_content = ""
+            for msg in reversed(request.messages):
+                if msg.role == "user":
+                    text_content = msg.content
+                    break
+
+            conversation = [{
+                "role": "user",
+                "content": [
+                    {"type": "audio", "audio": request.audio_path},
+                    {"type": "text", "text": text_content},
+                ],
+            }]
+
+            # Prepare inputs using Omni utilities
+            model_inputs, _ = prepare_omni_inputs(processor, conversation)
+
+            # Generate (text only, no audio output)
+            generate_kwargs = {
+                "input_ids": model_inputs["input_ids"],
+                "input_features": model_inputs.get("input_features"),
+                "feature_attention_mask": model_inputs.get("feature_attention_mask"),
+                "audio_feature_lengths": model_inputs.get("audio_feature_lengths"),
+                "thinker_max_new_tokens": request.max_tokens or 2048,
+                "return_audio": False,
+            }
+            # Filter None values
+            generate_kwargs = {k: v for k, v in generate_kwargs.items() if v is not None}
+
+            thinker_result, _ = model.generate(**generate_kwargs)
+            full_text = processor.decode(thinker_result.sequences[0].tolist())
+
+            return {
+                "text": full_text.strip(),
+                "stats": {"audio_input": True}
+            }
+        except Exception as e:
+            logger.error(f"Omni generation error (audio): {e}")
+            raise
+
+    def _generate_omni_text_response(self, model, processor, request: LLMRequest) -> Dict[str, Any]:
+        """Generate response using Omni model with text-only input (runs in executor)."""
+        try:
+            # Build text-only conversation
+            text_content = ""
+            for msg in reversed(request.messages):
+                if msg.role == "user":
+                    text_content = msg.content
+                    break
+
+            conversation = [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": text_content},
+                ],
+            }]
+
+            # Prepare inputs using Omni utilities
+            model_inputs, _ = prepare_omni_inputs(processor, conversation)
+
+            # Generate (text only)
+            generate_kwargs = {
+                "input_ids": model_inputs["input_ids"],
+                "thinker_max_new_tokens": request.max_tokens or 2048,
+                "return_audio": False,
+            }
+
+            thinker_result, _ = model.generate(**generate_kwargs)
+            full_text = processor.decode(thinker_result.sequences[0].tolist())
+
+            return {
+                "text": full_text.strip(),
+                "stats": {"audio_input": False}
+            }
+        except Exception as e:
+            logger.error(f"Omni generation error (text): {e}")
             raise
 
     async def process_llm_request(self, request: LLMRequest) -> Dict[str, Any]:

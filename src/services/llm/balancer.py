@@ -99,6 +99,7 @@ class LLMRequest(BaseModel):
     seed: Optional[int] = Field(default=42)
     priority: int = Field(default=2, ge=1, le=99, description="Priority (1-99, lower = higher)")
     task_type: TaskType = Field(default=TaskType.TEXT)
+    audio_path: Optional[str] = Field(default=None, description="Path to audio file (auto-routes to tier_2 Omni model)")
 
 
 class LLMResponse(BaseModel):
@@ -373,12 +374,21 @@ class LLMBalancer:
             if expired_count > 0:
                 logger.info(f"Expired {expired_count} requests from queues")
 
-    def _resolve_model_tier(self, model_name: str) -> str:
-        """Resolve model name to tier."""
+    def _resolve_model_tier(self, model_name: str, has_audio: bool = False) -> str:
+        """Resolve model name to tier.
+
+        Args:
+            model_name: Requested model name or tier
+            has_audio: If True, forces tier_2 (Omni model required for audio)
+        """
+        # Audio requests require tier_2 (Omni model)
+        if has_audio:
+            return "tier_2"
+
         model_lower = model_name.lower()
         if any(x in model_lower for x in ["tier_1", "tier1", "80b", "large", "best"]):
             return "tier_1"
-        if any(x in model_lower for x in ["tier_2", "tier2", "30b", "medium", "balanced"]):
+        if any(x in model_lower for x in ["tier_2", "tier2", "30b", "medium", "balanced", "omni"]):
             return "tier_2"
         # Default to tier_3
         return "tier_3"
@@ -444,7 +454,8 @@ class LLMBalancer:
         - If 10.0.0.209 is busy, use tier_2 endpoints as overflow
         - Load balance across all capable endpoints based on active count
         """
-        model_tier = self._resolve_model_tier(request.model)
+        model_tier = self._resolve_model_tier(request.model, has_audio=bool(request.audio_path))
+        has_audio = bool(request.audio_path)
 
         # Collect all capable endpoints with their type
         native_endpoints = []
@@ -464,12 +475,20 @@ class LLMBalancer:
             if self.endpoint_active.get(ep, 0) == 0:
                 return ep
 
+        # Audio requests CANNOT fall back to tier_1 - only Omni (tier_2) supports audio
+        # So for audio requests, only use native tier_2 endpoints
+        if has_audio:
+            fallback_endpoints = []
+
         # Otherwise, load balance across ALL capable endpoints (native + fallback)
         all_capable = native_endpoints + fallback_endpoints
         if all_capable:
             return min(all_capable, key=lambda ep: self.endpoint_active.get(ep, 0))
 
-        logger.warning(f"No healthy endpoints for tier {model_tier}")
+        if has_audio:
+            logger.warning(f"No healthy Omni endpoints for audio request - audio requires tier_2")
+        else:
+            logger.warning(f"No healthy endpoints for tier {model_tier}")
         return None
 
     async def _worker_loop(self, endpoint: str):
@@ -522,7 +541,7 @@ class LLMBalancer:
                     self.endpoint_active[endpoint] = self.endpoint_active.get(endpoint, 0) + 1
 
                 start_time = time.time()
-                model_tier = self._resolve_model_tier(request.model)
+                model_tier = self._resolve_model_tier(request.model, has_audio=bool(request.audio_path))
 
                 try:
                     # Process request
@@ -591,6 +610,8 @@ class LLMBalancer:
             payload["seed"] = request.seed
         if request.max_tokens:
             payload["max_tokens"] = request.max_tokens
+        if request.audio_path:
+            payload["audio_path"] = request.audio_path
 
         response = req_lib.post(
             f"http://{endpoint}:{self.backend_port}/llm-request",
@@ -651,8 +672,8 @@ class LLMBalancer:
         timestamp = datetime.now().strftime("%H%M%S%f")[:-3]
         request_id = f"llm_{timestamp}"
 
-        # Determine tier from model name
-        model_tier = self._resolve_model_tier(request.model)
+        # Determine tier from model name (audio requests auto-route to tier_2)
+        model_tier = self._resolve_model_tier(request.model, has_audio=bool(request.audio_path))
 
         # Create future for result
         future = asyncio.Future()
