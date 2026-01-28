@@ -520,8 +520,8 @@ exec {self.head_python_path} {llm_server_path} 2>&1 | tee -a {log_dir}/llm_serve
             worker_id = worker.worker_id if hasattr(worker, 'worker_id') else 'local'
             project_root = self.project_dir
             log_dir = f"/Users/signal4/logs/content_processing/{worker_id}"
-            # Use uvicorn module execution for proper HTTP server binding
-            uvicorn_cmd = "python -m uvicorn src.workers.processor:app --host 0.0.0.0 --port 8000"
+            # Run processor module directly to get proper signal handling and graceful shutdown
+            processor_cmd = "python -m src.workers.processor"
             
             # Create log directory
             mkdir_cmd = f"mkdir -p {log_dir}"
@@ -553,11 +553,11 @@ exec {self.head_python_path} {llm_server_path} 2>&1 | tee -a {log_dir}/llm_serve
                     await self._run_command(worker, kill_cmd)
                     await asyncio.sleep(1)
 
-                # Start new tmux session with uvicorn using uv
+                # Start new tmux session with processor module using uv
                 uv_path = self.uv_path
-                # Run uv which automatically uses the project's .venv
+                # Run processor module directly for proper signal handling and graceful shutdown
                 # Use exec to replace shell with python process, keeping it attached to tmux
-                tmux_cmd = f"cd {project_root} && export PYTHONPATH={project_root}:$PYTHONPATH && PATH=/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin:$PATH tmux new-session -d -s processor 'exec {uv_path} run --project {project_root} {uvicorn_cmd} >> {log_dir}/processor.log 2>&1'"
+                tmux_cmd = f"cd {project_root} && export PYTHONPATH={project_root}:$PYTHONPATH && PATH=/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin:$PATH tmux new-session -d -s processor 'exec {uv_path} run --project {project_root} {processor_cmd} >> {log_dir}/processor.log 2>&1'"
                 result = await self._run_command(worker, tmux_cmd)
 
                 if hasattr(result, 'returncode') and result.returncode != 0:
@@ -585,12 +585,12 @@ exec {self.head_python_path} {llm_server_path} 2>&1 | tee -a {log_dir}/llm_serve
                     await self._run_command(worker, kill_cmd)
                     await asyncio.sleep(1)
 
-                # Start new screen session using uv with uvicorn
+                # Start new screen session with processor module using uv
                 uv_path = self.uv_path
-                # Run uv which automatically uses the project's .venv
+                # Run processor module directly for proper signal handling and graceful shutdown
                 # Use exec to replace bash with the python process, keeping it attached to screen
                 # Redirect output directly to log file (use tail -f to view logs)
-                screen_cmd = f"screen -dmS processor bash -c 'cd {project_root} && export PYTHONPATH={project_root}:$PYTHONPATH && exec {uv_path} run --project {project_root} {uvicorn_cmd} >> {log_dir}/processor.log 2>&1'"
+                screen_cmd = f"screen -dmS processor bash -c 'cd {project_root} && export PYTHONPATH={project_root}:$PYTHONPATH && exec {uv_path} run --project {project_root} {processor_cmd} >> {log_dir}/processor.log 2>&1'"
                 result = await self._run_command(worker, screen_cmd)
 
                 if hasattr(result, 'returncode') and result.returncode != 0:
@@ -615,9 +615,9 @@ exec {self.head_python_path} {llm_server_path} 2>&1 | tee -a {log_dir}/llm_serve
                     await self._run_command(worker, "pkill -9 -f 'processor.py' || true")
                     await asyncio.sleep(1)
 
-                # Start with nohup using uv and uvicorn
+                # Start with nohup using uv and processor module
                 uv_path = self.uv_path
-                nohup_cmd = f"cd {project_root} && export PYTHONPATH={project_root}:$PYTHONPATH && nohup caffeinate {uv_path} run --project {project_root} {uvicorn_cmd} > {log_dir}/processor.log 2>&1 &"
+                nohup_cmd = f"cd {project_root} && export PYTHONPATH={project_root}:$PYTHONPATH && nohup caffeinate {uv_path} run --project {project_root} {processor_cmd} > {log_dir}/processor.log 2>&1 &"
                 result = await self._run_command(worker, nohup_cmd)
 
                 if hasattr(result, 'returncode') and result.returncode != 0:

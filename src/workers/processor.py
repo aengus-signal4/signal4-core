@@ -69,22 +69,45 @@ logger.info("Task queue system initialized")
 # --- End Task Queue System ---
 
 def cleanup_existing_processes():
-    """Kill any existing task processor processes"""
+    """Kill any existing task processor processes and processes on port 8000"""
+    import subprocess
     current_pid = os.getpid()
     script_name = Path(__file__).name
-    
+
+    # First, kill any process listening on port 8000
+    try:
+        result = subprocess.run(
+            ['lsof', '-ti', ':8000'],
+            capture_output=True,
+            text=True
+        )
+        if result.stdout.strip():
+            for pid_str in result.stdout.strip().split('\n'):
+                try:
+                    pid = int(pid_str)
+                    if pid != current_pid:
+                        logger.info(f"Killing process {pid} on port 8000...")
+                        os.kill(pid, signal.SIGKILL)
+                        logger.info(f"Killed process {pid}")
+                except (ValueError, ProcessLookupError):
+                    pass
+                except Exception as e:
+                    logger.warning(f"Error killing process on port 8000: {e}")
+    except Exception as e:
+        logger.warning(f"Error checking port 8000: {e}")
+
     # Find and kill other instances of this script
     for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
         try:
             # Skip our own process
             if proc.pid == current_pid:
                 continue
-                
+
             # Check if this is a Python process running our script
-            if (proc.info['name'] == 'Python' and 
-                proc.info['cmdline'] and 
+            if (proc.info['name'] == 'Python' and
+                proc.info['cmdline'] and
                 script_name in ' '.join(proc.info['cmdline'])):
-                
+
                 logger.info(f"Found existing task processor process (PID: {proc.pid}), terminating...")
                 try:
                     os.kill(proc.pid, signal.SIGKILL)
@@ -95,12 +118,15 @@ def cleanup_existing_processes():
                     logger.error(f"Error killing process {proc.pid}: {str(e)}")
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
-    
+
     # Give processes time to terminate
     time.sleep(1)
 
 # Set up logging
 logger = setup_worker_logger('task_processor')
+
+# Kill any existing processor processes on port 8000 before starting
+cleanup_existing_processes()
 
 class TaskProcessor:
     def __init__(self, config_path: str = "config/config.yaml"):
