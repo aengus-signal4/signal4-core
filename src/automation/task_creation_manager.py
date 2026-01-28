@@ -243,17 +243,23 @@ class TaskCreator:
                         )
                         AND (:start_date IS NULL OR c.publish_date >= :start_date)
                         AND (:end_date IS NULL OR c.publish_date <= :end_date)
-                        -- Add check for existing tasks
+                        -- Add check for existing tasks (check both yt_ prefixed and base content_id for YouTube)
                         AND NOT EXISTS (
                             SELECT 1 FROM tasks.task_queue tq
-                            WHERE tq.content_id = c.content_id
+                            WHERE (
+                                tq.content_id = c.content_id
+                                OR (c.platform = 'youtube' AND c.content_id LIKE 'yt_%' AND tq.content_id = SUBSTRING(c.content_id FROM 4))
+                            )
                             AND tq.task_type IN ('download_youtube', 'download_podcast', 'download_rumble')
-                            AND tq.status IN ('pending', 'processing')
+                            AND tq.status IN ('pending', 'processing', 'completed')
                         )
-                        -- Skip content with permanent download failures (SSL errors, etc)
+                        -- Skip content with permanent download failures (check both content_id formats)
                         AND NOT EXISTS (
                             SELECT 1 FROM tasks.task_queue tq
-                            WHERE tq.content_id = c.content_id
+                            WHERE (
+                                tq.content_id = c.content_id
+                                OR (c.platform = 'youtube' AND c.content_id LIKE 'yt_%' AND tq.content_id = SUBSTRING(c.content_id FROM 4))
+                            )
                             AND tq.task_type IN ('download_youtube', 'download_podcast', 'download_rumble')
                             AND tq.status = 'failed'
                             AND tq.result->>'permanent' = 'true'

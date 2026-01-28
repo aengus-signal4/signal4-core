@@ -121,19 +121,32 @@ class DatabaseManager:
     
     def add_content(self, content_data: Dict) -> Content:
         """Add new content to database or update if exists"""
+        from src.utils.content_id import get_raw_id, is_new_format
+
         # Convert single project to list if needed
         if 'project' in content_data:
             content_data['projects'] = [content_data.pop('project')]
         elif not isinstance(content_data.get('projects'), list):
             # If projects is a string (legacy), convert to list
             content_data['projects'] = [content_data['projects']] if content_data.get('projects') else []
-        
+
         try:
-            # Check if content already exists
+            # Check if content already exists (check both prefixed and base content_id for backward compatibility)
+            content_id = content_data['content_id']
+            raw_id = get_raw_id(content_id)
+
+            # First check for exact match with new format
             existing = self.session.query(Content).filter_by(
                 platform=content_data['platform'],
-                content_id=content_data['content_id']
+                content_id=content_id
             ).first()
+
+            # If not found and using new format, also check for old format (base ID)
+            if not existing and is_new_format(content_id) and raw_id != content_id:
+                existing = self.session.query(Content).filter_by(
+                    platform=content_data['platform'],
+                    content_id=raw_id
+                ).first()
             
             if existing:
                 # Update existing content
